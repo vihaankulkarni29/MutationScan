@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SubScan Pipeline Analysis Report</title>
+    
+    <!-- External Dependencies -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://unpkg.com/msa@1.0.1/dist/msa.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/msa@1.0.1/css/msa.css">
+    
+    <!-- Custom Styles -->
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f7fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem 0;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 0.5rem 0 0 0;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        
+        .card-header {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .card-header h2 {
+            margin: 0;
+            color: #495057;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .card-content {
+            padding: 1.5rem;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+        }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .data-table th {
+            background: #667eea;
+            color: white;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #5a6fd8;
+        }
+        
+        .data-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .data-table tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-1px);
+        }
+        
+        .footer {
+            background: #2c3e50;
+            color: white;
+            text-align: center;
+            padding: 2rem 0;
+            margin-top: 3rem;
+        }
+        
+        /* Modal Styles for MSA Viewer */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 2% auto;
+            padding: 2rem;
+            border-radius: 12px;
+            width: 95%;
+            height: 90%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .modal-header h3 {
+            margin: 0;
+            color: #495057;
+        }
+        
+        .close {
+            color: #aaa;
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            background: none;
+        }
+        
+        .close:hover {
+            color: #000;
+        }
+        
+        .msa-container {
+            height: calc(100% - 80px);
+            overflow: auto;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 0 1rem;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header Section -->
+    <div class="header">
+        <h1>SubScan Pipeline Analysis Report</h1>
+        <p>Comprehensive AMR Gene Mutation Analysis Results</p>
+    </div>
+    
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Summary Statistics Section -->
+        <div class="card full-width">
+            <div class="card-header">
+                <h2>📊 Pipeline Summary Statistics</h2>
+            </div>
+            <div class="card-content">
+                <div id="summary-stats" class="stats-grid">
+                    <!-- Summary statistics will be populated here via Jinja2 -->
+                    <div class="stat-item">
+                        <div class="stat-value">{{ total_genomes | default('--') }}</div>
+                        <div class="stat-label">Total Genomes</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">{{ total_mutations | default('--') }}</div>
+                        <div class="stat-label">Mutations Detected</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">{{ gene_families | default('--') }}</div>
+                        <div class="stat-label">Gene Families</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">{{ cooccurrence_pairs | default('--') }}</div>
+                        <div class="stat-label">Co-occurrence Pairs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Dashboard Grid -->
+        <div class="dashboard-grid">
+            <!-- Interactive Plotly Chart -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📈 Mutation Frequency Analysis</h2>
+                </div>
+                <div class="card-content">
+                    <div id="plotly-chart">
+                        <!-- Plotly chart will be rendered here via JavaScript -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Gene Family Overview -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🧬 Gene Family Overview</h2>
+                </div>
+                <div class="card-content">
+                    <div id="gene-family-summary">
+                        <!-- Gene family summary will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Results Table -->
+        <div class="card full-width">
+            <div class="card-header">
+                <h2>🔬 Detailed Mutation Analysis Results</h2>
+            </div>
+            <div class="card-content">
+                <div id="main-results-table" class="table-container">
+                    <!-- Main results table will be populated here via Jinja2 -->
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Gene Family</th>
+                                <th>Genome</th>
+                                <th>Position</th>
+                                <th>Reference</th>
+                                <th>Mutation</th>
+                                <th>Type</th>
+                                <th>Alignment</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for mutation in mutations %}
+                            <tr>
+                                <td>{{ mutation.gene_family }}</td>
+                                <td>{{ mutation.genome }}</td>
+                                <td>{{ mutation.position }}</td>
+                                <td>{{ mutation.reference }}</td>
+                                <td>{{ mutation.mutation }}</td>
+                                <td>{{ mutation.type }}</td>
+                                <td>
+                                    <button class="btn" onclick="openMSAViewer('{{ mutation.gene_family }}')">
+                                        View Alignment
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- MSA Viewer Modal -->
+    <div id="msa-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="msa-title">Multiple Sequence Alignment</h3>
+                <button class="close" onclick="closeMSAViewer()">&times;</button>
+            </div>
+            <div id="msa-viewer" class="msa-container">
+                <!-- MSA viewer will be rendered here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <div class="footer">
+        <p>&copy; 2025 SubScan Pipeline | Generated on {{ generation_timestamp | default('Unknown') }}</p>
+        <p>Comprehensive AMR Gene Analysis and Mutation Detection</p>
+    </div>
+    
+    <!-- JavaScript for Interactive Components -->
+    <script>
+        // Plotly chart generation - will be populated via Jinja2 in Phase 3
+        {{ plotly_javascript | safe }}
+        
+        // MSA Viewer functionality
+        let msaData = {{ msa_data | tojson | safe }};
+        let currentMSAViewer = null;
+        
+        function openMSAViewer(geneFamily) {
+            const modal = document.getElementById('msa-modal');
+            const title = document.getElementById('msa-title');
+            const container = document.getElementById('msa-viewer');
+            
+            title.textContent = `Multiple Sequence Alignment - ${geneFamily}`;
+            
+            // Clear previous content
+            container.innerHTML = '';
+            
+            if (msaData && msaData[geneFamily]) {
+                // Initialize MSA viewer with the sequence data
+                const opts = {
+                    el: container,
+                    seqs: msaData[geneFamily],
+                    colorscheme: {"scheme": "clustal"},
+                    bootstrapMenu: true,
+                    vis: {
+                        conserv: false,
+                        overviewbox: false,
+                        seqlogo: true
+                    }
+                };
+                
+                currentMSAViewer = msa(opts);
+                currentMSAViewer.render();
+            } else {
+                container.innerHTML = '<p>No alignment data available for this gene family.</p>';
+            }
+            
+            modal.style.display = 'block';
+        }
+        
+        function closeMSAViewer() {
+            const modal = document.getElementById('msa-modal');
+            modal.style.display = 'none';
+            
+            if (currentMSAViewer) {
+                currentMSAViewer.remove();
+                currentMSAViewer = null;
+            }
+        }
+        
+        // Close modal when clicking outside of it
+        window.onclick = function(event) {
+            const modal = document.getElementById('msa-modal');
+            if (event.target === modal) {
+                closeMSAViewer();
+            }
+        }
+        
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('SubScan Report Dashboard Initialized');
+        });
+    </script>
+</body>
+</html>
