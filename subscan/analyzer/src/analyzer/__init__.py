@@ -1,7 +1,7 @@
 """
 SubScan Analyzer Package
 
-A high-performance mutation detection and co-occurrence analysis engine 
+A high-performance mutation detection and co-occurrence analysis engine
 for the SubScan bioinformatics pipeline.
 """
 

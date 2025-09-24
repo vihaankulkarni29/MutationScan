@@ -1,0 +1,55 @@
+# MutationScan Pipeline - Requirements
+# =====================================
+# Production-ready dependencies for AMR analysis pipeline
+# Install with: pip install -r requirements.txt
+
+# Core Scientific Computing
+biopython>=1.79,<2.0       # Biological sequence analysis
+pandas>=1.3.0,<3.0         # Data manipulation and analysis
+numpy>=1.21.0,<2.0         # Numerical computing foundation
+
+# Web and Network
+requests>=2.25.0,<3.0      # HTTP library for genome downloads
+urllib3>=1.26.0,<3.0       # HTTP client utilities
+
+# Testing and Quality Assurance
+pytest>=7.0.0,<9.0         # Testing framework
+pytest-cov>=4.0.0,<6.0     # Coverage reporting
+pytest-mock>=3.10.0,<4.0   # Mock utilities for testing
+pytest-asyncio>=0.20.0,<1.0 # Async testing support
+
+# Code Quality
+pylint>=2.12.0,<4.0        # Code analysis and style checking
+black>=22.0.0,<24.0        # Code formatting
+isort>=5.10.0,<6.0         # Import sorting
+mypy>=0.950,<2.0           # Static type checking
+
+# Configuration and I/O
+PyYAML>=6.0,<7.0           # YAML configuration files
+toml>=0.10.0,<1.0          # TOML configuration support
+configparser>=5.2.0,<6.0   # Configuration file parsing
+
+# Progress and Logging
+tqdm>=4.64.0,<5.0          # Progress bars
+colorlog>=6.6.0,<7.0       # Colored logging output
+
+# Data Validation
+jsonschema>=4.4.0,<5.0     # JSON schema validation
+marshmallow>=3.15.0,<4.0   # Object serialization/validation
+
+# File System and Path Utilities
+pathlib2>=2.3.0,<3.0       # Enhanced path handling (Python < 3.6 compat)
+
+# Optional: Visualization (for advanced reporting)
+matplotlib>=3.5.0,<4.0     # Plotting and visualization
+seaborn>=0.11.0,<1.0       # Statistical data visualization
+plotly>=5.6.0,<6.0         # Interactive visualizations
+
+# Optional: Performance (for large datasets)
+joblib>=1.1.0,<2.0         # Parallel processing utilities
+multiprocess>=0.70.0,<1.0  # Better multiprocessing
+
+# Development Dependencies (uncomment for development)
+# sphinx>=4.0.0,<8.0         # Documentation generation
+# sphinx-rtd-theme>=1.0.0,<3.0 # Documentation theme
+# pre-commit>=2.17.0,<4.0    # Git hooks for code quality
