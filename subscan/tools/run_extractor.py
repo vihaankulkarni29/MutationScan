@@ -272,6 +272,8 @@ def execute_parallel_extraction(
 
         # Extract genome list from manifest
         genome_list = manifest_data.get("genomes", [])
+        if not genome_list and "output_files" in manifest_data:
+            genome_list = manifest_data["output_files"].get("genomes", [])
 
         if not genome_list:
             print("❌ Error: No genomes found in annotation manifest")

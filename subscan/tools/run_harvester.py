@@ -119,8 +119,6 @@ def execute_ncbi_genome_extractor(accessions: str, email: str, output_dir: str) 
         str(len(accession_list)),
         "--metadata_format",
         "csv",
-        "--email",
-        email,
     ]
 
     print("Executing ncbi_genome_extractor with command:")

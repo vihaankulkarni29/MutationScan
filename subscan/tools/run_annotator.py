@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 SubScan Pipeline - Domino 2: The Annotator (High-Performance Parallel Version)
 
@@ -18,6 +19,13 @@ import argparse
 import json
 import os
 import subprocess
+import sys
+
+# Set UTF-8 encoding for Windows console
+if sys.platform.startswith('win'):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 import sys
 import multiprocessing
 from datetime import datetime
@@ -103,9 +111,9 @@ def validate_arguments(args):
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"✓ Manifest file: {args.manifest}")
-    print(f"✓ Output directory: {args.output_dir}")
-    print(f"✓ Parallel threads: {args.threads}")
+    print(f"[OK] Manifest file: {args.manifest}")
+    print(f"[OK] Output directory: {args.output_dir}")
+    print(f"[OK] Parallel threads: {args.threads}")
 
 
 # REFACTORED: Replaced with shared utility function from subscan.utils
@@ -179,25 +187,32 @@ def annotate_single_genome(work_item: Tuple[Dict[str, Any], str, List[str], bool
                 "90.0",
             ]
         else:
-            # Use real ABRicate-Automator (not implemented in this simplified version)
-            return {
-                "genome_id": genome_id,
-                "success": False,
-                "error": "Real ABRicate-Automator integration not implemented yet",
-                "card_results_path": None,
-            }
+            # Use ABRicate directly
+            command = [
+                "abricate",
+                "--db", "card",
+                "--mincov", "80.0",
+                "--minid", "90.0",
+                fasta_path
+            ]
 
         # Execute ABRicate command
-        subprocess.run(
+        result = subprocess.run(
             command,
             check=True,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=300,  # 5 minute timeout per genome
         )
 
-        # Check if output was created
-        if os.path.isfile(tsv_path):
+        # Save the output to TSV file
+        with open(tsv_path, 'w', encoding='utf-8') as f:
+            f.write(result.stdout)
+
+        # Check if output was created and has content
+        if os.path.isfile(tsv_path) and os.path.getsize(tsv_path) > 0:
             return {
                 "genome_id": genome_id,
                 "success": True,
@@ -208,7 +223,7 @@ def annotate_single_genome(work_item: Tuple[Dict[str, Any], str, List[str], bool
         return {
                 "genome_id": genome_id,
                 "success": False,
-                "error": f"Expected TSV output not created: {output_tsv_file}",
+                "error": f"Expected TSV output not created or empty: {output_tsv_file}",
                 "card_results_path": None,
             }
 
@@ -271,28 +286,26 @@ def execute_parallel_annotation(genomes: List[Dict[str, Any]], output_dir: str, 
         abricate_command_base = ["python", mock_tool_path]
         use_mock = True
     else:
-        # Use real ABRicate-Automator tool
-        abricate_command_base = ["abricate-automator"]
-        use_mock = False
-
-        # Test if abricate-automator is available
+        # Test if abricate is available
         try:
             subprocess.run(
-                ["abricate-automator", "--help"],
+                ["abricate", "--version"],
                 capture_output=True,
                 check=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=10,
             )
+            print("✅ Using ABRicate directly")
+            use_mock = False
         except (
             subprocess.CalledProcessError,
             FileNotFoundError,
             subprocess.TimeoutExpired,
         ):
-            print("❌ ABRicate-Automator command not found or not working!")
-            print(
-                "Please ensure 'abricate-automator' is installed and available in PATH"
-            )
-            return []
+            print("❌ ABRicate command not found!")
+            print("🔧 Falling back to MOCK mode for demonstration purposes...")
+            use_mock = True
 
     # Create work items for parallel processing
     work_items = [
@@ -477,10 +490,10 @@ def main() -> int:
     try:
         # Step 1: Load and validate the genome manifest
         print("\n📋 Step 1: Loading genome manifest...")
-        manifest = load_json_manifest(args.manifest, required_keys=["genomes", "output_files"])
+        manifest = load_json_manifest(args.manifest, required_keys=["output_files"])
         genomes = extract_genomes_from_manifest(manifest)
 
-        print(f"✓ Loaded manifest: {len(genomes)} genomes found")
+        print(f"[OK] Loaded manifest: {len(genomes)} genomes found")
 
         if not genomes:
             print("❌ No genomes found in manifest")

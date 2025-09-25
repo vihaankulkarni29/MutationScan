@@ -271,10 +271,16 @@ def execute_domino_tool(
     cmd = [sys.executable, tool_script] + tool_args
 
     # Execute with proper error handling
+    env = os.environ.copy()
+    env['PYTHONIOENCODING'] = 'utf-8'
+    
     result = subprocess.run(
         cmd,
         capture_output=not verbose,  # Show output in verbose mode
         text=True,
+        encoding='utf-8',
+        errors='replace',
+        env=env,
         check=True,  # Raises CalledProcessError on non-zero exit
     )
 
