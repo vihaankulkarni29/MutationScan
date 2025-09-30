@@ -145,25 +145,15 @@ def validate_inputs(args) -> None:
         ValueError: If manifest format is invalid
         OSError: If output directory cannot be created
     """
-    # Check manifest file exists
-    if not os.path.isfile(args.manifest):
-        raise FileNotFoundError(f"Analysis manifest file not found: {args.manifest}")
-
-    # Validate manifest is JSON
-    if not args.manifest.lower().endswith(".json"):
-        print(f"⚠️  Warning: Manifest file should be JSON: {args.manifest}")
-
-    # Create output directory if needed
-    try:
-        os.makedirs(args.output_dir, exist_ok=True)
-        print(f"📁 Output directory ready: {args.output_dir}")
-    except OSError as e:
-        raise OSError(f"Cannot create output directory {args.output_dir}: {e}") from e
-
-    # Check output directory is writable
-    if not os.access(args.output_dir, os.W_OK):
-        raise OSError(f"Output directory is not writable: {args.output_dir}")
-
+    # Import shared utilities
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+    from subscan.utils import validate_manifest_file, validate_output_directory
+    
+    # Use shared validation functions
+    validate_manifest_file(args.manifest)
+    validate_output_directory(args.output_dir, create=True)
+    
+    print(f"📁 Output directory ready: {args.output_dir}")
     print("✅ Input validation completed successfully")
 
 

@@ -31,6 +31,37 @@ from pathlib import Path
 from typing import List
 
 
+class DominoToolError(Exception):
+    """
+    Custom exception for domino tool execution failures with enhanced debugging information.
+    
+    This exception provides detailed information about which specific domino tool failed,
+    making it easier for users to identify and debug pipeline issues.
+    """
+    
+    def __init__(self, domino_name: str, step_number: int, error_info: dict):
+        self.domino_name = domino_name
+        self.step_number = step_number
+        self.error_info = error_info
+        
+        # Create detailed error message
+        message = f"\n❌ DOMINO TOOL FAILURE: {domino_name} (Step {step_number}/7)\n"
+        message += f"   🔧 Tool Script: {error_info['tool_script']}\n"
+        message += f"   ⏱️  Execution Time: {error_info['execution_time']}\n"
+        message += f"   📤 Exit Code: {error_info['exit_code']}\n"
+        message += f"   💻 Command: {error_info['command']}\n"
+        
+        if error_info['stderr'] != "No error output captured":
+            message += f"   🚨 Error Output: {error_info['stderr'][:500]}{'...' if len(error_info['stderr']) > 500 else ''}\n"
+        
+        if error_info['stdout'] != "No output captured" and len(error_info['stdout']) > 0:
+            message += f"   📝 Standard Output: {error_info['stdout'][:300]}{'...' if len(error_info['stdout']) > 300 else ''}\n"
+        
+        message += f"   💡 Debug Tip: Check the {step_number:02d}_{domino_name.lower().split(' ')[0]}_results/ directory for more details"
+        
+        super().__init__(message)
+
+
 def create_argument_parser() -> argparse.ArgumentParser:
     """
     Create and configure the master command-line argument parser.
@@ -252,7 +283,7 @@ def execute_domino_tool(
         subprocess.CompletedProcess: Result of the subprocess execution
 
     Raises:
-        subprocess.CalledProcessError: If the domino tool fails
+        DominoToolError: If the domino tool fails with enhanced error information
     """
     # Enhanced status message with progress bar visualization
     progress_bar = "█" * step_number + "░" * (total_steps - step_number)
@@ -274,23 +305,45 @@ def execute_domino_tool(
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
 
-    result = subprocess.run(
-        cmd,
-        capture_output=not verbose,  # Show output in verbose mode
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        check=True,  # Raises CalledProcessError on non-zero exit
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=not verbose,  # Show output in verbose mode
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=True,  # Raises CalledProcessError on non-zero exit
+        )
 
-    # Calculate step execution time
-    step_duration = time.time() - step_start_time
-    minutes = int(step_duration // 60)
-    seconds = int(step_duration % 60)
+        # Calculate step execution time
+        step_duration = time.time() - step_start_time
+        minutes = int(step_duration // 60)
+        seconds = int(step_duration % 60)
 
-    print(f"   ✅ Completed in {minutes:02d}:{seconds:02d}")
-    return result
+        print(f"   ✅ Completed in {minutes:02d}:{seconds:02d}")
+        return result
+        
+    except subprocess.CalledProcessError as e:
+        # Enhanced error handling with specific domino information
+        step_duration = time.time() - step_start_time
+        minutes = int(step_duration // 60)
+        seconds = int(step_duration % 60)
+        
+        # Create detailed error information
+        error_info = {
+            "domino_step": step_number,
+            "domino_name": domino_name,
+            "tool_script": os.path.basename(tool_script),
+            "execution_time": f"{minutes:02d}:{seconds:02d}",
+            "exit_code": e.returncode,
+            "command": ' '.join(e.cmd),
+            "stdout": e.stdout.strip() if e.stdout else "No output captured",
+            "stderr": e.stderr.strip() if e.stderr else "No error output captured"
+        }
+        
+        # Raise custom exception with enhanced information
+        raise DominoToolError(domino_name, step_number, error_info) from e
 
 
 def run_pipeline_sequence(args, run_directory: str) -> str:
@@ -646,6 +699,35 @@ if __name__ == "__main__":
 
         print("🧬" * 25)
 
+    except DominoToolError as e:
+        # Enhanced error handling for specific domino tool failures
+        print(str(e), file=sys.stderr)  # Print the detailed error message
+        print(
+            f"\n💡 DEBUGGING GUIDANCE:",
+            file=sys.stderr,
+        )
+        print(
+            f"   • Check the output directory for intermediate results and logs",
+            file=sys.stderr,
+        )
+        print(
+            f"   • Verify that all dependencies are installed (see requirements.txt)",
+            file=sys.stderr,
+        )
+        print(
+            f"   • Ensure input files are in the correct format",
+            file=sys.stderr,
+        )
+        print(
+            f"   • Try running the failed domino tool individually for more details",
+            file=sys.stderr,
+        )
+        print(
+            f"   • Report issues at: https://github.com/vihaankulkarni29/MutationScan/issues",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+        
     except subprocess.CalledProcessError as e:
         print(f"\n❌ Pipeline Error: Domino tool failed", file=sys.stderr)
         print(f"   Command: {' '.join(e.cmd)}", file=sys.stderr)

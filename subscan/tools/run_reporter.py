@@ -82,28 +82,28 @@ Input Requirements:
 
 
 def validate_arguments(args):
-    """Validate command-line arguments"""
-    # Check manifest file exists
-    if not os.path.isfile(args.manifest):
-        print(f"❌ Error: Manifest file not found: {args.manifest}")
+    """Validate command-line arguments using shared utilities"""
+    # Import shared utilities
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+    from subscan.utils import (
+        validate_manifest_file,
+        validate_output_directory,
+        print_validation_success,
+    )
+
+    try:
+        # Use shared validation functions
+        validate_manifest_file(args.manifest)
+        validate_output_directory(args.output_dir, create=True)
+
+        if args.verbose:
+            print_validation_success(
+                args.manifest, args.output_dir, report_name=args.report_name
+            )
+
+    except (FileNotFoundError, OSError, PermissionError) as e:
+        print(f"❌ Error: {e}")
         sys.exit(1)
-
-    # Validate manifest is JSON
-    if not args.manifest.lower().endswith(".json"):
-        print(f"⚠️  Warning: Manifest file should be JSON: {args.manifest}")
-
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    # Validate output directory is writable
-    if not os.access(args.output_dir, os.W_OK):
-        print(f"❌ Error: Output directory is not writable: {args.output_dir}")
-        sys.exit(1)
-
-    if args.verbose:
-        print(f"✅ Manifest file: {args.manifest}")
-        print(f"✅ Output directory: {args.output_dir}")
-        print(f"✅ Report name: {args.report_name}")
 
 
 def main():

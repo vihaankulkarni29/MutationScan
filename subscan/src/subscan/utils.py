@@ -219,3 +219,103 @@ def format_duration(seconds: float) -> str:
     if hours > 0:
         return f"{hours}h {minutes:02d}m {secs:02d}s"
     return f"{minutes}m {secs:02d}s"
+
+
+def validate_manifest_file(manifest_path: str) -> None:
+    """
+    Validate that a manifest file exists and is a JSON file.
+    
+    Args:
+        manifest_path: Path to the manifest file to validate
+    
+    Raises:
+        FileNotFoundError: If manifest file doesn't exist
+        ValueError: If file doesn't have .json extension
+    """
+    if not os.path.isfile(manifest_path):
+        raise FileNotFoundError(f"Manifest file not found: {manifest_path}")
+    
+    if not manifest_path.lower().endswith(".json"):
+        print(f"⚠️  Warning: Manifest file should be JSON: {manifest_path}")
+
+
+def validate_output_directory(output_dir: str, create: bool = True) -> None:
+    """
+    Validate output directory exists and is writable, optionally creating it.
+    
+    Args:
+        output_dir: Path to the output directory
+        create: Whether to create the directory if it doesn't exist
+    
+    Raises:
+        OSError: If directory cannot be created or accessed
+        PermissionError: If directory is not writable
+    """
+    if create:
+        create_output_directory(output_dir)
+    elif not os.path.isdir(output_dir):
+        raise OSError(f"Output directory does not exist: {output_dir}")
+    
+    # Check if directory is writable
+    if not os.access(output_dir, os.W_OK):
+        raise PermissionError(f"Output directory is not writable: {output_dir}")
+
+
+def validate_thread_count(threads: int, max_threads: Optional[int] = None) -> int:
+    """
+    Validate and normalize thread count for parallel processing.
+    
+    Args:
+        threads: Requested number of threads
+        max_threads: Maximum allowed threads (defaults to CPU count)
+    
+    Returns:
+        int: Validated thread count
+    
+    Raises:
+        ValueError: If thread count is invalid
+    """
+    if threads < 1:
+        raise ValueError(f"Thread count must be at least 1, got: {threads}")
+    
+    if max_threads is None:
+        import multiprocessing
+        max_threads = multiprocessing.cpu_count()
+    
+    if threads > max_threads:
+        print(f"⚠️  Warning: Requested {threads} threads, limiting to {max_threads} (CPU count)")
+        return max_threads
+    
+    return threads
+
+
+def print_tool_header(tool_name: str, description: str) -> None:
+    """
+    Print a standardized header for domino tools.
+    
+    Args:
+        tool_name: Name of the domino tool
+        description: Brief description of the tool's function
+    """
+    print(f"SubScan Pipeline - {tool_name}")
+    print("=" * 60)
+    print(f"Description: {description}")
+    print()
+
+
+def print_validation_success(manifest_path: str, output_dir: str, **kwargs) -> None:
+    """
+    Print standardized validation success messages.
+    
+    Args:
+        manifest_path: Path to the input manifest
+        output_dir: Path to the output directory
+        **kwargs: Additional parameters to display
+    """
+    print(f"✅ Input manifest: {manifest_path}")
+    print(f"✅ Output directory: {output_dir}")
+    
+    for key, value in kwargs.items():
+        formatted_key = key.replace('_', ' ').title()
+        print(f"✅ {formatted_key}: {value}")
+    print()
