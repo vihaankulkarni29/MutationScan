@@ -7,11 +7,13 @@ import tempfile
 import os
 from pathlib import Path
 
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files"""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
+
 
 @pytest.fixture
 def sample_alignment_data():
@@ -26,10 +28,11 @@ def sample_alignment_data():
                 "position": 34,
                 "reference_aa": "H",
                 "mutated_aa": "A",
-                "mutation_type": "substitution"
+                "mutation_type": "substitution",
             }
-        ]
+        ],
     }
+
 
 @pytest.fixture
 def sample_manifest():
@@ -39,7 +42,7 @@ def sample_manifest():
         "alignments": {
             "test_gene": {
                 "alignment_file_path": "/path/to/test_gene_alignment.water",
-                "gene_family": "test_gene"
+                "gene_family": "test_gene",
             }
-        }
+        },
     }

@@ -99,17 +99,17 @@ class ReportGenerator:
     def _extract_file_paths(self) -> None:
         """
         Extract and validate key file paths from the manifest lineage.
-        
+
         This method traverses the complete pipeline manifest chain to locate
         all key result files needed for report generation:
         - Metadata CSV from genome harvesting
         - Mutation analysis reports from genome analysis
         - Co-occurrence analysis results
         - Alignment manifests for sequence data
-        
+
         Updates:
             self.aggregated_data["file_paths"] with discovered file paths
-            
+
         Raises:
             FileNotFoundError: If critical files cannot be located
             ValueError: If manifest structure is unexpected

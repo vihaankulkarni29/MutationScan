@@ -1,0 +1,11 @@
+{
+  "accessions": "demo_accessions.txt",
+  "gene_list": "sample_data/gene_list.txt",
+  "email": "test@example.com",
+  "output_dir": "demo_results/",
+  "threads": 2,
+  "reference_mode": "SEPI",
+  "sepi_species": "Escherichia coli",
+  "skip_existing": false,
+  "debug": false
+}

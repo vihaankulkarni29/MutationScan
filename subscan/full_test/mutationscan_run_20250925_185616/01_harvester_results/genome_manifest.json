@@ -1,0 +1,35 @@
+{
+  "pipeline_step": "Harvester",
+  "parameters": {
+    "accession_file": "C:\\Users\\Vihaan\\Desktop\\GenomeAnalyzer\\subscan\\test_single.txt",
+    "email": "test@example.com"
+  },
+  "output_files": {
+    "metadata_csv": "C:\\Users\\Vihaan\\Desktop\\GenomeAnalyzer\\subscan\\full_test\\mutationscan_run_20250925_185616\\01_harvester_results\\01_harvester_results_metadata.csv",
+    "genomes": [
+      {
+        "accession": "NC_013791",
+        "fasta_path": "C:\\Users\\Vihaan\\Desktop\\GenomeAnalyzer\\subscan\\full_test\\mutationscan_run_20250925_185616\\01_harvester_results\\316994385.fasta",
+        "metadata": {
+          "genome_id": "316994385",
+          "accession": "NC_013791",
+          "title": "Alkalihalophilus pseudofirmus OF4, complete sequence",
+          "organism": "Alkalihalophilus pseudofirmus",
+          "genus": "Alkalihalophilus",
+          "species": "pseudofirmus",
+          "biosample": "",
+          "bioproject": "",
+          "collection_date": "",
+          "country": "",
+          "host": "",
+          "isolation_source": "",
+          "mic_data": "",
+          "resistance_phenotype": "",
+          "antibiotic_resistance": "",
+          "create_date": "2010/02/05",
+          "update_date": "2025/03/27"
+        }
+      }
+    ]
+  }
+}

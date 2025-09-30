@@ -19,16 +19,16 @@ from subprocess import CompletedProcess
 def parse_arguments():
     """
     Parse and validate command-line arguments for the NCBI Genome Harvester.
-    
+
     Creates an argument parser configured for genome harvesting operations,
     including validation for required NCBI access parameters.
-    
+
     Returns:
         argparse.Namespace: Parsed command-line arguments containing:
             - accessions (str): Path to file with NCBI accession numbers
             - email (str): Valid email address for NCBI API access
             - output_dir (str): Directory for saving harvested genomes
-            
+
     Raises:
         SystemExit: If required arguments are missing or invalid
     """
@@ -58,10 +58,12 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def execute_ncbi_genome_extractor(accessions: str, email: str, output_dir: str) -> CompletedProcess[str]:
+def execute_ncbi_genome_extractor(
+    accessions: str, email: str, output_dir: str
+) -> CompletedProcess[str]:
     """
     Execute the external NCBI Genome Extractor tool for automated genome harvesting.
-    
+
     This function interfaces with the ncbi_genome_extractor.py tool to download
     complete genome sequences from NCBI using provided accession numbers. The
     tool handles NCBI API interactions, rate limiting, and file organization.
@@ -78,7 +80,7 @@ def execute_ncbi_genome_extractor(accessions: str, email: str, output_dir: str) 
         FileNotFoundError: If ncbi_genome_extractor.py script cannot be found
         subprocess.CalledProcessError: If the external harvesting tool fails
         PermissionError: If output directory cannot be created or accessed
-        
+
     Side Effects:
         - Creates output directory if it doesn't exist
         - Downloads FASTA files to output_dir/fasta/
@@ -211,12 +213,12 @@ def generate_genome_manifest(accessions, email, output_dir):
     # Define expected output paths (based on your tool's structure)
     output_dir_name = os.path.basename(output_dir.rstrip("/\\"))
     paths = {
-        'metadata_csv': os.path.join(output_dir, f"{output_dir_name}_metadata.csv"),
-        'manifest': os.path.join(output_dir, "genome_manifest.json")
+        "metadata_csv": os.path.join(output_dir, f"{output_dir_name}_metadata.csv"),
+        "manifest": os.path.join(output_dir, "genome_manifest.json"),
     }
 
     # Verify that the expected outputs exist
-    if not os.path.exists(paths['metadata_csv']):
+    if not os.path.exists(paths["metadata_csv"]):
         print(f"Error: Expected metadata file not found: {paths['metadata_csv']}")
         print("Available files in output directory:")
         try:
@@ -229,22 +231,26 @@ def generate_genome_manifest(accessions, email, output_dir):
     # Read metadata.csv to get genome information
     genomes_data = []
     try:
-        metadata_rows = _read_metadata_csv(paths['metadata_csv'])
+        metadata_rows = _read_metadata_csv(paths["metadata_csv"])
 
         # Build genome entries from metadata and find corresponding FASTA files
         for row in metadata_rows:
             row_data = {
-                'accession': row.get("accession", "").strip(),
-                'genome_id': row.get("genome_id", "").strip()
+                "accession": row.get("accession", "").strip(),
+                "genome_id": row.get("genome_id", "").strip(),
             }
-            if not row_data['accession']:
+            if not row_data["accession"]:
                 continue
 
-            fasta_path = _find_fasta_file(row_data['accession'], row_data['genome_id'], output_dir)
+            fasta_path = _find_fasta_file(
+                row_data["accession"], row_data["genome_id"], output_dir
+            )
             genome_entry = _create_genome_entry(row, fasta_path)
 
             if not fasta_path:
-                print(f"Warning: FASTA file not found for accession {row_data['accession']} (genome_id: {row_data['genome_id']})")
+                print(
+                    f"Warning: FASTA file not found for accession {row_data['accession']} (genome_id: {row_data['genome_id']})"
+                )
 
             genomes_data.append(genome_entry)
 
@@ -257,21 +263,21 @@ def generate_genome_manifest(accessions, email, output_dir):
         "pipeline_step": "Harvester",
         "parameters": {"accession_file": os.path.abspath(accessions), "email": email},
         "output_files": {
-            "metadata_csv": os.path.abspath(paths['metadata_csv']),
+            "metadata_csv": os.path.abspath(paths["metadata_csv"]),
             "genomes": genomes_data,
         },
     }
 
     # Save the manifest as JSON
     try:
-        with open(paths['manifest'], "w", encoding="utf-8") as f:
+        with open(paths["manifest"], "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2, ensure_ascii=False)
 
         print("Successfully generated genome_manifest.json")
         print(f"Manifest location: {os.path.abspath(paths['manifest'])}")
         print(f"Total genomes processed: {len(genomes_data)}")
 
-        return paths['manifest']
+        return paths["manifest"]
 
     except (FileNotFoundError, PermissionError, OSError) as e:
         print(f"Error writing manifest file: {e}")

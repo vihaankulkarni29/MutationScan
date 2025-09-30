@@ -608,7 +608,9 @@ if __name__ == "__main__":
         print()
 
         # Execute the complete analysis workflow
-        main_csv_report_path, main_summary_stats, main_manifest_path = run_cooccurrence_analysis(main_args)
+        main_csv_report_path, main_summary_stats, main_manifest_path = (
+            run_cooccurrence_analysis(main_args)
+        )
 
         print("\n" + "=" * 25)
         print("*** DOMINO 6 CO-OCCURRENCE ANALYSIS COMPLETED! ***")
@@ -616,8 +618,12 @@ if __name__ == "__main__":
         print()
         print("📊 ANALYSIS SUMMARY:")
         print("=" * 55)
-        print(f"⚡ Total genomes analyzed:        {main_summary_stats['total_genomes']}")
-        print(f"🧬 Total mutations processed:     {main_summary_stats['total_mutations']}")
+        print(
+            f"⚡ Total genomes analyzed:        {main_summary_stats['total_genomes']}"
+        )
+        print(
+            f"🧬 Total mutations processed:     {main_summary_stats['total_mutations']}"
+        )
         print(f"🎯 Unique genes identified:       {main_summary_stats['unique_genes']}")
         print(
             f"🔗 Co-occurrence patterns found:  {main_summary_stats['total_combinations']}"

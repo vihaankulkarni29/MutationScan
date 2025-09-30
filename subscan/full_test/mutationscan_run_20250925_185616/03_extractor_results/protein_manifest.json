@@ -1,0 +1,17 @@
+{
+  "metadata": {
+    "tool": "SubScan-Extractor",
+    "domino": 3,
+    "description": "Protein extraction results from FastaAAExtractor",
+    "input_manifest": "C:\\Users\\Vihaan\\Desktop\\GenomeAnalyzer\\subscan\\full_test\\mutationscan_run_20250925_185616\\02_annotator_results\\annotation_manifest.json",
+    "gene_list": "C:\\Users\\Vihaan\\Desktop\\GenomeAnalyzer\\subscan\\sample_data\\gene_list.txt",
+    "output_directory": "C:\\Users\\Vihaan\\Desktop\\GenomeAnalyzer\\subscan\\full_test\\mutationscan_run_20250925_185616\\03_extractor_results",
+    "total_genomes_processed": 0,
+    "timestamp": "2025-09-25T18:56:27.607379"
+  },
+  "extracted_proteins": [],
+  "summary": {
+    "total_protein_files": 0,
+    "extraction_success_rate": "0%"
+  }
+}

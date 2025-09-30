@@ -22,10 +22,11 @@ import subprocess
 import sys
 
 # Set UTF-8 encoding for Windows console
-if sys.platform.startswith('win'):
+if sys.platform.startswith("win"):
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 import sys
 import multiprocessing
 from datetime import datetime
@@ -35,8 +36,12 @@ from typing import Dict, List, Tuple, Any
 from tqdm import tqdm
 
 # Add src directory to Python path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), 'src'))
-from subscan.utils import load_json_manifest, save_json_manifest, extract_genomes_from_manifest  # pylint: disable=import-error
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
+from subscan.utils import (
+    load_json_manifest,
+    save_json_manifest,
+    extract_genomes_from_manifest,
+)  # pylint: disable=import-error
 
 
 def create_argument_parser():
@@ -122,31 +127,33 @@ def validate_arguments(args):
 # from the shared utilities module, eliminating code duplication.
 
 
-def annotate_single_genome(work_item: Tuple[Dict[str, Any], str, List[str], bool]) -> Dict[str, Any]:
+def annotate_single_genome(
+    work_item: Tuple[Dict[str, Any], str, str, bool],
+) -> Dict[str, Any]:
     """
     Worker function to annotate a single genome using ABRicate-Automator.
-    
+
     This function is designed to be used with multiprocessing.Pool to enable
     parallel annotation of multiple genomes simultaneously.
-    
+
     Args:
         work_item: Tuple containing:
             - genome_data (Dict[str, Any]): Dictionary with genome information including 'fasta_path'
             - output_dir (str): Directory where annotation results will be saved
-            - abricate_command_base (List[str]): Base command for ABRicate-Automator execution
+            - mock_tool_path (str): Path to mock tool if using mock mode
             - use_mock (bool): Whether to use mock tool for testing
-    
+
     Returns:
         Dict[str, Any]: Dictionary containing annotation results:
             - genome_id (str): Genome identifier (accession or filename)
             - success (bool): Whether annotation completed successfully
             - error (str): Error message if annotation failed (None if successful)
             - card_results_path (str): Path to generated TSV results file (None if failed)
-    
+
     Raises:
         No exceptions are raised - all errors are captured and returned in the result dictionary
     """
-    genome_data, output_dir, abricate_command_base, use_mock = work_item
+    genome_data, output_dir, mock_tool_path, use_mock = work_item
 
     accession = genome_data.get("accession", "")
     if not accession:
@@ -173,43 +180,42 @@ def annotate_single_genome(work_item: Tuple[Dict[str, Any], str, List[str], bool
         tsv_path = os.path.join(output_dir, output_tsv_file)
 
         if use_mock:
-            # Use mock tool with individual file processing
-            command = abricate_command_base + [
-                "--input",
-                fasta_path,
-                "--output",
-                tsv_path,
+            # Use our mock ABRicate script
+            command = ["python3", mock_tool_path, fasta_path, tsv_path]
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,  # 30 second timeout for mock
+            )
+        else:
+            # Use ABRicate directly
+            command = [
+                "abricate",
                 "--db",
                 "card",
                 "--mincov",
                 "80.0",
                 "--minid",
                 "90.0",
+                fasta_path,
             ]
-        else:
-            # Use ABRicate directly
-            command = [
-                "abricate",
-                "--db", "card",
-                "--mincov", "80.0",
-                "--minid", "90.0",
-                fasta_path
-            ]
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=300,  # 5 minute timeout per genome
+            )
 
-        # Execute ABRicate command
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=300,  # 5 minute timeout per genome
-        )
-
-        # Save the output to TSV file
-        with open(tsv_path, 'w', encoding='utf-8') as f:
-            f.write(result.stdout)
+            # Save the output to TSV file
+            with open(tsv_path, "w", encoding="utf-8") as f:
+                f.write(result.stdout)
 
         # Check if output was created and has content
         if os.path.isfile(tsv_path) and os.path.getsize(tsv_path) > 0:
@@ -221,11 +227,11 @@ def annotate_single_genome(work_item: Tuple[Dict[str, Any], str, List[str], bool
             }
 
         return {
-                "genome_id": genome_id,
-                "success": False,
-                "error": f"Expected TSV output not created or empty: {output_tsv_file}",
-                "card_results_path": None,
-            }
+            "genome_id": genome_id,
+            "success": False,
+            "error": f"Expected TSV output not created or empty: {output_tsv_file}",
+            "card_results_path": None,
+        }
 
     except subprocess.TimeoutExpired:
         return {
@@ -250,25 +256,27 @@ def annotate_single_genome(work_item: Tuple[Dict[str, Any], str, List[str], bool
         }
 
 
-def execute_parallel_annotation(genomes: List[Dict[str, Any]], output_dir: str, threads: int) -> List[Dict[str, Any]]:
+def execute_parallel_annotation(
+    genomes: List[Dict[str, Any]], output_dir: str, threads: int
+) -> List[Dict[str, Any]]:
     """
     Execute ABRicate-Automator annotation in parallel across multiple genomes.
-    
+
     This function orchestrates high-performance parallel processing to annotate
     multiple genomes simultaneously using ABRicate-Automator tool for AMR gene
     identification against the CARD database.
-    
+
     Args:
         genomes (List[Dict[str, Any]]): List of genome dictionaries, each containing:
             - 'fasta_path': Path to the genome FASTA file
             - 'accession': Genome accession number (optional)
         output_dir (str): Directory where annotation results will be saved
         threads (int): Number of parallel worker processes to use
-    
+
     Returns:
         List[Dict[str, Any]]: List of annotation results from worker functions:
             - Each result contains 'genome_id', 'success', 'error', 'card_results_path'
-    
+
     Raises:
         Exception: If parallel processing setup or execution fails
     """
@@ -279,38 +287,35 @@ def execute_parallel_annotation(genomes: List[Dict[str, Any]], output_dir: str, 
 
     # Prepare base command for ABRicate-Automator (check for mock tool first)
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    mock_tool_path = os.path.join(script_dir, "mock_abricate_automator.py")
+    mock_tool_path = os.path.join(os.path.dirname(script_dir), "mock_abricate.py")
 
-    if os.path.isfile(mock_tool_path):
-        print("🧪 Using mock ABRicate Automator for testing")
-        abricate_command_base = ["python", mock_tool_path]
+    # Initialize variables
+    abricate_command_base = []
+    use_mock = False
+
+    # Test if abricate is available
+    try:
+        subprocess.run(
+            ["abricate", "--version"],
+            capture_output=True,
+            check=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        print("✅ Using ABRicate directly")
+        use_mock = False
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ):
+        print("❌ ABRicate command not found!")
+        print("🔧 Falling back to MOCK mode for demonstration purposes...")
         use_mock = True
-    else:
-        # Test if abricate is available
-        try:
-            subprocess.run(
-                ["abricate", "--version"],
-                capture_output=True,
-                check=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=10,
-            )
-            print("✅ Using ABRicate directly")
-            use_mock = False
-        except (
-            subprocess.CalledProcessError,
-            FileNotFoundError,
-            subprocess.TimeoutExpired,
-        ):
-            print("❌ ABRicate command not found!")
-            print("🔧 Falling back to MOCK mode for demonstration purposes...")
-            use_mock = True
 
     # Create work items for parallel processing
-    work_items = [
-        (genome, output_dir, abricate_command_base, use_mock) for genome in genomes
-    ]
+    work_items = [(genome, output_dir, mock_tool_path, use_mock) for genome in genomes]
 
     # Execute parallel annotation
     print("\n" + "=" * 50)
@@ -398,7 +403,9 @@ def _update_genomes_with_results(genomes_list, parallel_results):
             else:
                 genome["amr_card_results"] = ""
                 genome["annotation_error"] = result.get("error", "Unknown error")
-                print(f"    ❌ Failed annotation for: {accession} - {result.get('error', 'Unknown error')}")
+                print(
+                    f"    ❌ Failed annotation for: {accession} - {result.get('error', 'Unknown error')}"
+                )
         else:
             genome["amr_card_results"] = ""
             print(f"    ⚠️  No parallel result found for: {accession}")
@@ -421,7 +428,9 @@ def generate_annotation_manifest(original_manifest, parallel_results, output_dir
     annotation_manifest["generation_timestamp"] = datetime.now().isoformat()
 
     # Calculate statistics from parallel results
-    annotation_manifest["annotation_stats"] = _calculate_annotation_stats(parallel_results)
+    annotation_manifest["annotation_stats"] = _calculate_annotation_stats(
+        parallel_results
+    )
 
     # Extract and update genomes with AMR results
     genomes_list = extract_genomes_from_manifest(annotation_manifest)
@@ -437,9 +446,15 @@ def generate_annotation_manifest(original_manifest, parallel_results, output_dir
 
         print(f"✅ Annotation manifest saved: {manifest_path}")
         print("📊 High-Performance Statistics:")
-        print(f"    - Total genomes: {annotation_manifest['annotation_stats']['total_genomes']}")
-        print(f"    - Successful annotations: {annotation_manifest['annotation_stats']['successful_annotations']}")
-        print(f"    - Success rate: {annotation_manifest['annotation_stats']['success_rate']}")
+        print(
+            f"    - Total genomes: {annotation_manifest['annotation_stats']['total_genomes']}"
+        )
+        print(
+            f"    - Successful annotations: {annotation_manifest['annotation_stats']['successful_annotations']}"
+        )
+        print(
+            f"    - Success rate: {annotation_manifest['annotation_stats']['success_rate']}"
+        )
         print("    - Processing method: Parallel (individual genome workers)")
 
         return manifest_path
@@ -452,22 +467,22 @@ def generate_annotation_manifest(original_manifest, parallel_results, output_dir
 def main() -> int:
     """
     Main entry point for the high-performance AMR gene annotation tool.
-    
+
     This function orchestrates the complete annotation workflow:
     1. Loads and validates the input genome manifest from Domino 1 (Harvester)
     2. Validates that all FASTA files exist and are accessible
     3. Executes parallel ABRicate-Automator annotation using multiprocessing
     4. Aggregates results and generates annotation manifest for Domino 3 (Extractor)
-    
+
     The tool uses high-performance parallel processing to annotate multiple genomes
     simultaneously against the CARD database for antimicrobial resistance gene identification.
-    
+
     Returns:
         int: Exit code (0 for success, 1 for error, 130 for user interruption)
-    
+
     Command Line Usage:
         python run_annotator.py --manifest genome_manifest.json --output-dir ./annotations --threads 8
-    
+
     Pipeline Integration:
         Domino 1 (Harvester) → genome_manifest.json → Domino 2 (Annotator) → annotation_manifest.json → Domino 3 (Extractor)
     """
