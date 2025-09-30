@@ -1,19 +1,36 @@
 #!/usr/bin/env python3
 """
-SubScan Co-occurrence Analysis Module
+MutationScan Co-occurrence Analysis Module
 
 This module provides core functionality for analyzing mutation co-occurrence patterns
-across genomes in antimicrobial resistance studies.
+across genomes in antimicrobial resistance studies. It implements statistical methods
+to identify genes with mutations that frequently appear together in the same bacterial
+isolates, providing insights into coordinated resistance evolution.
 
-Functions:
-    analyze_cooccurrence(mutation_df, min_frequency=2, exclude_single=False) -> pd.DataFrame
+The module supports various analytical approaches including frequency-based filtering,
+pattern size analysis, and statistical significance testing for co-occurrence patterns.
+It is designed to handle large-scale genomic datasets and provides comprehensive
+summary statistics for downstream visualization and interpretation.
 
-Scientific Purpose:
-    Identifies patterns where mutations in multiple genes co-occur within the same
-    genomic isolate, providing insights into potential functional relationships
-    between different resistance mechanisms.
+Key Functions:
+    - analyze_cooccurrence: Core co-occurrence pattern detection
+    - generate_cooccurrence_summary: Statistical summary generation
+    - validate_mutation_dataframe: Input data validation
+    - filter_patterns_by_frequency: Pattern filtering utilities
+
+Scientific Applications:
+    - Identify functionally linked resistance mechanisms
+    - Detect coordinated evolution of resistance genes
+    - Support epidemiological analysis of resistance patterns
+    - Enable network analysis of gene interactions
+
+Dependencies:
+    - pandas for high-performance data manipulation
+    - collections for efficient pattern counting
+    - typing for enhanced code documentation and validation
 
 Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import pandas as pd

@@ -1,30 +1,81 @@
 #!/usr/bin/env python3
 """
-SubScan Pipeline - Domino 7: The HTML Report Generator
+MutationScan Domino 7: Interactive HTML Report Generator
 
-This script serves as the final domino in the SubScan bioinformatics pipeline,
-generating comprehensive, interactive HTML reports from the complete pipeline results.
+This module implements the final domino in the MutationScan pipeline, responsible
+for generating comprehensive, interactive HTML reports from complete pipeline results.
+It serves as the culmination of the AMR analysis workflow, creating professional
+dashboards that enable researchers to explore and visualize mutation patterns.
 
-Purpose:
-- Reads cooccurrence_manifest.json from the complete pipeline run
-- Aggregates all analytical results (metadata, mutations, co-occurrence data)
-- Generates a professional, interactive HTML dashboard for researchers
-- Provides visual exploration from high-level summaries to detailed sequence alignments
+The reporter aggregates data from all upstream domino tools and creates sophisticated
+interactive visualizations including mutation frequency plots, co-occurrence heatmaps,
+sequence alignment viewers, and comprehensive summary statistics. The output is a
+self-contained HTML file optimized for scientific presentation and data sharing.
 
-Author: SubScan Pipeline Development Team
+Key Features:
+- Comprehensive data aggregation from all pipeline stages
+- Interactive Plotly visualizations for mutation analysis
+- MSA viewer integration for sequence alignment exploration  
+- Professional dashboard design for scientific presentation
+- Single-file HTML output for easy sharing and archival
+- Responsive design optimized for different screen sizes
+
+Usage:
+    python run_reporter.py --manifest cooccurrence_manifest.json --output-dir ./reports
+
+Integration:
+    - Input: cooccurrence_manifest.json from Co-occurrence Analyzer (Domino 6)
+    - Output: Interactive HTML dashboard + supporting visualization files
+    - End Product: Complete AMR analysis report for researchers
+
+Visualization Components:
+    - Genome metadata summary tables
+    - AMR gene distribution charts
+    - Mutation frequency heatmaps
+    - Co-occurrence pattern networks
+    - Interactive sequence alignment viewers
+    - Statistical summary panels
+
+Dependencies:
+    - pandas for data manipulation and analysis
+    - plotly for interactive visualization generation
+    - HTML templating for dashboard assembly
+    - subscan.reporting module for specialized report functions
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
 import os
 import sys
+from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
 import pandas as pd
 
 # Add src directory to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
 
-def create_argument_parser():
-    """Create and configure the command-line argument parser"""
+def create_argument_parser() -> argparse.ArgumentParser:
+    """
+    Create and configure command-line argument parser for report generation.
+    
+    Sets up argument parsing for the reporter with validation for final pipeline
+    manifest input, output directory specification, and report customization
+    options for generating comprehensive HTML analysis dashboards.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser for reporter arguments with:
+            - manifest: Path to cooccurrence_manifest.json from final pipeline run
+            - output_dir: Directory for HTML report and supporting files
+            - report_name: Custom name for the output HTML file
+            - verbose: Enable detailed progress and debugging output
+
+    Example:
+        >>> parser = create_argument_parser()
+        >>> args = parser.parse_args(['--manifest', 'final_manifest.json', '--output-dir', 'reports/'])
+    """
     parser = argparse.ArgumentParser(
         description="SubScan Domino 7: HTML Report Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -78,10 +129,16 @@ Input Requirements:
         help="Enable verbose logging for detailed progress tracking",
     )
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the generated report in the default web browser after creation",
+    )
+
+    return parser
 
 
-def validate_arguments(args):
+def validate_arguments(args: argparse.Namespace) -> None:
     """Validate command-line arguments using shared utilities"""
     # Import shared utilities
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
@@ -106,14 +163,30 @@ def validate_arguments(args):
         sys.exit(1)
 
 
-def main():
-    """Main entry point for the HTML Report Generator"""
+def main() -> int:
+    """
+    Main entry point for the HTML Report Generator.
+    
+    This function orchestrates the complete report generation workflow:
+    1. Parses and validates command-line arguments
+    2. Initializes the ReportGenerator with the pipeline manifest
+    3. Aggregates data from all pipeline stages
+    4. Prepares interactive visualization components
+    5. Generates the final HTML dashboard
+    
+    Returns:
+        int: Exit code (0 for success, 1 for error)
+        
+    Raises:
+        SystemExit: If argument validation fails or critical errors occur
+    """
 
     print("SubScan Pipeline - Domino 7: The HTML Report Generator")
     print("=" * 60)
 
     # Parse and validate arguments
-    args = create_argument_parser()
+    parser = create_argument_parser()
+    args = parser.parse_args()
     validate_arguments(args)
 
     print(f"📊 Input manifest: {args.manifest}")
@@ -158,14 +231,8 @@ def main():
     # Phase 4: Final Rendering with Jinja2 Integration
     try:
         # Determine output file path
-        if args.output:
-            html_output_path = args.output
-        else:
-            # Generate default output filename
-            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-            html_output_path = os.path.join(
-                args.output_dir, f"subscan_report_{timestamp}.html"
-            )
+        # Use provided report name within the specified output directory
+        html_output_path = os.path.join(args.output_dir, args.report_name)
 
         # Generate the HTML report
         final_report_path = report_generator.generate_html_report(html_output_path)

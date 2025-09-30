@@ -2,11 +2,16 @@
 """
 MutationScan Pipeline Orchestrator
 
-This is the master entry point for the complete MutationScan bioinformatics pipeline.
-It orchestrates the execution of all seven "Domino" tools in the correct sequence,
-managing data handoffs via manifest files to provide a seamless end-to-end experience.
+This module serves as the main entry point for the complete MutationScan bioinformatics
+pipeline, orchestrating the execution of all seven domino tools in sequence. It manages
+data flow between tools, provides comprehensive progress tracking, and handles error
+recovery for the antimicrobial resistance (AMR) analysis workflow.
 
-Pipeline Flow:
+The orchestrator ensures proper execution order, validates inter-domino data handoffs,
+and provides a unified interface for researchers to run complete AMR mutation analysis
+from genome accessions to interactive reports.
+
+Pipeline Architecture:
     Domino 1 (Harvester) → genome_manifest.json →
     Domino 2 (Annotator) → annotation_manifest.json →
     Domino 3 (Extractor) → protein_manifest.json →
@@ -16,9 +21,20 @@ Pipeline Flow:
     Domino 7 (Reporter) → Interactive HTML Dashboard
 
 Usage:
-    python run_pipeline.py --accessions accessions.txt --gene-list genes.txt --email user@domain.com --output-dir ./results --sepi-species "Escherichia coli"
+    python run_pipeline.py --accessions accessions.txt --gene-list genes.txt 
+                          --email user@domain.com --output-dir ./results 
+                          --sepi-species "Escherichia coli"
+
+Features:
+    - Automated data flow management between all domino tools
+    - Comprehensive error handling and recovery mechanisms
+    - Progress tracking with estimated completion times
+    - Parallel processing support where applicable
+    - Reference sequence management (SEPI and user-provided)
+    - Detailed logging and audit trails
 
 Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
@@ -28,7 +44,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 
 class DominoToolError(Exception):
@@ -39,7 +55,7 @@ class DominoToolError(Exception):
     making it easier for users to identify and debug pipeline issues.
     """
     
-    def __init__(self, domino_name: str, step_number: int, error_info: dict):
+    def __init__(self, domino_name: str, step_number: int, error_info: Dict[str, Any]) -> None:
         self.domino_name = domino_name
         self.step_number = step_number
         self.error_info = error_info
@@ -187,7 +203,7 @@ Output Structure:
     return parser
 
 
-def validate_input_files(args) -> None:
+def validate_input_files(args: argparse.Namespace) -> None:
     """
     Validate that all required input files exist and are readable.
 
@@ -267,7 +283,7 @@ def execute_domino_tool(
     step_number: int,
     total_steps: int,
     verbose: bool = False,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """
     Execute a single domino tool with proper error handling and enhanced logging.
 
@@ -346,7 +362,7 @@ def execute_domino_tool(
         raise DominoToolError(domino_name, step_number, error_info) from e
 
 
-def run_pipeline_sequence(args, run_directory: str) -> str:
+def run_pipeline_sequence(args: argparse.Namespace, run_directory: str) -> str:
     """
     Execute the complete pipeline sequence of domino tools.
 

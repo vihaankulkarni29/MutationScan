@@ -1,56 +1,46 @@
 #!/usr/bin/env python3
 """
-SubScan Pipeline - Domino 4: The Aligner
+MutationScan Domino 4: Sequence Aligner
 
-This script serves as a high-performance parallel integration wrapper for the
-WildTypeAligner tool, acting as the fourth domino in the SubScan bioinformatics pipeline.
+This module implements the fourth domino in the MutationScan pipeline, responsible
+for aligning extracted protein sequences to wild-type reference sequences. It serves
+as the critical bridge between protein extraction and mutation analysis, providing
+the sequence alignments necessary for detecting AMR-conferring mutations.
 
-Purpose:
-- Reads protein_manifest.json from Domino 3 (The Extractor)
-- Groups extracted proteins by gene family for alignment processing
-- Leverages WildTypeAligner's dual-mode referencing system:
-  * Automated SEPI reference mode for species-specific alignments
-  * User-provided reference mode for custom reference sequences
-- Performs parallel alignment processing across multiple gene families
-- Generates alignment_manifest.json for handoff to Domin    )
+The aligner interfaces with the WildTypeAligner tool and supports dual reference
+modes: automated SEPI species-specific references and user-provided custom reference
+sequences. It processes protein sequences by gene family for optimal alignment
+accuracy and downstream mutation detection.
 
-    # Generate the alignment manifest for Domino 5
-    manifest_path = None
-    if successful_alignments:
-        manifest_path = generate_alignment_manifest(
-            args.manifest,
-            successful_alignments,
-            args.output_dir,
-            reference_mode_info
-        )
+Key Features:
+- High-performance parallel processing by gene family
+- Dual-mode reference system (SEPI automated vs user-provided)
+- Integration with WildTypeAligner for professional sequence alignment
+- Comprehensive error handling and progress tracking
+- Gene family grouping for optimized alignment workflows
+- Standardized manifest generation for mutation analysis integration
 
-    # Report final results
-    if successful_alignments:
-        print(f"\n🎉 Alignment processing completed!")
-        print(f"   ✅ {len(successful_alignments)} gene families aligned")
-        print(f"   📁 Results saved to: {args.output_dir}")
-        print(f"   📄 Manifest ready for Domino 5: {os.path.basename(manifest_path) if manifest_path else 'Failed'}")
-
-        # Show sample of aligned gene families
-        aligned_genes = sorted(list(successful_alignments.keys()))
-        print(f"   🧬 Aligned genes: {', '.join(aligned_genes[:5])}{'...' if len(aligned_genes) > 5 else ''}")
-        return 0
-    else:
-        print(f"\n⚠️  No gene families were successfully aligned")
-        print(f"   🔍 Check WildTypeAligner installation and reference files")
-        return 1)
-
-Architecture:
-- Parallel processing using multiprocessing.Pool for maximum throughput
-- Individual gene family processing as work units
-- Real-time progress tracking with tqdm
-- Comprehensive error handling and validation
-- Standardized JSON manifest output for pipeline integration
+Usage:
+    # SEPI automated reference mode
+    python run_aligner.py --manifest protein_manifest.json --output-dir ./alignments 
+                         --sepi-species "Escherichia coli"
+    
+    # User-provided reference mode
+    python run_aligner.py --manifest protein_manifest.json --output-dir ./alignments 
+                         --user-reference-dir ./custom_references/
 
 Integration:
-- Input: protein_manifest.json (from Domino 3)
-- Processing: WildTypeAligner tool execution
-- Output: alignment_manifest.json (to Domino 5)
+    - Input: protein_manifest.json from Extractor (Domino 3)
+    - Output: alignment_manifest.json + MSA files by gene family
+    - Next Domino: run_analyzer.py (mutation detection and analysis)
+
+Dependencies:
+    - WildTypeAligner tool for sequence alignment processing
+    - SEPI database for species-specific reference sequences (automated mode)
+    - Custom reference FASTA files (user-provided mode)
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
@@ -61,20 +51,32 @@ import tempfile
 import json
 import multiprocessing
 from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple, Union
 from tqdm import tqdm
 from collections import defaultdict
 
 
 def create_argument_parser():
     """
-    Create and configure the command line argument parser
-
-    This function sets up the CLI interface for the Aligner wrapper,
-    exposing the WildTypeAligner's dual-mode referencing system through
-    mutually exclusive argument groups.
+    Create and configure command-line argument parser for sequence alignment.
+    
+    Sets up argument parsing for the aligner with validation for protein manifest
+    input, reference sequence configuration (SEPI vs user-provided), and output
+    directory specification for high-throughput alignment workflows.
 
     Returns:
-        argparse.ArgumentParser: Configured argument parser
+        argparse.ArgumentParser: Configured parser for aligner arguments with:
+            - manifest: Path to protein_manifest.json from Domino 3 (Extractor)
+            - output_dir: Directory for alignment results and manifest output
+            - Reference mode (mutually exclusive):
+              * user_reference_dir: Custom reference FASTA files
+              * sepi_species: Species name for SEPI automated references
+            - threads: Number of parallel processes for alignment
+
+    Example:
+        >>> parser = create_argument_parser()
+        >>> args = parser.parse_args(['--manifest', 'protein_manifest.json', 
+        ...                          '--sepi-species', 'Escherichia coli'])
     """
     parser = argparse.ArgumentParser(
         description="SubScan Domino 4: High-Performance Alignment Wrapper",

@@ -1,17 +1,39 @@
 #!/usr/bin/env python3
 """
-SubScan Pipeline - Domino 3: The Extractor
+MutationScan Domino 3: Protein Sequence Extractor
 
-This script serves as a high-performance parallel integration wrapper for the
-FastaAAExtractor tool, acting as the third domino in the SubScan bioinformatics pipeline.
+This module implements the third domino in the MutationScan pipeline, responsible
+for extracting protein sequences from annotated genomes based on AMR gene coordinates.
+It processes annotation results from Domino 2 and generates FASTA files containing
+protein sequences for target genes specified in the user-provided gene list.
 
-Purpose:
-- Reads annotation_manifest.json from Domino 2 (The Annotator)
-- Uses user-provided gene_list.txt to filter proteins of interest
-- Executes FastaAAExtractor in parallel across all genomes
-- Generates protein_manifest.json for Domino 4 (The Aligner)
+The extractor interfaces with the FastaAAExtractor tool for high-performance protein
+sequence extraction and creates standardized JSON manifests for downstream alignment
+and mutation analysis workflows.
 
-Author: SubScan Pipeline Development Team
+Key Features:
+- High-performance parallel processing of multiple genomes
+- Precise protein extraction based on genome coordinates
+- Gene filtering using user-defined target gene lists
+- Comprehensive error handling and progress tracking
+- Mock mode support for testing environments
+- Standardized manifest generation for pipeline integration
+
+Usage:
+    python run_extractor.py --manifest annotation_manifest.json --gene-list targets.txt --output-dir ./proteins
+
+Integration:
+    - Input: annotation_manifest.json from Annotator (Domino 2) + gene list file
+    - Output: protein_manifest.json + extracted protein FASTA files
+    - Next Domino: run_aligner.py (sequence alignment to references)
+
+Dependencies:
+    - FastaAAExtractor tool for coordinate-based protein extraction
+    - Valid annotation TSV files with gene coordinates
+    - Target gene list file for filtering relevant proteins
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
@@ -20,11 +42,30 @@ import sys
 import multiprocessing
 import subprocess
 import json
+from typing import List, Dict, Any, Optional, Tuple
+from pathlib import Path
 from tqdm import tqdm
 
 
-def create_argument_parser():
-    """Create and configure the command-line argument parser"""
+def create_argument_parser() -> argparse.ArgumentParser:
+    """
+    Create and configure command-line argument parser for protein extraction.
+    
+    Sets up argument parsing for the extractor with validation for annotation
+    manifest input, gene list specification, and output directory configuration
+    for high-throughput protein sequence extraction workflows.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser for extractor arguments with:
+            - manifest: Path to annotation_manifest.json from Domino 2 (Annotator)
+            - gene_list: Path to text file containing target genes to extract
+            - output_dir: Directory for extracted protein FASTA files and manifest
+            - threads: Number of parallel processes for extraction
+
+    Example:
+        >>> parser = create_argument_parser()
+        >>> args = parser.parse_args(['--manifest', 'annotation_manifest.json', '--gene-list', 'targets.txt'])
+    """
     parser = argparse.ArgumentParser(
         description="SubScan Domino 3: High-Performance Protein Extraction Wrapper",
         formatter_class=argparse.RawDescriptionHelpFormatter,

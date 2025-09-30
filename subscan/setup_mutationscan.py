@@ -1,16 +1,43 @@
 #!/usr/bin/env python3
 """
-MutationScan Pipeline Quick Setup Script
-========================================
+MutationScan Pipeline Setup and Validation Script
 
-This script helps researchers quickly set up and validate the MutationScan pipeline
-for production use. It performs system checks, installs dependencies, and runs
-validation tests.
+This comprehensive setup script helps researchers quickly deploy and validate the
+MutationScan pipeline for production antimicrobial resistance analysis. It performs
+extensive system checks, dependency validation, and functional testing to ensure
+the complete pipeline is ready for scientific workflows.
+
+The script provides automated installation support, comprehensive diagnostics, and
+validation testing across all seven domino tools. It includes sample data generation,
+mock mode testing, and integration validation to verify proper pipeline functionality
+before processing real research data.
+
+Key Features:
+    - Automated system requirement validation
+    - Python dependency installation and verification
+    - External tool detection and configuration
+    - Sample data generation for testing workflows
+    - Complete pipeline validation with integration tests
+    - Cross-platform compatibility (Windows, Linux, macOS)
+    - Detailed diagnostic reporting and troubleshooting
 
 Usage:
-    python setup_mutationscan.py
-    python setup_mutationscan.py --check-only
-    python setup_mutationscan.py --install-deps
+    python setup_mutationscan.py                    # Complete setup and validation
+    python setup_mutationscan.py --check-only       # System diagnostics only
+    python setup_mutationscan.py --install-deps     # Install missing dependencies
+    python setup_mutationscan.py --test-pipeline    # Run comprehensive tests
+    python setup_mutationscan.py --generate-data    # Create sample datasets
+
+Validation Components:
+    - Python version and package compatibility
+    - File system permissions and directory structure
+    - Network connectivity for NCBI API access
+    - External bioinformatics tool availability
+    - Pipeline integration and data flow validation
+    - Output format verification and quality assessment
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import sys
@@ -34,29 +61,62 @@ class Colors:
     END = "\033[0m"
 
 
-def print_header(text: str):
-    """Print a formatted header."""
+def print_header(text: str) -> None:
+    """
+    Print a formatted header section for setup script output.
+    
+    Creates visually distinct section headers using color codes and formatting
+    to improve readability of setup progress and diagnostic information.
+    
+    Args:
+        text (str): Header text to display in formatted section
+        
+    Example:
+        >>> print_header("System Requirements Check")
+    """
     print(f"\n{Colors.BLUE}{Colors.BOLD}{'='*60}")
     print(f" {text}")
     print(f"{'='*60}{Colors.END}")
 
 
-def print_success(text: str):
-    """Print success message."""
+def print_success(text: str) -> None:
+    """
+    Print a success message with green checkmark formatting.
+    
+    Displays positive validation results and successful operation completions
+    with consistent visual formatting for easy identification.
+    
+    Args:
+        text (str): Success message to display with green formatting
+        
+    Example:
+        >>> print_success("Python 3.8+ detected")
+    """
     print(f"{Colors.GREEN}✓ {text}{Colors.END}")
 
 
-def print_warning(text: str):
-    """Print warning message."""
+def print_warning(text: str) -> None:
+    """
+    Print a warning message with yellow formatting.
+    
+    Displays non-critical issues, optional components, or cautionary information
+    that doesn't prevent pipeline operation but may affect functionality.
+    
+    Args:
+        text (str): Warning message to display with yellow formatting
+        
+    Example:
+        >>> print_warning("Optional external tool not found - using mock mode")
+    """
     print(f"{Colors.YELLOW}⚠ {text}{Colors.END}")
 
 
-def print_error(text: str):
+def print_error(text: str) -> None:
     """Print error message."""
     print(f"{Colors.RED}✗ {text}{Colors.END}")
 
 
-def print_info(text: str):
+def print_info(text: str) -> None:
     """Print info message."""
     print(f"{Colors.BLUE}ℹ {text}{Colors.END}")
 
@@ -368,7 +428,7 @@ def create_sample_data() -> bool:
         return False
 
 
-def print_final_report(results: Dict[str, Dict[str, bool]]):
+def print_final_report(results: Dict[str, Dict[str, bool]]) -> None:
     """Print final setup report."""
     print_header("Setup Summary Report")
 
@@ -426,7 +486,7 @@ def print_final_report(results: Dict[str, Dict[str, bool]]):
         print_info("Install missing dependencies and re-run this script")
 
 
-def main():
+def main() -> None:
     """Main setup function."""
     parser = argparse.ArgumentParser(description="MutationScan Pipeline Setup")
     parser.add_argument(

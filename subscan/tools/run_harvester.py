@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 """
-SubScan Harvester - Integration Wrapper for ncbi_genome_extractor
+MutationScan Domino 1: Genome Harvester
 
-This module serves as "Domino 1" in the SubScan bioinformatics pipeline.
-It wraps the ncbi_genome_extractor tool and produces a standardized
-genome_manifest.json file for downstream processing.
+This module implements the first domino in the MutationScan pipeline, responsible
+for downloading genome assemblies from NCBI based on accession numbers. It serves
+as the entry point for the AMR analysis workflow, converting accession lists into
+local FASTA files with comprehensive metadata tracking.
+
+The harvester interfaces with the ncbi_genome_extractor tool to download genomes
+and creates standardized JSON manifests for downstream domino tools. It handles
+various genome formats and provides robust error handling for network issues
+and invalid accessions.
+
+Usage:
+    python run_harvester.py --accessions genome_list.txt --email user@email.com 
+                           --output-dir results/genomes/
+
+Integration:
+    - Input: Text file with NCBI genome accession numbers
+    - Output: genome_manifest.json + downloaded FASTA files
+    - Next Domino: run_annotator.py (AMR gene annotation)
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
@@ -14,23 +32,30 @@ import os
 import subprocess
 import sys
 from subprocess import CompletedProcess
+from typing import List, Dict, Any, Optional, Tuple
+from pathlib import Path
 
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """
-    Parse and validate command-line arguments for the NCBI Genome Harvester.
-
-    Creates an argument parser configured for genome harvesting operations,
-    including validation for required NCBI access parameters.
+    Create and configure command-line argument parser for genome harvesting.
+    
+    Sets up argument parsing for the genome harvester with validation for NCBI
+    API access requirements and file path specifications. Ensures all required
+    parameters for genome downloading workflow are properly configured.
 
     Returns:
         argparse.Namespace: Parsed command-line arguments containing:
-            - accessions (str): Path to file with NCBI accession numbers
-            - email (str): Valid email address for NCBI API access
-            - output_dir (str): Directory for saving harvested genomes
+            - accessions (str): Path to text file with NCBI accession numbers (one per line)
+            - email (str): Valid email address for NCBI API compliance (required by NCBI)
+            - output_dir (str): Output directory path for downloaded genomes and manifest
 
     Raises:
-        SystemExit: If required arguments are missing or invalid
+        SystemExit: If required arguments are missing or invalid format
+
+    Example:
+        >>> args = parse_arguments()
+        >>> print(f"Processing {args.accessions} with email {args.email}")
     """
     parser = argparse.ArgumentParser(
         description="SubScan Harvester: Extract genomes from NCBI and generate manifest",
@@ -64,27 +89,33 @@ def execute_ncbi_genome_extractor(
     """
     Execute the external NCBI Genome Extractor tool for automated genome harvesting.
 
-    This function interfaces with the ncbi_genome_extractor.py tool to download
-    complete genome sequences from NCBI using provided accession numbers. The
-    tool handles NCBI API interactions, rate limiting, and file organization.
+    Interfaces with the ncbi_genome_extractor.py tool to download complete genome
+    sequences from NCBI using provided accession numbers. Handles NCBI API 
+    interactions, rate limiting, file organization, and metadata generation.
 
     Args:
         accessions (str): Path to text file containing NCBI accession numbers (one per line)
         email (str): Valid email address for NCBI API access (required by NCBI guidelines)
-        output_dir (str): Directory path where harvested FASTA files will be saved
+        output_dir (str): Directory path where harvested genomes and metadata will be saved
 
     Returns:
-        None: Function completes successfully or raises exception
+        CompletedProcess[str]: Result of subprocess execution with returncode and output
 
     Raises:
-        FileNotFoundError: If ncbi_genome_extractor.py script cannot be found
-        subprocess.CalledProcessError: If the external harvesting tool fails
-        PermissionError: If output directory cannot be created or accessed
+        FileNotFoundError: If ncbi_genome_extractor.py script cannot be found in expected location
+        subprocess.CalledProcessError: If the external harvesting tool fails during execution
+        PermissionError: If output directory cannot be created or accessed due to permissions
 
     Side Effects:
-        - Creates output directory if it doesn't exist
-        - Downloads FASTA files to output_dir/fasta/
-        - Generates CSV metadata file with genome information
+        - Creates output directory structure if it doesn't exist
+        - Downloads FASTA files to output_dir with standardized naming
+        - Generates CSV metadata file with comprehensive genome information
+        - Handles NCBI rate limiting and retry logic automatically
+
+    Example:
+        >>> result = execute_ncbi_genome_extractor("accessions.txt", "user@email.com", "results/")
+        >>> if result.returncode == 0:
+        ...     print("Genomes downloaded successfully")
     """
     # Find the ncbi_genome_extractor script
     script_path = os.path.join(
@@ -157,15 +188,37 @@ def execute_ncbi_genome_extractor(
         sys.exit(1)
 
 
-def _read_metadata_csv(metadata_csv_path):
-    """Read and parse the metadata CSV file."""
+def _read_metadata_csv(metadata_csv_path: str) -> List[Dict[str, Any]]:
+    """
+    Read and parse the metadata CSV file generated by ncbi_genome_extractor.
+    
+    Args:
+        metadata_csv_path (str): Path to the CSV metadata file
+        
+    Returns:
+        List[Dict[str, str]]: List of dictionaries containing genome metadata
+        
+    Raises:
+        FileNotFoundError: If CSV file doesn't exist
+        csv.Error: If CSV file format is invalid
+    """
     with open(metadata_csv_path, "r", newline="", encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         return list(reader)
 
 
-def _find_fasta_file(accession, genome_id, output_dir):
-    """Find the corresponding FASTA file for a genome entry."""
+def _find_fasta_file(accession: str, genome_id: str, output_dir: str) -> Optional[str]:
+    """
+    Find the corresponding FASTA file for a genome entry.
+    
+    Args:
+        accession (str): Genome accession number
+        genome_id (str): Genome ID from metadata
+        output_dir (str): Directory containing FASTA files
+        
+    Returns:
+        str or None: Absolute path to FASTA file if found, None otherwise
+    """
     fasta_files = [f for f in os.listdir(output_dir) if f.endswith(".fasta")]
     fasta_path = None
 
@@ -185,8 +238,17 @@ def _find_fasta_file(accession, genome_id, output_dir):
     return fasta_path
 
 
-def _create_genome_entry(row, fasta_path):
-    """Create a genome entry dictionary from metadata row and FASTA path."""
+def _create_genome_entry(row: Dict[str, Any], fasta_path: Optional[str]) -> Dict[str, Any]:
+    """
+    Create a genome entry dictionary from metadata row and FASTA path.
+    
+    Args:
+        row (Dict[str, str]): Dictionary containing genome metadata from CSV
+        fasta_path (str or None): Absolute path to the genome FASTA file
+        
+    Returns:
+        Dict[str, Any]: Genome entry dictionary with accession, fasta_path, and metadata
+    """
     accession = row.get("accession", "").strip()
     genome_entry = {
         "accession": accession,
@@ -196,17 +258,37 @@ def _create_genome_entry(row, fasta_path):
     return genome_entry
 
 
-def generate_genome_manifest(accessions, email, output_dir):
+def generate_genome_manifest(accessions: str, email: str, output_dir: str) -> str:
     """
-    Generate the standardized genome_manifest.json file for pipeline integration.
+    Generate standardized JSON manifest file for downstream pipeline integration.
 
-    This function reads the output from ncbi_genome_extractor and creates a structured
-    manifest that serves as input for the next domino in the SubScan pipeline.
+    Creates the genome_manifest.json file that serves as the primary data handoff
+    mechanism to subsequent domino tools. Processes ncbi_genome_extractor output
+    to create a structured manifest with genome metadata, file paths, and processing
+    statistics for the MutationScan pipeline.
 
     Args:
-        accessions (str): Path to the original accessions file
-        email (str): Email used for NCBI access
-        output_dir (str): Output directory where results were saved
+        accessions (str): Path to the original accessions file used for download
+        email (str): Email address used for NCBI API access (preserved in manifest)
+        output_dir (str): Output directory containing downloaded genomes and metadata
+
+    Returns:
+        str: Path to the generated genome_manifest.json file
+
+    Raises:
+        FileNotFoundError: If expected metadata CSV file is not found after download
+        IOError: If manifest file cannot be written due to permissions or disk space
+        ValueError: If metadata format is invalid or missing required fields
+
+    Side Effects:
+        - Creates genome_manifest.json in the output directory
+        - Validates all referenced FASTA files exist and are readable
+        - Links accession numbers to downloaded genome files
+        - Preserves comprehensive metadata for downstream analysis
+
+    Example:
+        >>> manifest_path = generate_genome_manifest("accessions.txt", "user@email.com", "results/")
+        >>> print(f"Manifest created at: {manifest_path}")
     """
     print("Generating genome_manifest.json...")
 

@@ -1,34 +1,52 @@
 #!/usr/bin/env python3
 """
-SubScan Pipeline - Domino 6: The Co-occurrence Analyzer
+MutationScan Domino 6: Co-occurrence Pattern Analyzer
 
-This tool analyzes mutation co-occurrence patterns across genomes to identify
-functionally linked mutations in antimicrobial resistance genes.
+This module implements the sixth domino in the MutationScan pipeline, responsible
+for analyzing mutation co-occurrence patterns across genomes to identify functionally
+linked mutations in antimicrobial resistance genes. It provides statistical analysis
+of how mutations in different genes co-occur within the same bacterial isolates.
 
-Purpose:
-- Reads analysis_manifest.json from Domino 5 (The Analyzer)
-- Loads the subscan_mutation_report.xlsx master mutation list
-- Performs statistical analysis of co-occurring mutations in different genes
-- Generates cooccurrence_manifest.json for Domino 7 (The Reporter)
+The analyzer processes comprehensive mutation reports from Domino 5 and generates
+detailed co-occurrence statistics, helping researchers understand potential functional
+relationships between resistance mechanisms and identify mutation patterns that may
+indicate coordinated resistance evolution.
+
+Key Features:
+- Statistical analysis of mutation co-occurrence patterns
+- Gene-level and position-specific co-occurrence detection
+- Frequency analysis with configurable thresholds
+- Comprehensive summary statistics and reports
+- Integration with mutation analysis pipeline data
 
 Usage:
     python run_cooccurrence_analyzer.py --manifest analysis_manifest.json --output-dir ./cooccurrence_results
 
-Pipeline Flow:
-    Domino 5 (Analyzer) → analysis_manifest.json → Domino 6 (Co-occurrence) → cooccurrence_manifest.json → Domino 7 (Reporter)
+Integration:
+    - Input: analysis_manifest.json from Analyzer (Domino 5) + mutation reports
+    - Output: cooccurrence_manifest.json + statistical analysis files
+    - Next Domino: run_reporter.py (interactive dashboard generation)
 
-Scientific Value:
-    Identifies patterns where mutations in multiple genes co-occur in the same isolate,
-    providing insights into potential functional relationships between resistance mechanisms.
+Scientific Applications:
+    - Identify co-evolving resistance mutations
+    - Detect functional gene clusters in resistance mechanisms
+    - Analyze mutation patterns across bacterial populations
+    - Support epidemiological studies of resistance evolution
+
+Dependencies:
+    - pandas for data manipulation and statistical analysis
+    - Comprehensive mutation report files from upstream analysis
+    - subscan.cooccurrence module for specialized analysis functions
 
 Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
 import os
 import sys
 import json
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List, Optional
 import logging
 from datetime import datetime
 

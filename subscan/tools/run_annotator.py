@@ -1,18 +1,39 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SubScan Pipeline - Domino 2: The Annotator (High-Performance Parallel Version)
+MutationScan Domino 2: AMR Gene Annotator
 
-This script serves as an integration wrapper for the ABRicate-Automator tool,
-acting as the second domino in the SubScan bioinformatics pipeline with
-parallel execution for maximum performance.
+This module implements the second domino in the MutationScan pipeline, responsible
+for identifying antimicrobial resistance (AMR) genes in downloaded genomes using
+the ABRicate tool and CARD database. It processes genome FASTA files and generates
+comprehensive annotation reports with gene coordinates and resistance profiles.
 
-Purpose:
-- Reads genome_manifest.json from Domino 1 (The Harvester)
-- Executes ABRicate-Automator for AMR gene annotation in parallel
-- Generates annotation_manifest.json for Domino 3 (FastaAAExtractor)
+The annotator interfaces with the ABRicate-Automator tool for high-throughput AMR
+gene detection and creates standardized JSON manifests for downstream analysis.
+It includes mock mode fallback for demonstration when external tools are unavailable.
 
-Author: SubScan Pipeline Development Team
+Key Features:
+- High-performance parallel processing of multiple genomes
+- Integration with ABRicate and CARD database for AMR gene detection
+- Mock mode support for testing and demonstration environments
+- Comprehensive error handling and progress tracking
+- Standardized manifest generation for pipeline integration
+
+Usage:
+    python run_annotator.py --manifest genome_manifest.json --output-dir results/annotations/
+
+Integration:
+    - Input: genome_manifest.json from Harvester (Domino 1)
+    - Output: annotation_manifest.json + TSV annotation files
+    - Next Domino: run_extractor.py (protein sequence extraction)
+
+Dependencies:
+    - ABRicate-Automator tool (optional - falls back to mock mode)
+    - CARD database for resistance gene identification
+    - Python multiprocessing for parallel execution
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import argparse
@@ -20,6 +41,8 @@ import json
 import os
 import subprocess
 import sys
+from typing import List, Dict, Any, Optional, Tuple
+from pathlib import Path
 
 # Set UTF-8 encoding for Windows console
 if sys.platform.startswith("win"):
@@ -44,8 +67,25 @@ from subscan.utils import (
 )  # pylint: disable=import-error
 
 
-def create_argument_parser():
-    """Create and configure the command-line argument parser"""
+def create_argument_parser() -> argparse.ArgumentParser:
+    """
+    Create and configure command-line argument parser for AMR gene annotation.
+    
+    Sets up argument parsing for the annotator with validation for manifest input
+    from the harvester, output directory specification, and parallel processing
+    options for high-throughput AMR gene annotation workflows.
+
+    Returns:
+        argparse.ArgumentParser: Configured parser for annotator arguments with:
+            - manifest: Path to genome_manifest.json from Domino 1 (Harvester)
+            - output_dir: Directory for annotation results and manifest output
+            - threads: Number of parallel processes for annotation
+            - verbose: Enable detailed progress and debugging output
+
+    Example:
+        >>> parser = create_argument_parser()
+        >>> args = parser.parse_args(['--manifest', 'genome_manifest.json', '--output-dir', 'results/'])
+    """
     parser = argparse.ArgumentParser(
         description="SubScan Domino 2: High-Performance AMR Gene Annotation Wrapper",
         formatter_class=argparse.RawDescriptionHelpFormatter,

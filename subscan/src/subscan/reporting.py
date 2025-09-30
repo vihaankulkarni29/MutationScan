@@ -1,11 +1,43 @@
 """
-SubScan Reporting Module
+MutationScan Reporting Module
 
-This module provides the core data aggregation and preparation functionality
-for the SubScan HTML Report Generator (Domino 7).
+This module provides comprehensive data aggregation and visualization preparation
+functionality for the MutationScan HTML Report Generator (Domino 7). It serves
+as the central engine for collecting, processing, and organizing analytical results
+from the complete pipeline workflow into interactive dashboard components.
 
-The ReportGenerator class serves as the central hub for collecting and organizing
-all analytical results from the complete SubScan pipeline run.
+The module handles complex data integration from multiple pipeline stages including
+genome metadata, AMR gene annotations, protein alignments, mutation analyses, and
+co-occurrence patterns. It provides sophisticated data preparation methods optimized
+for interactive visualization and scientific presentation.
+
+Key Classes:
+    - ReportGenerator: Central data aggregation and processing engine
+    - VisualizationPreparer: Specialized data formatting for interactive plots
+    - SummaryStatisticsCalculator: Comprehensive statistical analysis
+    - HTMLTemplateManager: Dashboard template and styling management
+
+Features:
+    - Multi-source data integration and validation
+    - Interactive visualization data preparation
+    - Statistical summary generation
+    - Error handling and data quality assessment
+    - Modular design for extensibility
+
+Scientific Applications:
+    - Generate publication-ready analysis reports
+    - Create interactive dashboards for research teams
+    - Support data exploration and hypothesis generation
+    - Enable comprehensive result archival and sharing
+
+Dependencies:
+    - pandas for data manipulation and statistical analysis
+    - plotly for interactive visualization generation
+    - jinja2 for HTML templating and dashboard assembly
+    - pathlib for robust file system operations
+
+Author: MutationScan Development Team
+Version: 1.0.0
 """
 
 import json
@@ -27,7 +59,7 @@ class ReportGenerator:
     - Providing data preparation methods for interactive visualizations
     """
 
-    def __init__(self, manifest_path: str):
+    def __init__(self, manifest_path: str) -> None:
         """
         Initialize the ReportGenerator with the final pipeline manifest.
 
