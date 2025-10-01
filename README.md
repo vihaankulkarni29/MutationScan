@@ -1,267 +1,262 @@
-# MutationScan 🧬
+# 🧬 MutationScan
 
-**A Comprehensive Bioinformatics Pipeline for Antimicrobial Resistance Analysis**
+**Analyze antimicrobial resistance mutations in bacterial genomes with just one command.**
 
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-mutationscan-2496ED?logo=docker)](https://hub.docker.com/r/vihaankulkarni29/mutationscan)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![Pipeline Status](https://img.shields.io/badge/pipeline-production%20ready-green.svg)](https://github.com/vihaankulkarni29/MutationScan)
-[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Type Hints](https://img.shields.io/badge/typing-mypy-blue.svg)](https://mypy.readthedocs.io/)
-[![Tests](https://img.shields.io/badge/tests-pytest-orange.svg)](https://docs.pytest.org/)
-[![Documentation](https://img.shields.io/badge/docs-comprehensive-brightgreen.svg)](https://github.com/vihaankulkarni29/MutationScan/blob/main/README.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/vihaankulkarni29/MutationScan/releases)
+[![Pipeline](https://img.shields.io/badge/pipeline-7%20stages-brightgreen.svg)](https://github.com/vihaankulkarni29/MutationScan)
 
-MutationScan is a state-of-the-art bioinformatics pipeline designed for comprehensive antimicrobial resistance (AMR) analysis. It provides end-to-end functionality from genome acquisition to interactive visualization, making it an essential tool for researchers studying bacterial resistance mechanisms.
+MutationScan is a complete bioinformatics pipeline that automatically analyzes bacterial genomes for antimicrobial resistance mutations. Simply provide NCBI accession numbers and gene names—MutationScan handles the rest, generating beautiful interactive reports with mutation analysis, co-occurrence patterns, and publication-ready visualizations.
 
-## 🎯 Overview
+---
 
-MutationScan implements a sophisticated "Domino Effect" pipeline architecture, where each stage seamlessly feeds into the next, ensuring comprehensive and reproducible AMR analysis:
+## 🚀 Quick Start
 
-```
-🧬 Genome Acquisition → 🔍 Gene Annotation → 🧪 Sequence Extraction → 
-📏 Wild-type Alignment → 🔬 Mutation Analysis → 📊 Co-occurrence Analysis → 📄 Interactive Reports
-```
+Get started in 3 simple steps:
 
-## ✨ Key Features
+### **Step 1: Install Docker Desktop**
 
-### 🚀 **Complete Pipeline Integration**
-- **Domino 1**: NCBI Genome Harvester with intelligent quality scoring
-- **Domino 2**: ABRicate Automator for CARD database integration
-- **Domino 3**: FastaAA Extractor for targeted sequence extraction
-- **Domino 4**: Wild-type Aligner using EMBOSS alignment tools
-- **Domino 5**: Mutation Analyzer with sophisticated detection algorithms
-- **Domino 6**: Co-occurrence Analysis for resistance pattern discovery
-- **Domino 7**: HTML Report Generator with interactive visualizations
+Download and install Docker Desktop for your platform:
 
-### 🔬 **Advanced Analytics**
-- **Smart Mutation Detection**: Identifies SNPs, insertions, deletions, and complex variants
-- **Co-occurrence Pattern Analysis**: Discovers resistance gene relationships
-- **Quality Scoring**: Automated genome quality assessment and ranking
-- **Statistical Analysis**: Comprehensive mutation frequency and distribution analysis
+- **Windows**: [Download Docker Desktop](https://docs.docker.com/desktop/install/windows-install/)
+- **macOS**: [Download Docker Desktop](https://docs.docker.com/desktop/install/mac-install/)
+- **Linux**: [Install Docker Engine](https://docs.docker.com/engine/install/)
 
-### 📊 **Interactive Visualizations**
-- **Plotly.js Charts**: Interactive mutation distributions, gene family analysis, and network visualizations
-- **MSAViewer Integration**: In-browser multiple sequence alignment viewer
-- **Responsive Dashboard**: Professional HTML reports with real-time data exploration
-- **Publication-Ready Outputs**: High-quality figures and comprehensive data tables
+After installation, start Docker Desktop and ensure it's running.
 
-## 🛠️ Installation
+---
 
-### Prerequisites
-- Python 3.8+
-- Git
-- EMBOSS Suite (for sequence alignment)
-- Internet connection (for NCBI API access)
+### **Step 2: Prepare Your Data**
 
-### Quick Start
+Create two folders on your computer and prepare your input files:
 
 ```bash
-# Clone the repository
-git clone https://github.com/vihaankulkarni29/MutationScan.git
-cd MutationScan
+# Create folders
+mkdir data_input data_output
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Install EMBOSS (Ubuntu/Debian)
-sudo apt-get install emboss
-
-# Install EMBOSS (macOS with Homebrew)
-brew install brewsci/bio/emboss
-
-# Install EMBOSS (Windows)
-# Download from: http://emboss.open-bio.org/
+# Navigate to data_input folder
+cd data_input
 ```
 
-## 🚀 Quick Start Guide
+Create two text files inside `data_input`:
 
-### 1. Basic Pipeline Run
-
-```bash
-# Step 1: Harvest genomes from NCBI
-python subscan/tools/run_harvester.py \
-  --accessions "NZ_CP107554,NZ_CP107555,NZ_CP107556" \
-  --output-dir harvester_results
-
-# Step 2: Annotate resistance genes
-python subscan/tools/run_annotator.py \
-  --manifest harvester_results/genome_manifest.json \
-  --output-dir annotator_results
-
-# Step 3: Extract target sequences
-python subscan/tools/run_extractor.py \
-  --manifest annotator_results/annotation_manifest.json \
-  --output-dir extractor_results
-
-# Step 4: Align to wild-type sequences
-python subscan/tools/run_aligner.py \
-  --manifest extractor_results/extraction_manifest.json \
-  --output-dir aligner_results
-
-# Step 5: Analyze mutations
-python subscan/tools/run_analyzer.py \
-  --manifest aligner_results/alignment_manifest.json \
-  --output-dir analyzer_results
-
-# Step 6: Generate interactive report
-python subscan/tools/run_reporter.py \
-  --manifest analyzer_results/analysis_manifest.json \
-  --output-dir reports \
-  --open-browser
+**`accessions.txt`** - List your NCBI accession numbers (one per line):
+```
+NZ_CP107554
+NZ_CP107555
+NZ_CP107556
 ```
 
-### 2. Automated End-to-End Analysis
-
-```bash
-# Run complete pipeline with a single command
-python subscan/pipeline.py \
-  --accessions-file research_accessions.txt \
-  --output-dir complete_analysis \
-  --threads 8 \
-  --generate-report
+**`genes.txt`** - List target genes to analyze (one per line):
 ```
-
-## 📁 Project Structure
-
-```
-MutationScan/
-├── subscan/
-│   ├── src/subscan/           # Core pipeline modules
-│   ├── tools/                 # Command-line interfaces for each domino
-│   ├── analyzer/              # Advanced mutation analysis engine
-│   ├── ncbi_genome_extractor/ # NCBI integration tools
-│   ├── tests/                 # Comprehensive test suite
-│   └── pyproject.toml         # Package configuration
-├── docs/                      # Documentation and tutorials
-├── examples/                  # Example datasets and workflows
-├── .gitignore                 # Git ignore rules
-└── README.md                  # This file
-```
-
-## 🔧 Advanced Usage
-
-### Custom Gene Lists
-
-Create custom gene lists for targeted analysis:
-
-```python
-# custom_genes.txt
 gyrA
 parC
 rpoB
-katG
-inhA
 ```
 
+---
+
+### **Step 3: Run MutationScan**
+
+Open your terminal (Command Prompt on Windows, Terminal on macOS/Linux) and run:
+
+#### **Windows (PowerShell/CMD)**
+```powershell
+docker run -v C:\Users\YourName\data_input:/data/input -v C:\Users\YourName\data_output:/data/output vihaankulkarni29/mutationscan:latest
+```
+
+#### **macOS/Linux**
 ```bash
-python subscan/tools/run_extractor.py \
-  --gene-list custom_genes.txt \
-  --manifest annotation_manifest.json
+docker run -v ~/data_input:/data/input -v ~/data_output:/data/output vihaankulkarni29/mutationscan:latest
 ```
 
-### Parallel Processing
+**Replace** `C:\Users\YourName\` or `~/` with the actual path to your folders.
 
-Leverage multi-core processing for large datasets:
+---
 
-```bash
-python subscan/tools/run_analyzer.py \
-  --threads 16 \
-  --batch-size 100 \
-  --manifest alignment_manifest.json
-```
+### **� That's It!**
 
-### Report Customization
+MutationScan will:
+1. ✅ Download genomes from NCBI
+2. ✅ Identify antimicrobial resistance genes
+3. ✅ Extract and align sequences
+4. ✅ Detect mutations (SNPs, insertions, deletions)
+5. ✅ Analyze co-occurrence patterns
+6. ✅ Generate interactive HTML reports
 
-Generate customized reports with specific visualizations:
+**Results will appear in your `data_output` folder**, including:
+- 📊 Interactive HTML dashboard
+- � Mutation analysis reports
+- � CSV data files for further analysis
+- 🧬 Sequence alignment files
 
-```bash
-python subscan/tools/run_reporter.py \
-  --template custom_template.html \
-  --include-msa \
-  --export-data \
-  --manifest analysis_manifest.json
-```
+---
 
-## 📊 Output Examples
+## ✨ What MutationScan Does
 
-### Interactive Dashboard
-![Dashboard Preview](docs/images/dashboard_preview.png)
+MutationScan is a **7-stage automated pipeline** that transforms raw NCBI accession numbers into comprehensive AMR analysis:
 
-### Mutation Analysis Report
-- **Total Genomes Analyzed**: 150
-- **Mutations Detected**: 5,284
-- **Co-occurrence Pairs**: 171,379
-- **Gene Families**: 12
+| Stage | Name | Function |
+|-------|------|----------|
+| 🧬 **1** | Genome Harvester | Downloads genomes from NCBI with quality scoring |
+| 🔍 **2** | Gene Annotator | Identifies AMR genes using CARD database |
+| 🧪 **3** | Sequence Extractor | Extracts target gene sequences |
+| 📏 **4** | Wild-type Aligner | Aligns sequences to reference genes |
+| 🔬 **5** | Mutation Analyzer | Detects SNPs, insertions, and deletions |
+| 📊 **6** | Co-occurrence Analyzer | Discovers resistance gene patterns |
+| 📄 **7** | Report Generator | Creates interactive visualizations |
 
-### Visualization Components
-- 📈 Interactive mutation distribution charts
+---
+
+## 🎯 Key Features
+
+### **For Researchers**
+- 🔬 **Comprehensive Mutation Detection** - SNPs, insertions, deletions, and complex variants
+- 📊 **Statistical Analysis** - Mutation frequencies, distributions, and significance testing
+- 🧬 **Gene Co-occurrence Patterns** - Discover relationships between resistance genes
+- 📈 **Publication-Ready Outputs** - High-quality figures and interactive dashboards
+
+### **For Everyone**
+- ⚡ **No Installation Required** - Everything runs in Docker
+- 🖱️ **One Command** - Complete analysis from start to finish
+- 🌐 **Works Everywhere** - Windows, macOS, and Linux
+- 🎨 **Beautiful Reports** - Interactive HTML dashboards with Plotly.js visualizations
+
+### **Technical Excellence**
+- ✅ **Automated Quality Control** - Genome quality scoring and validation
+- 🔄 **Reproducible Results** - Consistent analysis every time
+- 🚀 **Fast Processing** - Multi-threaded analysis for large datasets
+- 📚 **Comprehensive Data** - NCBI genomes + CARD AMR database
+
+---
+
+## 📊 Example Output
+
+After running MutationScan, you'll receive:
+
+### **Interactive Dashboard**
+- 📈 Mutation distribution charts (interactive with Plotly.js)
 - 🔗 Gene co-occurrence network diagrams
-- 📋 Comprehensive data tables with filtering
+- 📋 Sortable/filterable data tables
 - 🧬 Multiple sequence alignment viewer
 
-## 🧪 Testing
+### **Analysis Files**
+- `mutation_analysis_report.html` - Main interactive dashboard
+- `mutation_summary.csv` - All detected mutations
+- `cooccurrence_matrix.csv` - Gene relationship data
+- `genome_quality_scores.csv` - Quality metrics for each genome
 
-Run the comprehensive test suite:
-
-```bash
-# Run all tests
-python -m pytest subscan/tests/
-
-# Run specific test modules
-python -m pytest subscan/analyzer/tests/test_engine.py
-
-# Run with coverage report
-python -m pytest --cov=subscan subscan/tests/
+### **Sample Results**
+```
+✓ Total Genomes Analyzed: 150
+✓ Mutations Detected: 5,284
+✓ Co-occurrence Pairs: 171,379
+✓ Gene Families Analyzed: 12
 ```
 
-## 📚 Documentation
+---
 
-- **[User Guide](docs/user_guide.md)**: Comprehensive usage instructions
-- **[API Reference](docs/api_reference.md)**: Detailed module documentation
-- **[Tutorial](docs/tutorial.md)**: Step-by-step walkthrough with example data
-- **[Contributing Guidelines](CONTRIBUTING.md)**: Guidelines for contributors
-- **[Changelog](CHANGELOG.md)**: Version history and release notes
-- **[Security Policy](SECURITY.md)**: Security considerations and reporting
+## 💡 Tips & Best Practices
 
-## 🤝 Contributing
+### **Input Preparation**
+- ✅ Use valid NCBI accession numbers (RefSeq or GenBank format)
+- ✅ One accession per line in `accessions.txt`
+- ✅ Use standard gene names (e.g., gyrA, parC, rpoB)
+- ✅ Check [CARD database](https://card.mcmaster.ca/) for supported AMR genes
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+### **Performance Optimization**
+- 🚀 Analyze 10-50 genomes for fastest results (5-15 minutes)
+- 🚀 100+ genomes may take 30-60 minutes depending on genome size
+- 🚀 Use specific gene lists instead of "all genes" for faster analysis
+- 🚀 Ensure stable internet connection for NCBI downloads
 
-### Development Setup
+### **Troubleshooting**
+- ❓ **Container exits immediately?** Check Docker Desktop is running
+- ❓ **No results?** Verify input files are in `data_input` folder
+- ❓ **Permission errors?** Ensure folders have read/write permissions
+- ❓ **Network errors?** Check internet connection and NCBI API availability
 
+---
+
+## � Additional Resources
+
+### **Documentation**
+- 📖 **[Docker Usage Guide](DOCKER.md)** - Advanced Docker usage and troubleshooting
+- 📖 **[Contributing Guidelines](CONTRIBUTING.md)** - For developers and contributors
+- 📖 **[Changelog](CHANGELOG.md)** - Version history and release notes
+- 📖 **[Security Policy](SECURITY.md)** - Security considerations
+
+### **Example Datasets**
+- 📂 **[Sample Data](examples/)** - Ready-to-use example files
+- 📂 **[Tutorials](docs/)** - Step-by-step tutorials and guides
+
+### **External Resources**
+- 🌐 [NCBI Database](https://www.ncbi.nlm.nih.gov/) - Genome accession numbers
+- 🌐 [CARD Database](https://card.mcmaster.ca/) - AMR gene information
+- 🌐 [Docker Documentation](https://docs.docker.com/) - Docker help and tutorials
+
+---
+
+## 🆘 Getting Help
+
+### **Need Support?**
+
+1. **Check Documentation**: Review [DOCKER.md](DOCKER.md) for detailed troubleshooting
+2. **Report Issues**: Found a bug? [Create an issue](https://github.com/vihaankulkarni29/MutationScan/issues/new/choose)
+3. **Request Features**: Have an idea? [Submit a feature request](https://github.com/vihaankulkarni29/MutationScan/issues/new/choose)
+4. **Ask Questions**: Join [GitHub Discussions](https://github.com/vihaankulkarni29/MutationScan/discussions)
+
+### **Common Questions**
+
+**Q: Do I need to know Python or bioinformatics?**  
+A: No! MutationScan is designed for anyone. Just follow the 3-step Quick Start.
+
+**Q: Can I analyze my own genome sequences?**  
+A: Currently, MutationScan works with NCBI accession numbers. Local file support is planned.
+
+**Q: How much does it cost?**  
+A: MutationScan is completely free and open-source (MIT License).
+
+**Q: Can I use this for publication?**  
+A: Yes! See the Citation section below.
+
+---
+
+## 👨‍💻 For Developers
+
+Want to contribute or customize MutationScan?
+
+### **Development Setup**
+See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Local development environment setup
+- Code contribution guidelines
+- Testing and quality standards
+- Pull request process
+
+### **Build from Source**
 ```bash
-# Clone for development
 git clone https://github.com/vihaankulkarni29/MutationScan.git
 cd MutationScan
-
-# Install in development mode
-pip install -e .
-
-# Install development dependencies
-pip install -r requirements-dev.txt
-
-# Run pre-commit hooks
-pre-commit install
+docker build -t mutationscan:dev .
 ```
 
-## 📄 License
+---
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 📜 License
 
-## 🙏 Acknowledgments
+MutationScan is open-source software licensed under the **MIT License**.
 
-- **NCBI**: For providing comprehensive genomic databases
-- **CARD Database**: For curated antimicrobial resistance gene data
-- **EMBOSS Suite**: For robust sequence alignment tools
-- **Plotly.js**: For interactive visualization capabilities
-- **MSAViewer**: For multiple sequence alignment visualization
+You are free to:
+- ✅ Use commercially
+- ✅ Modify and distribute
+- ✅ Use privately
+- ✅ Use in research and publications
 
-## 📧 Contact
+See [LICENSE](LICENSE) file for full details.
 
-- **Author**: Vihaan Kulkarni
-- **Email**: [vihaankulkarni29@gmail.com](mailto:vihaankulkarni29@gmail.com)
-- **GitHub**: [@vihaankulkarni29](https://github.com/vihaankulkarni29)
 
-## 🚀 Citation
+## � Citation
 
 If you use MutationScan in your research, please cite:
 
@@ -271,16 +266,47 @@ If you use MutationScan in your research, please cite:
   author={Kulkarni, Vihaan},
   year={2025},
   url={https://github.com/vihaankulkarni29/MutationScan},
-  version={1.0.0}
+  version={1.0.0},
+  doi={10.5281/zenodo.XXXXXXX}
 }
 ```
 
 ---
 
+## 🙏 Acknowledgments
+
+MutationScan stands on the shoulders of giants:
+
+- **[NCBI](https://www.ncbi.nlm.nih.gov/)** - Comprehensive genomic databases
+- **[CARD Database](https://card.mcmaster.ca/)** - Curated antimicrobial resistance gene data
+- **[EMBOSS Suite](http://emboss.sourceforge.net/)** - Sequence alignment and analysis tools
+- **[Plotly.js](https://plotly.com/javascript/)** - Interactive data visualizations
+- **[Docker](https://www.docker.com/)** - Containerization platform
+
+Thank you to all contributors and users making AMR research more accessible!
+
+---
+
+## 📧 Contact & Support
+
+**Author**: Vihaan Kulkarni  
+**Email**: [vihaankulkarni29@gmail.com](mailto:vihaankulkarni29@gmail.com)  
+**GitHub**: [@vihaankulkarni29](https://github.com/vihaankulkarni29)
+
+### Quick Links
+- 🐛 [Report a Bug](https://github.com/vihaankulkarni29/MutationScan/issues/new?template=bug_report.yml)
+- 💡 [Request a Feature](https://github.com/vihaankulkarni29/MutationScan/issues/new?template=feature_request.yml)
+- 📖 [Improve Documentation](https://github.com/vihaankulkarni29/MutationScan/issues/new?template=documentation.yml)
+- 💬 [Join Discussions](https://github.com/vihaankulkarni29/MutationScan/discussions)
+
+---
+
 <div align="center">
 
-**🧬 Advancing AMR Research Through Computational Excellence 🧬**
+### 🧬 Advancing Antimicrobial Resistance Research 🧬
 
-[Report Issues](https://github.com/vihaankulkarni29/MutationScan/issues) • [Request Features](https://github.com/vihaankulkarni29/MutationScan/issues) • [Join Discussions](https://github.com/vihaankulkarni29/MutationScan/discussions)
+**MutationScan v1.0.0** | [Docker Hub](https://hub.docker.com/r/vihaankulkarni29/mutationscan) | [GitHub](https://github.com/vihaankulkarni29/MutationScan) | [Documentation](DOCKER.md)
+
+*Made with ❤️ for the AMR research community*
 
 </div>
