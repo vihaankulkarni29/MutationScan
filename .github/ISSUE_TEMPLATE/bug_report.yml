@@ -1,0 +1,159 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior in MutationScan
+title: "[BUG] "
+labels: ["bug", "needs-triage"]
+assignees:
+  - vihaankulkarni29
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out this form to help us understand and reproduce the issue.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify these before submitting your bug report
+      options:
+        - label: I have searched existing issues and this is not a duplicate
+          required: true
+        - label: I have read the documentation and troubleshooting guide
+          required: true
+        - label: I can reproduce this issue consistently
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: Describe what happened and what you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the behavior
+      placeholder: |
+        1. Run command: `python subscan/tools/run_harvester.py ...`
+        2. With input file: `example.txt`
+        3. See error: `...`
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: Describe the expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened (include error messages)
+      placeholder: Describe what actually happened, including any error messages
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pipeline-stage
+    attributes:
+      label: Pipeline Stage
+      description: Which domino/stage of the pipeline is affected?
+      options:
+        - "Domino 1: Harvester (NCBI Genome Acquisition)"
+        - "Domino 2: Annotator (AMR Gene Annotation)"
+        - "Domino 3: Extractor (Sequence Extraction)"
+        - "Domino 4: Aligner (Wild-type Alignment)"
+        - "Domino 5: Analyzer (Mutation Analysis)"
+        - "Domino 6: Co-occurrence Analyzer"
+        - "Domino 7: Reporter (HTML Generation)"
+        - "Pipeline Orchestrator"
+        - "Setup/Installation"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g., Windows 11, Ubuntu 22.04, macOS 13.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      placeholder: "e.g., 3.9.7, 3.11.2"
+    validations:
+      required: true
+
+  - type: input
+    id: mutationscan-version
+    attributes:
+      label: MutationScan Version
+      placeholder: "e.g., 1.0.0, latest from main branch"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: Additional environment information
+      placeholder: |
+        - EMBOSS version: 
+        - ABRicate version (if used): 
+        - Available memory: 
+        - CPU cores: 
+        - Any special configuration: 
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs
+      description: Include relevant log output or error messages
+      placeholder: Paste error messages, stack traces, or relevant log output here
+      render: shell
+
+  - type: textarea
+    id: data-info
+    attributes:
+      label: Input Data Information
+      description: Information about the data being processed (no sensitive data)
+      placeholder: |
+        - Number of genomes: 
+        - Genome source: NCBI/local files
+        - Accession examples: 
+        - File sizes: 
+        - Any data quality issues: 
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, or information that might help
+      placeholder: Add any other context about the problem here
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Contribution Agreement
+      description: By submitting this issue, you agree to our contribution guidelines
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/vihaankulkarni29/MutationScan/blob/main/CONTRIBUTING.md)
+          required: true

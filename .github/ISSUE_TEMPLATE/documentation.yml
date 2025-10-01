@@ -1,0 +1,145 @@
+name: 📖 Documentation Issue
+description: Report issues with documentation or request documentation improvements
+title: "[DOCS] "
+labels: ["documentation", "needs-review"]
+assignees:
+  - vihaankulkarni29
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us improve our documentation! Report unclear sections, missing information, or suggest improvements.
+
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: Documentation Type
+      description: What type of documentation needs attention?
+      options:
+        - "README.md"
+        - "Installation Guide"
+        - "User Manual/Tutorial"
+        - "API Reference"
+        - "Code Comments/Docstrings"
+        - "Examples/Demos"
+        - "Contributing Guidelines"
+        - "Troubleshooting Guide"
+        - "Pipeline Overview"
+        - "Performance Guide"
+        - "Other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      description: What kind of documentation issue is this?
+      options:
+        - "Missing Information"
+        - "Incorrect/Outdated Information"
+        - "Unclear Explanation"
+        - "Broken Links"
+        - "Formatting Issues"
+        - "Missing Examples"
+        - "Translation Request"
+        - "New Documentation Request"
+        - "Other"
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation Location
+      description: Where is the documentation issue located?
+      placeholder: "e.g., README.md line 45, docs/installation.md, function docstring in run_harvester.py"
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-content
+    attributes:
+      label: Current Content (if applicable)
+      description: Quote the current text that needs improvement
+      placeholder: Copy and paste the current documentation text that has issues
+
+  - type: textarea
+    id: issue-description
+    attributes:
+      label: Issue Description
+      description: Describe what's wrong or missing
+      placeholder: |
+        Explain the documentation issue:
+        - What is unclear or missing?
+        - What caused confusion?
+        - What information would be helpful?
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested-improvement
+    attributes:
+      label: Suggested Improvement
+      description: How should this be improved?
+      placeholder: |
+        Suggest specific improvements:
+        - Clearer wording
+        - Additional examples
+        - Better organization
+        - Missing steps or information
+
+  - type: dropdown
+    id: user-level
+    attributes:
+      label: Target User Level
+      description: What level of user would this documentation help?
+      options:
+        - "Beginner - New to bioinformatics"
+        - "Intermediate - Familiar with basic concepts"
+        - "Advanced - Experienced researchers"
+        - "Developer - Contributing to code"
+        - "All levels"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: User Context
+      description: What were you trying to accomplish when you found this issue?
+      placeholder: |
+        Describe your situation:
+        - What task were you trying to complete?
+        - What documentation were you following?
+        - Where did you get stuck?
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is fixing this documentation issue?
+      options:
+        - "Low - Minor improvement"
+        - "Medium - Noticeable improvement needed"
+        - "High - Causing significant confusion"
+        - "Critical - Blocking users from success"
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution Interest
+      description: Would you like to help improve this documentation?
+      options:
+        - label: I would like to submit a pull request to fix this
+        - label: I can provide more examples or use cases
+        - label: I can help review proposed changes
+        - label: I just want to report the issue
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information that would help improve the documentation
+      placeholder: Additional context, examples, or suggestions

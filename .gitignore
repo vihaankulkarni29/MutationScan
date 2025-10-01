@@ -262,6 +262,46 @@ docs/_templates/
 /site
 
 # ============================================================================
+# MUTATIONSCAN SPECIFIC FILES
+# ============================================================================
+# Pipeline output directories
+*_results/
+*_output/
+demo_results/
+full_test/
+test_annotate/
+test_extract/
+test_harvest/
+alignment_*/
+annotation_*/
+extractor_*/
+harvester_*/
+analysis_*/
+reports_*/
+
+# Temporary configuration files
+config.yaml
+demo_config.json
+test_single.txt
+debug_*.py
+mock_*.py
+
+# Cleanup and development files
+CLEANUP_README.md
+cleanup_repository.*
+debug_pipeline.*
+WARP.md
+audit_report.txt
+
+# Large genomic data files
+*.fasta.gz
+*.fastq.gz
+*.gbk
+*.gbff
+NC_*.fasta
+NZ_*.fasta
+
+# ============================================================================
 # SECURITY AND SENSITIVE FILES
 # ============================================================================
 # API keys and secrets

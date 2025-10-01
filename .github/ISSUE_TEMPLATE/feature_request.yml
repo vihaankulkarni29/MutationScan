@@ -1,0 +1,180 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement for MutationScan
+title: "[FEATURE] "
+labels: ["enhancement", "needs-review"]
+assignees:
+  - vihaankulkarni29
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! We appreciate your ideas for improving MutationScan.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please verify these before submitting your feature request
+      options:
+        - label: I have searched existing issues and feature requests
+          required: true
+        - label: I have reviewed the roadmap and documentation
+          required: true
+        - label: This feature would benefit the broader MutationScan community
+          required: true
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What type of feature are you requesting?
+      options:
+        - "New Pipeline Domino/Stage"
+        - "Enhancement to Existing Domino"
+        - "New Analysis Algorithm"
+        - "Visualization Improvement"
+        - "Performance Optimization"
+        - "Integration with External Tool"
+        - "CLI/Interface Improvement"
+        - "Documentation Enhancement"
+        - "Testing/Quality Improvement"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve?
+      placeholder: Describe the current limitation or need that this feature would address
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe your proposed feature in detail
+      placeholder: |
+        Describe what you would like to see implemented:
+        - What would it do?
+        - How would it work?
+        - What would the interface look like?
+        - Any specific requirements?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pipeline-stage
+    attributes:
+      label: Pipeline Stage (if applicable)
+      description: Which part of the pipeline would this feature affect?
+      options:
+        - "Not applicable"
+        - "Domino 1: Harvester (NCBI Genome Acquisition)"
+        - "Domino 2: Annotator (AMR Gene Annotation)"
+        - "Domino 3: Extractor (Sequence Extraction)"
+        - "Domino 4: Aligner (Wild-type Alignment)"
+        - "Domino 5: Analyzer (Mutation Analysis)"
+        - "Domino 6: Co-occurrence Analyzer"
+        - "Domino 7: Reporter (HTML Generation)"
+        - "Pipeline Orchestrator"
+        - "Multiple Stages"
+        - "New Pipeline Stage"
+
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: Use Cases
+      description: Describe specific use cases or scenarios where this feature would be valuable
+      placeholder: |
+        Examples:
+        - A researcher analyzing 500+ genomes needs faster processing
+        - Users want to integrate with Galaxy workflows
+        - Publication requires specific visualization formats
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Have you considered any alternative approaches?
+      placeholder: Describe any alternative solutions or workarounds you've considered
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How important is this feature to your work?
+      options:
+        - "Low - Nice to have"
+        - "Medium - Would improve workflow"
+        - "High - Essential for my research"
+        - "Critical - Blocking current work"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Estimated Complexity
+      description: How complex do you think this feature would be to implement?
+      options:
+        - "Simple - Small change or addition"
+        - "Medium - Moderate development effort"
+        - "Complex - Significant new functionality"
+        - "Major - Large architectural changes"
+        - "Unknown"
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Ideas
+      description: If you have technical ideas about implementation, share them here
+      placeholder: |
+        Optional: Any thoughts on how this could be implemented?
+        - Specific algorithms or approaches
+        - External tools that could be integrated
+        - Code structure considerations
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples or References
+      description: Provide examples, mockups, or references to similar features
+      placeholder: |
+        - Links to similar tools or features
+        - Research papers describing the approach
+        - Screenshots or mockups
+        - Example datasets that would benefit
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Contribution Interest
+      description: Would you be interested in contributing to this feature?
+      options:
+        - "Yes - I would like to implement this"
+        - "Yes - I can help with testing"
+        - "Yes - I can provide domain expertise"
+        - "Maybe - Depending on complexity"
+        - "No - Just suggesting the idea"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information that would help evaluate this feature
+      placeholder: Additional context, research background, or implementation details
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Contribution Agreement
+      description: By submitting this feature request, you agree to our guidelines
+      options:
+        - label: I agree to follow the [Code of Conduct](https://github.com/vihaankulkarni29/MutationScan/blob/main/CONTRIBUTING.md)
+          required: true

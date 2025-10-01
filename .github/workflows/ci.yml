@@ -1,0 +1,310 @@
+name: 🧪 CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests weekly on Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+env:
+  PYTHON_VERSION: '3.9'
+  PYTHON_VERSION_MATRIX: '["3.8", "3.9", "3.10", "3.11"]'
+
+jobs:
+  # Job 1: Code Quality and Linting
+  code-quality:
+    name: 🔍 Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black flake8 mypy isort bandit safety
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: 🎨 Check code formatting (Black)
+      run: |
+        black --check --diff subscan/
+        
+    - name: 🔍 Lint with flake8
+      run: |
+        flake8 subscan/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 subscan/ --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+        
+    - name: 🔤 Check import sorting (isort)
+      run: |
+        isort --check-only --diff subscan/
+        
+    - name: 🔒 Security check (bandit)
+      run: |
+        bandit -r subscan/ -f json -o bandit-report.json || true
+        
+    - name: 🛡️ Dependency security check
+      run: |
+        safety check --json --output safety-report.json || true
+        
+    - name: 📊 Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # Job 2: Type Checking
+  type-checking:
+    name: 🔍 Type Checking
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mypy types-requests types-setuptools
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: 🔍 Type check with mypy
+      run: |
+        mypy subscan/src/ --ignore-missing-imports --strict-optional
+        mypy subscan/tools/ --ignore-missing-imports
+
+  # Job 3: Test Suite
+  test:
+    name: 🧪 Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ${{ fromJson(env.PYTHON_VERSION_MATRIX) }}
+        exclude:
+          # Skip some combinations to reduce CI time
+          - os: macos-latest
+            python-version: '3.8'
+          - os: windows-latest
+            python-version: '3.8'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-xdist pytest-mock
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: 🧪 Run tests with pytest
+      run: |
+        cd subscan
+        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term
+        
+    - name: 📊 Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.9'
+      uses: codecov/codecov-action@v3
+      with:
+        file: subscan/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        
+    - name: 📁 Upload coverage reports
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-reports-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: subscan/htmlcov/
+
+  # Job 4: Integration Tests
+  integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    needs: [code-quality, test]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y emboss
+        
+    - name: 📦 Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-timeout
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: 🧪 Run integration tests
+      timeout-minutes: 30
+      run: |
+        cd subscan
+        pytest tests/integration/ -v --timeout=300
+        
+    - name: 🔍 Test pipeline with sample data
+      timeout-minutes: 15
+      run: |
+        cd subscan
+        python tools/run_harvester.py --accessions "NC_000913.3" --output-dir test_integration --max-genomes 1
+        
+    - name: 📁 Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: integration-test-results
+        path: subscan/test_integration/
+
+  # Job 5: Documentation Build
+  docs:
+    name: 📚 Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install sphinx sphinx-rtd-theme myst-parser
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: 📚 Build documentation
+      run: |
+        # Add documentation build commands here when ready
+        echo "Documentation build placeholder"
+        
+    - name: 🔍 Check for broken links in README
+      run: |
+        # Basic check for README formatting
+        python -c "import markdown; markdown.markdown(open('README.md').read())"
+
+  # Job 6: Performance Benchmarks
+  performance:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest-benchmark memory-profiler
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: ⚡ Run performance benchmarks
+      run: |
+        cd subscan
+        pytest tests/performance/ -v --benchmark-json=benchmark.json || true
+        
+    - name: 📊 Upload benchmark results
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: subscan/benchmark.json
+
+  # Job 7: Build Distribution
+  build:
+    name: 📦 Build Distribution
+    runs-on: ubuntu-latest
+    needs: [code-quality, test]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+        
+    - name: 🏗️ Build package
+      run: |
+        cd subscan
+        python -m build
+        
+    - name: 🔍 Check distribution
+      run: |
+        cd subscan
+        twine check dist/*
+        
+    - name: 📁 Upload distribution artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: distribution
+        path: subscan/dist/
+
+  # Job 8: Notify on Failure
+  notify-failure:
+    name: 📧 Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [code-quality, type-checking, test, integration-tests, docs, build]
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: 📧 Create GitHub Issue on Failure
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `CI/CD Pipeline Failure - ${context.sha.substring(0, 7)}`,
+            body: `The CI/CD pipeline failed for commit ${context.sha}.\n\nWorkflow: ${context.workflow}\nRun: ${context.runNumber}\n\nPlease investigate: ${context.payload.repository.html_url}/actions/runs/${context.runId}`,
+            labels: ['bug', 'ci-failure', 'urgent']
+          })

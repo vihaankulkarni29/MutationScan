@@ -5,6 +5,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Pipeline Status](https://img.shields.io/badge/pipeline-production%20ready-green.svg)](https://github.com/vihaankulkarni29/MutationScan)
+[![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Type Hints](https://img.shields.io/badge/typing-mypy-blue.svg)](https://mypy.readthedocs.io/)
+[![Tests](https://img.shields.io/badge/tests-pytest-orange.svg)](https://docs.pytest.org/)
+[![Documentation](https://img.shields.io/badge/docs-comprehensive-brightgreen.svg)](https://github.com/vihaankulkarni29/MutationScan/blob/main/README.md)
 
 MutationScan is a state-of-the-art bioinformatics pipeline designed for comprehensive antimicrobial resistance (AMR) analysis. It provides end-to-end functionality from genome acquisition to interactive visualization, making it an essential tool for researchers studying bacterial resistance mechanisms.
 
@@ -214,7 +218,9 @@ python -m pytest --cov=subscan subscan/tests/
 - **[User Guide](docs/user_guide.md)**: Comprehensive usage instructions
 - **[API Reference](docs/api_reference.md)**: Detailed module documentation
 - **[Tutorial](docs/tutorial.md)**: Step-by-step walkthrough with example data
-- **[Contributing](docs/contributing.md)**: Guidelines for contributors
+- **[Contributing Guidelines](CONTRIBUTING.md)**: Guidelines for contributors
+- **[Changelog](CHANGELOG.md)**: Version history and release notes
+- **[Security Policy](SECURITY.md)**: Security considerations and reporting
 
 ## 🤝 Contributing
 

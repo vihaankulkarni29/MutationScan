@@ -1,0 +1,177 @@
+# GitHub repository configuration
+# This file defines repository-level settings and can be used with GitHub CLI or automation
+
+repository:
+  name: "MutationScan"
+  description: "🧬 A comprehensive bioinformatics pipeline for antimicrobial resistance analysis"
+  homepage: "https://github.com/vihaankulkarni29/MutationScan"
+  topics:
+    - bioinformatics
+    - antimicrobial-resistance
+    - genomics
+    - mutation-analysis
+    - pipeline
+    - python
+    - emboss
+    - ncbi
+    - card-database
+    - computational-biology
+    - research-tool
+    - amr-analysis
+    - sequence-alignment
+    - data-visualization
+    - plotly
+
+  # Repository settings
+  private: false
+  has_issues: true
+  has_projects: true
+  has_wiki: false
+  has_pages: false
+  has_downloads: true
+  
+  # Branch protection and merge settings
+  default_branch: "main"
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: true
+  delete_branch_on_merge: true
+  
+  # Security settings
+  vulnerability_alerts: true
+  automated_security_fixes: true
+
+# Branch protection rules
+branch_protection:
+  main:
+    required_status_checks:
+      strict: true
+      contexts:
+        - "🔍 Code Quality"
+        - "🔍 Type Checking" 
+        - "🧪 Test Suite (ubuntu-latest, 3.9)"
+        - "🔗 Integration Tests"
+    enforce_admins: false
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: false
+    restrictions: null
+    allow_force_pushes: false
+    allow_deletions: false
+
+# Issue and PR labels
+labels:
+  # Type labels
+  - name: "bug"
+    color: "d73a4a"
+    description: "Something isn't working"
+  - name: "enhancement"
+    color: "a2eeef"
+    description: "New feature or request"
+  - name: "documentation"
+    color: "0075ca"
+    description: "Improvements or additions to documentation"
+  - name: "question"
+    color: "d876e3"
+    description: "Further information is requested"
+  
+  # Priority labels
+  - name: "priority: low"
+    color: "009800"
+    description: "Low priority issue"
+  - name: "priority: medium"
+    color: "fbca04"
+    description: "Medium priority issue"
+  - name: "priority: high"
+    color: "eb6420"
+    description: "High priority issue"
+  - name: "priority: critical"
+    color: "e11d21"
+    description: "Critical priority issue"
+  
+  # Component labels
+  - name: "domino-1-harvester"
+    color: "5319e7"
+    description: "Issues related to NCBI genome harvesting"
+  - name: "domino-2-annotator"
+    color: "5319e7"
+    description: "Issues related to AMR gene annotation"
+  - name: "domino-3-extractor"
+    color: "5319e7"
+    description: "Issues related to sequence extraction"
+  - name: "domino-4-aligner"
+    color: "5319e7"
+    description: "Issues related to sequence alignment"
+  - name: "domino-5-analyzer"
+    color: "5319e7"
+    description: "Issues related to mutation analysis"
+  - name: "domino-6-cooccurrence"
+    color: "5319e7"
+    description: "Issues related to co-occurrence analysis"
+  - name: "domino-7-reporter"
+    color: "5319e7"
+    description: "Issues related to HTML report generation"
+  - name: "pipeline-orchestrator"
+    color: "5319e7"
+    description: "Issues related to pipeline coordination"
+  
+  # Status labels
+  - name: "needs-triage"
+    color: "ffffff"
+    description: "Needs initial review and categorization"
+  - name: "needs-review"
+    color: "ffffff"
+    description: "Needs review from maintainers"
+  - name: "needs-testing"
+    color: "ffffff"
+    description: "Needs testing or validation"
+  - name: "blocked"
+    color: "e11d21"
+    description: "Progress blocked by external dependency"
+  - name: "wontfix"
+    color: "ffffff"
+    description: "This will not be worked on"
+  - name: "duplicate"
+    color: "cfd3d7"
+    description: "This issue or pull request already exists"
+  
+  # Good first issue
+  - name: "good first issue"
+    color: "7057ff"
+    description: "Good for newcomers"
+  - name: "help wanted"
+    color: "008672"
+    description: "Extra attention is needed"
+  
+  # Special labels
+  - name: "announcement"
+    color: "0e8a16"
+    description: "Project announcements"
+  - name: "release"
+    color: "0e8a16"
+    description: "Related to releases"
+  - name: "ci-failure"
+    color: "e11d21"
+    description: "CI/CD pipeline failure"
+  - name: "performance"
+    color: "006b75"
+    description: "Performance related issues"
+  - name: "security"
+    color: "d93f0b"
+    description: "Security related issues"
+
+# Milestones
+milestones:
+  - title: "v1.1.0 - Enhanced Performance"
+    description: "Performance improvements and optimization features"
+    due_on: "2025-12-31"
+    state: "open"
+  - title: "v1.2.0 - Extended Integrations" 
+    description: "Additional database integrations and tool compatibility"
+    due_on: "2026-03-31"
+    state: "open"
+  - title: "v2.0.0 - Major Architecture Update"
+    description: "Major architectural improvements and new features"
+    due_on: "2026-06-30"
+    state: "open"

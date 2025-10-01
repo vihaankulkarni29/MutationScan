@@ -1,0 +1,37 @@
+# Configuration for welcome bot - https://github.com/behaviorbot/welcome
+
+# Configuration for new issue welcomes
+newIssueWelcomeComment: >
+  🎉 Thanks for opening your first issue in MutationScan! 
+  
+  We appreciate you taking the time to report this. A maintainer will review your issue and respond as soon as possible.
+  
+  In the meantime, please make sure you've provided all the requested information in the issue template.
+  
+  🧬 Happy analyzing!
+
+# Configuration for new pull request welcomes  
+newPRWelcomeComment: >
+  🎉 Thanks for opening your first pull request in MutationScan!
+  
+  We appreciate your contribution to the project. A maintainer will review your changes and provide feedback.
+  
+  Please make sure you've:
+  - [ ] Followed our [contributing guidelines](https://github.com/vihaankulkarni29/MutationScan/blob/main/CONTRIBUTING.md)
+  - [ ] Added or updated tests for your changes
+  - [ ] Updated documentation if necessary
+  
+  🧬 Welcome to the MutationScan community!
+
+# Configuration for first-time contributor PRs merges
+firstPRMergeComment: >
+  🎉 Congratulations on merging your first pull request! 
+  
+  Thank you for contributing to MutationScan. Your contribution helps advance antimicrobial resistance research.
+  
+  We'd love to have you continue contributing. Feel free to:
+  - Look for issues labeled `good first issue` or `help wanted`
+  - Join our discussions for questions and ideas
+  - Help improve documentation
+  
+  🧬 Welcome to the contributor community!

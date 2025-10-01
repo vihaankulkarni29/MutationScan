@@ -1,0 +1,308 @@
+name: 🚀 Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.1)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  # Job 1: Validate Release
+  validate:
+    name: 🔍 Validate Release
+    runs-on: ubuntu-latest
+    
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: 🔍 Extract version information
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+          IS_PRERELEASE="${{ github.event.inputs.prerelease }}"
+        else
+          VERSION=${GITHUB_REF#refs/tags/v}
+          if [[ $VERSION == *"-"* ]]; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+        echo "Release version: $VERSION"
+        echo "Is prerelease: $IS_PRERELEASE"
+        
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        pip install -r requirements.txt
+        cd subscan && pip install -e .
+        
+    - name: 🧪 Run quick validation tests
+      run: |
+        cd subscan
+        pytest tests/unit/ -v --tb=short
+
+  # Job 2: Build Release Assets
+  build:
+    name: 📦 Build Release
+    runs-on: ${{ matrix.os }}
+    needs: validate
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        
+    - name: 📦 Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine wheel
+        
+    - name: 🏗️ Build distribution
+      run: |
+        cd subscan
+        python -m build
+        
+    - name: 🔍 Verify build
+      run: |
+        cd subscan
+        twine check dist/*
+        
+    - name: 📁 Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dist-${{ matrix.os }}
+        path: subscan/dist/
+
+  # Job 3: Generate Release Notes
+  release-notes:
+    name: 📝 Generate Release Notes
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    outputs:
+      release_notes: ${{ steps.notes.outputs.release_notes }}
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: 📝 Generate release notes
+      id: notes
+      run: |
+        VERSION="${{ needs.validate.outputs.version }}"
+        
+        # Get the latest tag before this one
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        
+        # Generate changelog
+        if [[ -n "$PREVIOUS_TAG" ]]; then
+          echo "## Changes since $PREVIOUS_TAG" > release_notes.md
+          echo "" >> release_notes.md
+          
+          # Get commits since last tag
+          git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..HEAD >> release_notes.md
+        else
+          echo "## Initial Release" > release_notes.md
+          echo "" >> release_notes.md
+          echo "This is the first release of MutationScan v$VERSION!" >> release_notes.md
+        fi
+        
+        echo "" >> release_notes.md
+        echo "## 🧬 MutationScan v$VERSION" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### 🎯 Key Features" >> release_notes.md
+        echo "- Complete 7-domino AMR analysis pipeline" >> release_notes.md
+        echo "- Interactive HTML reports with Plotly visualizations" >> release_notes.md
+        echo "- Parallel processing for large-scale analysis" >> release_notes.md
+        echo "- Integration with NCBI, CARD, and EMBOSS" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### 📦 Installation" >> release_notes.md
+        echo "\`\`\`bash" >> release_notes.md
+        echo "git clone https://github.com/vihaankulkarni29/MutationScan.git" >> release_notes.md
+        echo "cd MutationScan" >> release_notes.md
+        echo "pip install -r requirements.txt" >> release_notes.md
+        echo "cd subscan && pip install -e ." >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "### 🚀 Quick Start" >> release_notes.md
+        echo "\`\`\`bash" >> release_notes.md
+        echo "python subscan/tools/run_harvester.py --accessions \"NC_000913.3\" --output-dir results" >> release_notes.md
+        echo "\`\`\`" >> release_notes.md
+        echo "" >> release_notes.md
+        echo "For complete documentation, see the [README](https://github.com/vihaankulkarni29/MutationScan/blob/main/README.md)." >> release_notes.md
+        
+        # Set output for next job
+        {
+          echo 'release_notes<<EOF'
+          cat release_notes.md
+          echo EOF
+        } >> $GITHUB_OUTPUT
+        
+    - name: 📁 Upload release notes
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-notes
+        path: release_notes.md
+
+  # Job 4: Create GitHub Release
+  release:
+    name: 🚀 Create Release
+    runs-on: ubuntu-latest
+    needs: [validate, build, release-notes]
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 📁 Download all artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: 📋 Prepare release assets
+      run: |
+        mkdir -p release_assets
+        
+        # Collect all distribution files
+        find . -name "*.whl" -o -name "*.tar.gz" | grep -E "subscan.*\.(whl|tar\.gz)$" | while read file; do
+          cp "$file" release_assets/
+        done
+        
+        # Create source archive
+        git archive --format=tar.gz --prefix=MutationScan-${{ needs.validate.outputs.version }}/ HEAD > release_assets/MutationScan-${{ needs.validate.outputs.version }}-source.tar.gz
+        
+        # List all assets
+        echo "Release assets:"
+        ls -la release_assets/
+        
+    - name: 🚀 Create GitHub Release
+      uses: actions/create-release@v1
+      id: create_release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ needs.validate.outputs.version }}
+        release_name: MutationScan v${{ needs.validate.outputs.version }}
+        body: ${{ needs.release-notes.outputs.release_notes }}
+        draft: false
+        prerelease: ${{ needs.validate.outputs.is_prerelease }}
+        
+    - name: 📎 Upload Release Assets
+      run: |
+        for asset in release_assets/*; do
+          echo "Uploading $asset"
+          gh release upload v${{ needs.validate.outputs.version }} "$asset"
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 5: Update Documentation
+  update-docs:
+    name: 📚 Update Documentation
+    runs-on: ubuntu-latest
+    needs: [validate, release]
+    if: needs.validate.outputs.is_prerelease == 'false'
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 🔄 Update version references
+      run: |
+        VERSION="${{ needs.validate.outputs.version }}"
+        
+        # Update README badge
+        sed -i "s/version-[^-]*-/version-$VERSION-/" README.md
+        
+        # Update CHANGELOG.md
+        sed -i "s/## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $(date +%Y-%m-%d)/" CHANGELOG.md
+        
+    - name: 📝 Commit documentation updates
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md CHANGELOG.md
+        git commit -m "docs: update version references for v${{ needs.validate.outputs.version }}" || exit 0
+        git push
+
+  # Job 6: Notify Success
+  notify:
+    name: 📢 Notify Release
+    runs-on: ubuntu-latest
+    needs: [validate, release, update-docs]
+    if: always() && needs.release.result == 'success'
+    
+    steps:
+    - name: 📢 Create announcement issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const version = '${{ needs.validate.outputs.version }}';
+          const isPrerelease = '${{ needs.validate.outputs.is_prerelease }}' === 'true';
+          
+          const title = `🚀 ${isPrerelease ? 'Pre-release' : 'Release'} v${version} is now available!`;
+          const body = `
+          ## 🎉 MutationScan v${version} has been released!
+          
+          ${isPrerelease ? '⚠️ This is a pre-release version.' : '✅ This is a stable release.'}
+          
+          ### 📥 Download
+          - [Release page](https://github.com/vihaankulkarni29/MutationScan/releases/tag/v${version})
+          - [Source code](https://github.com/vihaankulkarni29/MutationScan/archive/v${version}.tar.gz)
+          
+          ### 📚 Documentation
+          - [README](https://github.com/vihaankulkarni29/MutationScan/blob/main/README.md)
+          - [Changelog](https://github.com/vihaankulkarni29/MutationScan/blob/main/CHANGELOG.md)
+          
+          ### 🐛 Issues
+          If you encounter any issues with this release, please [create an issue](https://github.com/vihaankulkarni29/MutationScan/issues/new/choose).
+          
+          **Happy analyzing! 🧬**
+          `;
+          
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['announcement', 'release']
+          });
