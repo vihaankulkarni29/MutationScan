@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "subscan"
 version = "1.0.0"
 authors = [
-  { name="Vihaan Kulkarni", email="vihaankulkarni29@gmail.com" },
+  { name="Your Name", email="youremail@example.com" },
 ]
 description = "A modular pipeline for targeted, reference-driven mutation analysis of AMR genes."
 readme = "README.md"
