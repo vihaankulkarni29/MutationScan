@@ -46,6 +46,8 @@ python -c "import subscan; print('[OK] MutationScan installed successfully!')"
 REM Create batch launcher
 echo Creating launcher...
 cd ..
+
+REM Create batch file launcher
 echo @echo off > mutationscan.bat
 echo REM MutationScan Launcher >> mutationscan.bat
 echo echo MutationScan Pipeline Launcher >> mutationscan.bat
@@ -66,12 +68,14 @@ echo ^) >> mutationscan.bat
 echo if "%%~1"=="" ( >> mutationscan.bat
 echo     python subscan\tools\run_pipeline.py --help >> mutationscan.bat
 echo     echo. >> mutationscan.bat
-echo     echo Example: mutationscan.bat --accessions file.txt --genes genes.txt --output results\ >> mutationscan.bat
+echo     echo Example: .\mutationscan.bat --accessions file.txt --genes genes.txt --output results\ >> mutationscan.bat
 echo     pause >> mutationscan.bat
 echo ^) else ( >> mutationscan.bat
 echo     python subscan\tools\run_pipeline.py %%* >> mutationscan.bat
 echo     pause >> mutationscan.bat
 echo ^) >> mutationscan.bat
+
+REM Create PowerShell launcher (already exists as mutationscan.ps1)
 
 echo.
 echo Installation Complete!
@@ -80,9 +84,11 @@ echo.
 echo MutationScan is ready to use!
 echo.
 echo Quick Start:
-echo    1. Open Command Prompt in this directory
-echo    2. Run: mutationscan.bat --help
-echo    3. Analyze genomes: mutationscan.bat --accessions file.txt --genes genes.txt --output results\
+echo    PowerShell users: .\mutationscan.ps1 --help
+echo    Command Prompt users: .\mutationscan.bat --help
+echo    
+echo    Example analysis:
+echo    .\mutationscan.ps1 --accessions file.txt --genes genes.txt --output results\
 echo.
 echo Documentation: https://github.com/vihaankulkarni29/MutationScan
 echo Issues: https://github.com/vihaankulkarni29/MutationScan/issues
