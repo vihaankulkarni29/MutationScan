@@ -31,15 +31,11 @@ RUN conda config --add channels conda-forge && \
 
 # Create a new Conda environment and install system bioinformatics tools
 RUN conda create -n ${CONDA_ENV_NAME} python=3.9 -y && \
-    conda activate ${CONDA_ENV_NAME} && \
     conda install -n ${CONDA_ENV_NAME} -c conda-forge -c bioconda \
     git \
     abricate \
     -y && \
     conda clean -all -y
-
-# Activate the environment for subsequent commands
-SHELL ["conda", "run", "-n", "mutationscan_env", "/bin/bash", "-c"]
 
 # Copy project files (excluding items in .dockerignore)
 COPY . /app/
@@ -52,12 +48,12 @@ WORKDIR /app/subscan
 # 1. Install the subscan package itself
 # 2. Install all Python dependencies from install_requires
 # 3. Use git to clone and install all seven Domino tools from GitHub
-RUN conda run -n ${CONDA_ENV_NAME} pip install .
+RUN /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install .
 
 # Verify installation by checking if key tools are available
-RUN conda run -n ${CONDA_ENV_NAME} python -c "import subscan; print('SubScan installed successfully')" && \
-    conda run -n ${CONDA_ENV_NAME} python -c "import ncbi_genome_extractor; print('NCBI Genome Extractor installed')" && \
-    conda run -n ${CONDA_ENV_NAME} which abricate
+RUN /opt/conda/envs/${CONDA_ENV_NAME}/bin/python -c "import subscan; print('SubScan installed successfully')" && \
+    /opt/conda/envs/${CONDA_ENV_NAME}/bin/python -c "import ncbi_genome_extractor; print('NCBI Genome Extractor installed')" && \
+    /opt/conda/envs/${CONDA_ENV_NAME}/bin/abricate --version
 
 # Set the working directory back to the main app directory
 WORKDIR /app
@@ -70,14 +66,11 @@ RUN chmod +x /app/subscan/tools/run_pipeline.py
 
 # Set the entrypoint to the master orchestrator script
 # This makes the container itself an executable pipeline
-ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "mutationscan_env", "python", "/app/subscan/tools/run_pipeline.py"]
+ENTRYPOINT ["/opt/conda/envs/mutationscan_env/bin/python", "/app/subscan/tools/run_pipeline.py"]
 
 # Default command (can be overridden)
 CMD ["--help"]
 
-# Expose any ports if needed (uncomment if the pipeline includes web services)
-# EXPOSE 8080
-
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD conda run -n ${CONDA_ENV_NAME} python -c "import subscan" || exit 1
+    CMD /opt/conda/envs/${CONDA_ENV_NAME}/bin/python -c "import subscan" || exit 1
