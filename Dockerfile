@@ -20,22 +20,35 @@ RUN apt-get update && apt-get install -y \
     wget \
     curl \
     unzip \
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure Conda channels with strict priority
+# Install mamba for faster and more reliable package management
+RUN conda install mamba -n base -c conda-forge -y
+
+# Configure Conda channels with strict priority and network settings
 RUN conda config --add channels conda-forge && \
     conda config --add channels bioconda && \
     conda config --add channels defaults && \
-    conda config --set channel_priority strict
+    conda config --set channel_priority strict && \
+    conda config --set remote_read_timeout_secs 120 && \
+    conda config --set remote_connect_timeout_secs 30 && \
+    conda config --set remote_max_retries 5
 
-# Create a new Conda environment and install system bioinformatics tools
-RUN conda create -n ${CONDA_ENV_NAME} python=3.9 -y && \
-    conda install -n ${CONDA_ENV_NAME} -c conda-forge -c bioconda \
-    git \
-    abricate \
-    -y && \
-    conda clean -all -y
+# Create a new Conda environment using mamba for better reliability
+RUN mamba create -n ${CONDA_ENV_NAME} python=3.9 -y || \
+    (echo "Retrying environment creation with conda..." && conda create -n ${CONDA_ENV_NAME} python=3.9 -y)
+
+# Install system bioinformatics tools using mamba with retry logic
+RUN mamba install -n ${CONDA_ENV_NAME} -c conda-forge git -y || \
+    (echo "Retrying git installation with conda..." && conda install -n ${CONDA_ENV_NAME} -c conda-forge git -y)
+
+RUN mamba install -n ${CONDA_ENV_NAME} -c bioconda abricate -y || \
+    (echo "Retrying abricate installation with conda..." && conda install -n ${CONDA_ENV_NAME} -c bioconda abricate -y)
+
+# Clean up conda cache
+RUN conda clean -all -y
 
 # Copy project files (excluding items in .dockerignore)
 COPY . /app/
@@ -43,12 +56,13 @@ COPY . /app/
 # Change to the subscan directory where setup.cfg is located
 WORKDIR /app/subscan
 
-# Install the MutationScan pipeline and all dependencies
+# Install the MutationScan pipeline and all dependencies with retry logic
 # This will:
 # 1. Install the subscan package itself
 # 2. Install all Python dependencies from install_requires
 # 3. Use git to clone and install all seven Domino tools from GitHub
-RUN /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install .
+RUN /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install --retries 5 --timeout 300 . || \
+    (echo "Retrying pip installation..." && /opt/conda/envs/${CONDA_ENV_NAME}/bin/pip install --retries 3 --timeout 180 .)
 
 # Verify installation by checking if key tools are available
 RUN /opt/conda/envs/${CONDA_ENV_NAME}/bin/python -c "import subscan; print('SubScan installed successfully')" && \
