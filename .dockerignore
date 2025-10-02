@@ -1,0 +1,106 @@
+# Git-related files and directories
+.git
+.gitignore
+.gitattributes
+.github/
+
+# Local user data and results directories
+data_input/
+data_output/
+results/
+
+# Python cache directories and files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Local virtual environments
+.venv/
+venv/
+.env
+env/
+ENV/
+
+# Documentation and test files
+docs/
+tests/
+*.md
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+
+# IDE configuration folders
+.vscode/
+.idea/
+.vs/
+*.code-workspace
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+*.swp
+*.swo
+*~
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Local configuration files that shouldn't be in production
+config.ini
+local_config.py
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
