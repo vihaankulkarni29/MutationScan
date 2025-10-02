@@ -45,11 +45,33 @@ python -c "import subscan; print('✅ MutationScan installed successfully!')"
 
 REM Create batch launcher
 echo 🚀 Creating launcher...
-cd ..\..
+cd ..
 echo @echo off > mutationscan.bat
-echo cd /d "%~dp0MutationScan" >> mutationscan.bat
+echo REM MutationScan Launcher >> mutationscan.bat
+echo echo 🧬 MutationScan Pipeline Launcher >> mutationscan.bat
+echo echo ================================ >> mutationscan.bat
+echo echo. >> mutationscan.bat
+echo cd /d "%%~dp0MutationScan" >> mutationscan.bat
+echo if errorlevel 1 ( >> mutationscan.bat
+echo     echo ❌ ERROR: Could not find MutationScan directory >> mutationscan.bat
+echo     pause >> mutationscan.bat
+echo     exit /b 1 >> mutationscan.bat
+echo ^) >> mutationscan.bat
 echo call mutationscan_env\Scripts\activate.bat >> mutationscan.bat
-echo python subscan\tools\run_pipeline.py %%* >> mutationscan.bat
+echo if errorlevel 1 ( >> mutationscan.bat
+echo     echo ❌ ERROR: Could not activate virtual environment >> mutationscan.bat
+echo     pause >> mutationscan.bat
+echo     exit /b 1 >> mutationscan.bat
+echo ^) >> mutationscan.bat
+echo if "%%~1"=="" ( >> mutationscan.bat
+echo     python subscan\tools\run_pipeline.py --help >> mutationscan.bat
+echo     echo. >> mutationscan.bat
+echo     echo 💡 Example: mutationscan.bat --accessions file.txt --genes genes.txt --output results\ >> mutationscan.bat
+echo     pause >> mutationscan.bat
+echo ^) else ( >> mutationscan.bat
+echo     python subscan\tools\run_pipeline.py %%* >> mutationscan.bat
+echo     pause >> mutationscan.bat
+echo ^) >> mutationscan.bat
 
 echo.
 echo 🎉 Installation Complete!
