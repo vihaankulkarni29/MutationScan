@@ -64,24 +64,27 @@ def download_single_genome(
         session = requests.Session()
         session.headers.update({"User-Agent": f"NCBIExtractor/1.0 (mailto:{email})"})
 
-        # Download FASTA file
+        # First, extract metadata to get accession for proper naming
+        metadata = _extract_single_genome_metadata(session, genome_id, email, api_key)
+
+        if not metadata:
+            logging.warning(f"Failed to extract metadata for genome {genome_id}")
+            return None
+
+        # Get accession for filename (fallback to genome_id if accession not found)
+        accession = metadata.get("accession") or genome_id
+
+        # Download FASTA file with accession-based naming
         fasta_success = _download_fasta_worker(
-            session, genome_id, output_path, email, api_key, retries
+            session, genome_id, accession, output_path, email, api_key, retries
         )
 
         if not fasta_success:
             logging.warning(f"Failed to download FASTA for genome {genome_id}")
             return None
 
-        # Extract metadata for this genome
-        metadata = _extract_single_genome_metadata(session, genome_id, email, api_key)
-
-        if metadata:
-            logging.info(f"Successfully downloaded and processed genome {genome_id}")
-            return metadata
-        else:
-            logging.warning(f"Failed to extract metadata for genome {genome_id}")
-            return None
+        logging.info(f"Successfully downloaded and processed genome {genome_id} (accession: {accession})")
+        return metadata
 
     except Exception as e:
         logging.warning(f"Unexpected error processing genome {genome_id}: {e}")
@@ -91,6 +94,7 @@ def download_single_genome(
 def _download_fasta_worker(
     session: requests.Session,
     genome_id: str,
+    accession: str,
     output_dir: str,
     email: str,
     api_key: Optional[str],
@@ -115,7 +119,7 @@ def _download_fasta_worker(
             )
             response.raise_for_status()
 
-            filename = f"{genome_id}.fasta"
+            filename = f"{accession}.fasta"
             filepath = os.path.join(output_dir, filename)
 
             # Download with progress bar for large files
@@ -269,6 +273,10 @@ class NCBIExtractor:
         """Download FASTA sequence for a single genome ID"""
         os.makedirs(output_dir, exist_ok=True)
 
+        # First get metadata to determine accession for filename
+        metadata = self._parse_docsum_metadata_for_id(genome_id)
+        accession = metadata.get("accession") if metadata else genome_id
+
         params = {
             "db": "nuccore",
             "id": genome_id,
@@ -286,7 +294,7 @@ class NCBIExtractor:
                 if not response:
                     continue
 
-                filename = f"{genome_id}.fasta"
+                filename = f"{accession}.fasta"
                 filepath = os.path.join(output_dir, filename)
 
                 # Download with progress bar for large files
@@ -527,8 +535,37 @@ class NCBIExtractor:
 
         return min(score, 10)  # Cap at 10
 
+    def _parse_docsum_metadata_for_id(self, genome_id: str) -> Optional[Dict[str, Any]]:
+        """Parse metadata for a single genome ID using multi-step fetching"""
+        try:
+            # Step 1: Get primary summary from NCBI
+            summary_url = NCBI_BASE_URL + "esummary.fcgi"
+            params = {
+                "db": "nuccore",
+                "id": genome_id,
+                "retmode": "xml",
+                "email": self.email,
+                "api_key": self.api_key if self.api_key else None,
+            }
+
+            params = {k: v for k, v in params.items() if v is not None}
+            response = self.session.get(summary_url, params=params, timeout=30)
+            response.raise_for_status()
+
+            root = ET.fromstring(response.text)
+            docsum = root.find(".//DocSum")
+
+            if docsum is not None:
+                return self._parse_docsum_metadata(docsum)
+            else:
+                return None
+
+        except Exception as e:
+            logging.warning(f"Failed to parse metadata for {genome_id}: {e}")
+            return None
+
     def _parse_docsum_metadata(self, docsum: ET.Element) -> Dict[str, Any]:
-        """Parse metadata from NCBI DocSum XML"""
+        """Parse metadata from NCBI DocSum XML with enhanced multi-step fetching"""
         metadata = {
             "genome_id": None,
             "accession": None,
@@ -538,6 +575,9 @@ class NCBIExtractor:
             "species": None,
             "biosample": None,
             "bioproject": None,
+            "bioproject_accession": None,
+            "bioproject_title": None,
+            "bioproject_description": None,
             "collection_date": None,
             "country": None,
             "host": None,
@@ -571,10 +611,41 @@ class NCBIExtractor:
             elif name == "UpdateDate":
                 metadata["update_date"] = item.text
 
+        # Resolve BioSample/BioProject via ELink if missing from DocSum
+        if not metadata.get("biosample") or not metadata.get("bioproject"):
+            try:
+                resolved = self._resolve_ids_via_elink(metadata.get("genome_id"))
+                if resolved.get("biosample") and not metadata.get("biosample"):
+                    metadata["biosample"] = resolved["biosample"]
+                if resolved.get("bioproject") and not metadata.get("bioproject"):
+                    metadata["bioproject"] = resolved["bioproject"]
+            except Exception as e:
+                logging.debug(f"ELink resolution failed for {metadata.get('genome_id')}: {e}")
+
+        # Step 2: Enhanced multi-step metadata fetching
         # Try to get additional metadata from BioSample if available
         if metadata["biosample"]:
             biosample_metadata = self._get_biosample_metadata(metadata["biosample"])
-            metadata.update(biosample_metadata)
+            # Update with key AMR-relevant fields from BioSample
+            for key in ["collection_date", "country", "host", "isolation_source", "mic_data", "resistance_phenotype", "antibiotic_resistance"]:
+                if biosample_metadata.get(key):
+                    metadata[key] = biosample_metadata[key]
+
+            # If BioProject was not found in DocSum but is present in BioSample, adopt it
+            if not metadata.get("bioproject") and biosample_metadata.get("bioproject"):
+                metadata["bioproject"] = biosample_metadata.get("bioproject")
+
+        # Step 3: Retrieve BioProject details if available from either source
+        if metadata.get("bioproject"):
+            bioproject_metadata = self._get_bioproject_metadata(metadata["bioproject"])
+            # Do not overwrite the identifier; enrich with descriptive fields
+            for key in [
+                "bioproject_accession",
+                "bioproject_title",
+                "bioproject_description",
+            ]:
+                if bioproject_metadata.get(key):
+                    metadata[key] = bioproject_metadata[key]
 
         return metadata
 
@@ -632,7 +703,8 @@ class NCBIExtractor:
 
             if response:
                 # Parse BioSample XML for additional metadata
-                metadata.update(self._parse_biosample_xml(response.text))
+                biosample_parsed = self._parse_biosample_xml(response.text)
+                metadata.update(biosample_parsed)
 
         except Exception as e:
             logging.warning(f"Failed to get BioSample metadata for {biosample_id}: {e}")
@@ -646,35 +718,33 @@ class NCBIExtractor:
         try:
             root = ET.fromstring(xml_content)
 
-            # Extract collection date
-            collection_date = root.find(
-                './/Attribute[@attribute_name="collection_date"]'
-            )
-            if collection_date is not None:
-                metadata["collection_date"] = collection_date.text
+            # Namespace-agnostic scan for Attribute elements
+            def iter_attributes():
+                for elem in root.iter():
+                    tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                    if tag == 'Attribute':
+                        yield elem
 
-            # Extract country
-            country = root.find('.//Attribute[@attribute_name="geo_loc_name"]')
-            if country is not None:
-                metadata["country"] = country.text
-
-            # Extract host
-            host = root.find('.//Attribute[@attribute_name="host"]')
-            if host is not None:
-                metadata["host"] = host.text
-
-            # Extract isolation source
-            isolation = root.find('.//Attribute[@attribute_name="isolation_source"]')
-            if isolation is not None:
-                metadata["isolation_source"] = isolation.text
+            # Extract key attributes
+            for attr in iter_attributes():
+                name = (attr.get("attribute_name") or attr.get("harmonized_name") or "").lower()
+                value = attr.text or ""
+                if name == "collection_date" and value:
+                    metadata["collection_date"] = value
+                elif name in ("geo_loc_name", "country") and value:
+                    metadata["country"] = value
+                elif name == "host" and value:
+                    metadata["host"] = value
+                elif name == "isolation_source" and value:
+                    metadata["isolation_source"] = value
 
             # Extract MIC data and resistance information
             mic_data = []
             resistance_phenotype = []
             antibiotic_resistance = []
 
-            for attr in root.findall(".//Attribute"):
-                attr_name = attr.get("attribute_name", "").lower()
+            for attr in iter_attributes():
+                attr_name = (attr.get("attribute_name") or attr.get("harmonized_name") or "").lower()
                 attr_value = attr.text or ""
 
                 # MIC data patterns
@@ -722,6 +792,43 @@ class NCBIExtractor:
                 metadata["resistance_phenotype"] = resistance_phenotype
             if antibiotic_resistance:
                 metadata["antibiotic_resistance"] = antibiotic_resistance
+
+            # Try to locate linked BioProject ID within BioSample XML
+            # 1) Entrez links style (namespace-agnostic)
+            for link in root.iter():
+                tag = link.tag.split('}')[-1] if '}' in link.tag else link.tag
+                if tag == 'Link':
+                    link_type = (link.get('type') or '').lower()
+                    link_db = (link.get('db') or '').lower()
+                    if link_type == 'entrez' and link_db == 'bioproject':
+                        id_elem = None
+                        for child in link:
+                            ctag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                            if ctag == 'Id' and (child.text or '').strip():
+                                id_elem = child
+                                break
+                        if id_elem is not None:
+                            metadata["bioproject"] = id_elem.text.strip()
+                            break
+
+            # 2) Attributes that contain BioProject accession
+            if not metadata.get("bioproject"):
+                for attr in iter_attributes():
+                    if (attr.get("attribute_name") or "").lower() == "bioproject" and (attr.text or "").strip():
+                        metadata["bioproject"] = attr.text.strip()
+                        break
+
+            # 3) Fallback: search any text for PRJ pattern
+            if not metadata.get("bioproject"):
+                prj_match = None
+                for elem in root.iter():
+                    if elem.text:
+                        m = re.search(r"PRJ[NED][A-Z]\d+", elem.text, re.IGNORECASE)
+                        if m:
+                            prj_match = m.group(0)
+                            break
+                if prj_match:
+                    metadata["bioproject"] = prj_match
 
         except ET.ParseError as e:
             logging.warning(f"Failed to parse BioSample XML: {e}")
@@ -817,6 +924,130 @@ class NCBIExtractor:
         except requests.RequestException as e:
             logging.error(f"Request failed: {e}")
             return None
+
+    def _resolve_ids_via_elink(self, nuccore_id: Optional[str]) -> Dict[str, Optional[str]]:
+        """Resolve BioSample and BioProject IDs via ELink from a nuccore id."""
+        resolved: Dict[str, Optional[str]] = {"biosample": None, "bioproject": None}
+        if not nuccore_id:
+            return resolved
+
+        def query_elink(linkname: str) -> Optional[str]:
+            url = NCBI_BASE_URL + "elink.fcgi"
+            params = {
+                "dbfrom": "nuccore",
+                "id": nuccore_id,
+                "linkname": linkname,
+                "retmode": "xml",
+                "email": self.email,
+                "api_key": self.api_key if self.api_key else None,
+            }
+            params = {k: v for k, v in params.items() if v is not None}
+            resp = self._make_request(url, params)
+            if not resp:
+                return None
+            try:
+                root = ET.fromstring(resp.text)
+                for id_elem in root.findall('.//LinkSetDb/Link/Id'):
+                    if id_elem is not None and id_elem.text:
+                        return id_elem.text.strip()
+            except ET.ParseError:
+                return None
+            return None
+
+        # Resolve BioSample
+        biosample_id = query_elink("nuccore_biosample")
+        if biosample_id:
+            resolved["biosample"] = biosample_id
+
+        # Resolve BioProject directly from nuccore; if missing, try via biosample
+        bioproject_id = query_elink("nuccore_bioproject")
+        if not bioproject_id and biosample_id:
+            # biosample -> bioproject
+            url = NCBI_BASE_URL + "elink.fcgi"
+            params = {
+                "dbfrom": "biosample",
+                "id": biosample_id,
+                "linkname": "biosample_bioproject",
+                "retmode": "xml",
+                "email": self.email,
+                "api_key": self.api_key if self.api_key else None,
+            }
+            params = {k: v for k, v in params.items() if v is not None}
+            resp = self._make_request(url, params)
+            if resp:
+                try:
+                    root = ET.fromstring(resp.text)
+                    for id_elem in root.findall('.//LinkSetDb/Link/Id'):
+                        if id_elem is not None and id_elem.text:
+                            bioproject_id = id_elem.text.strip()
+                            break
+                except ET.ParseError:
+                    pass
+
+        if bioproject_id:
+            resolved["bioproject"] = bioproject_id
+
+        return resolved
+
+    def _get_bioproject_metadata(self, bioproject_id: str) -> Dict[str, Any]:
+        """Fetch and parse BioProject metadata using Entrez efetch."""
+        metadata: Dict[str, Any] = {}
+        try:
+            bioproject_url = NCBI_BASE_URL + "efetch.fcgi"
+            params = {
+                "db": "bioproject",
+                "id": bioproject_id,
+                "retmode": "xml",
+                "email": self.email,
+                "api_key": self.api_key if self.api_key else None,
+            }
+            params = {k: v for k, v in params.items() if v is not None}
+            response = self._make_request(bioproject_url, params)
+            if response:
+                metadata.update(self._parse_bioproject_xml(response.text))
+        except Exception as e:
+            logging.warning(
+                f"Failed to get BioProject metadata for {bioproject_id}: {e}"
+            )
+        return metadata
+
+    def _parse_bioproject_xml(self, xml_content: str) -> Dict[str, Any]:
+        """Parse BioProject XML into a compact, publication-friendly subset."""
+        result: Dict[str, Any] = {}
+        try:
+            root = ET.fromstring(xml_content)
+
+            # Accession: Project/ProjectID/ArchiveID@accession
+            acc_elem = root.find('.//Project/ProjectID/ArchiveID')
+            if acc_elem is not None and acc_elem.get('accession'):
+                result["bioproject_accession"] = acc_elem.get('accession')
+
+            # Title: Project/ProjectDescr/Title
+            title_elem = root.find('.//Project/ProjectDescr/Title')
+            if title_elem is not None and title_elem.text:
+                result["bioproject_title"] = title_elem.text.strip()
+
+            # Description: Project/ProjectDescr/Description
+            descr_elem = root.find('.//Project/ProjectDescr/Description')
+            if descr_elem is not None and descr_elem.text:
+                # Keep concise text
+                result["bioproject_description"] = descr_elem.text.strip()
+
+            # Fallback: scan for PRJ accession anywhere
+            if not result.get("bioproject_accession"):
+                prj_match = None
+                for elem in root.iter():
+                    if elem.text:
+                        m = re.search(r"PRJ[NED][A-Z]\d+", elem.text, re.IGNORECASE)
+                        if m:
+                            prj_match = m.group(0)
+                            break
+                if prj_match:
+                    result["bioproject_accession"] = prj_match
+
+        except ET.ParseError as e:
+            logging.warning(f"Failed to parse BioProject XML: {e}")
+        return result
 
 
 def main():

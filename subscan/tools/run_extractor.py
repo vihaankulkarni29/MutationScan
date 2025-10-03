@@ -487,6 +487,11 @@ def main():
     parser = create_argument_parser()
     args = parser.parse_args()
 
+    # Validate the Input Manifest: Check if manifest file exists before processing
+    if not os.path.isfile(args.manifest):
+        print(f"ERROR: Input manifest not found at '{args.manifest}'. This is likely because the previous pipeline step (Annotator) failed.", file=sys.stderr)
+        sys.exit(1)
+
     # Validate arguments
     validate_arguments(args)
 
