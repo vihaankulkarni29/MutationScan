@@ -11,6 +11,18 @@ authors = [
 description = "A modular pipeline for targeted, reference-driven mutation analysis of AMR genes."
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+    "pandas",
+    "biopython",
+    "tqdm",
+    "openpyxl",
+    "requests",
+    "ncbi-genome-extractor @ git+https://github.com/vihaankulkarni29/ncbi_genome_extractor.git",
+    "abricate-automator @ git+https://github.com/vihaankulkarni29/ABRicate-Automator.git",
+    "fasta-aa-extractor @ git+https://github.com/vihaankulkarni29/FastaAAExtractor.git",
+    "wildtype-aligner @ git+https://github.com/vihaankulkarni29/wildtype-aligner.git",
+    "subscan-analyzer @ git+https://github.com/vihaankulkarni29/SubScan.git"
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
