@@ -1,98 +1,131 @@
 @echo off
-REM MutationScan Launcher - Enhanced with error handling
-echo MutationScan Pipeline Launcher
+setlocal enabledelayedexpansion
+
+REM MutationScan Pipeline Launcher
+REM Professional AMR Analysis Pipeline for Windows
+REM Compatible with Windows 10/11
+
+echo.
+echo 🧬 MutationScan Pipeline
 echo ================================
+echo Professional AMR Analysis Pipeline
+echo.
 
-REM Get the directory where this batch file is located
-set SCRIPT_DIR=%~dp0
+REM Get script directory (root of MutationScan repository)
+cd /d "%~dp0"
 
-REM Check if MutationScan directory exists
-if not exist "%SCRIPT_DIR%MutationScan" (
-    echo ERROR: MutationScan directory not found at %SCRIPT_DIR%MutationScan
-    echo    Make sure you're running this from the correct directory
-    echo    Expected structure:
-    echo      Current Directory
-    echo      +-- mutationscan.bat (this file)
-    echo      +-- MutationScan/
+REM Check if this is the correct directory structure
+if not exist "subscan\tools\run_pipeline.py" (
+    echo [❌ ERROR] Invalid directory structure
+    echo    Please ensure you're running this from the MutationScan root directory
+    echo    Expected files:
+    echo      ✓ mutationscan.bat (this file)
+    echo      ✓ subscan\tools\run_pipeline.py
+    echo      ✓ requirements.txt
+    echo.
+    echo    Current directory: %CD%
     pause
     exit /b 1
 )
 
-REM Change to MutationScan directory
-cd /d "%SCRIPT_DIR%MutationScan"
-if errorlevel 1 (
-    echo ERROR: Could not change to MutationScan directory
-    pause
-    exit /b 1
-)
+echo [✅ OK] Found MutationScan directory structure
 
-echo [OK] Found MutationScan directory: %CD%
-
-REM Check if virtual environment exists
+REM Check for virtual environment
 if not exist "mutationscan_env\Scripts\activate.bat" (
-    echo ERROR: Virtual environment not found
+    echo [❌ ERROR] Virtual environment not found
     echo    Expected: mutationscan_env\Scripts\activate.bat
-    echo    Please run the installer again: install.bat
+    echo    Please run the installer first:
+    echo      .\install.bat
+    echo.
     pause
     exit /b 1
 )
 
-echo [OK] Found virtual environment
+echo [✅ OK] Found virtual environment
 
 REM Activate virtual environment
-echo Activating Python environment...
+echo 🔧 Activating Python environment...
 call mutationscan_env\Scripts\activate.bat
 if errorlevel 1 (
-    echo ERROR: Could not activate virtual environment
+    echo [❌ ERROR] Could not activate virtual environment
+    echo    Try running: .\install.bat
     pause
     exit /b 1
 )
 
-echo [OK] Virtual environment activated
+echo [✅ OK] Virtual environment activated
 
-REM Check if subscan directory exists
-if not exist "subscan\tools\run_pipeline.py" (
-    echo ERROR: Pipeline script not found
-    echo    Expected: subscan\tools\run_pipeline.py
-    echo    Current directory: %CD%
-    dir subscan\tools\ 2>nul
+REM Verify Python and key packages
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo [❌ ERROR] Python not found or not working
+    echo    Please ensure Python is installed and in PATH
     pause
     exit /b 1
 )
 
-echo [OK] Found pipeline script
+python -c "import tqdm; print('tqdm OK')" >nul 2>&1
+if errorlevel 1 (
+    echo [⚠️  WARNING] Missing dependencies detected
+    echo    Installing missing packages...
+    pip install -r requirements.txt
+    if errorlevel 1 (
+        echo [❌ ERROR] Failed to install dependencies
+        pause
+        exit /b 1
+    )
+    echo [✅ OK] Dependencies installed
+) else (
+    echo [✅ OK] Python dependencies verified
+)
 
 REM Show help if no arguments provided
 if "%~1"=="" (
-    echo Showing help - add your arguments to run analysis
+    echo.
+    echo 📖 MutationScan Pipeline Help
+    echo =============================
     echo.
     python subscan\tools\run_pipeline.py --help
     echo.
-    echo Example usage:
-    echo    mutationscan.bat --accessions data_input\accessions.txt --genes data_input\genes.txt --output results
+    echo 💡 Quick Start Examples:
+    echo    # Basic analysis with sample data:
+    echo    .\mutationscan.bat --accessions examples\demo_accessions.txt --gene-list examples\gene_list.txt --email your@email.com --output-dir results --sepi-species "Escherichia coli"
     echo.
-    echo Press any key to close...
-    pause >nul
+    echo    # Analysis with your own data:
+    echo    .\mutationscan.bat --accessions data_input\accession_list.txt --gene-list data_input\gene_list.txt --email your@email.com --output-dir results
+    echo.
+    echo 📚 For more information, see README.md
+    echo.
+    pause
     exit /b 0
 )
 
 REM Run the pipeline with arguments
-echo Running MutationScan pipeline...
+echo.
+echo 🚀 Starting MutationScan Pipeline...
 echo Command: python subscan\tools\run_pipeline.py %*
 echo.
 
-python subscan\tools\run_pipeline.py %*
+set start_time=%time%
 
-REM Check exit code
-if errorlevel 1 (
+python subscan\tools\run_pipeline.py %*
+set exit_code=%errorlevel%
+
+set end_time=%time%
+
+echo.
+echo ⏱️  Pipeline completed
+
+if %exit_code% equ 0 (
     echo.
-    echo Pipeline finished with errors (exit code: %errorlevel%)
-    echo    Check the error messages above for details
+    echo 🎉 Pipeline completed successfully!
+    echo    Check the data_output directory for results
 ) else (
     echo.
-    echo Pipeline completed successfully!
+    echo ❌ Pipeline finished with errors (exit code: %exit_code%)
+    echo    Check the error messages above for details
+    echo    For troubleshooting, see README.md or report issues
 )
 
 echo.
-echo Press any key to close...
-pause >nul
+pause

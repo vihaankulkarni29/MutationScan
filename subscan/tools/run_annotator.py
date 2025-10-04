@@ -56,7 +56,22 @@ from datetime import datetime
 from multiprocessing import Pool
 from typing import Dict, List, Tuple, Any
 
-from tqdm import tqdm
+# Preflight dependency guard for tqdm to prevent cryptic crashes
+try:
+    from tqdm import tqdm
+except ImportError as e:
+    sys.stderr.write("\n[ERROR] Missing dependency: tqdm\n")
+    sys.stderr.write(
+        "This tool requires 'tqdm' for progress bars. Install it with:\n"
+    )
+    sys.stderr.write(
+        "    pip install tqdm\n\n"
+    )
+    sys.stderr.write(
+        "If using the bundled environment, run: mutationscan_env/Scripts/pip.exe install tqdm\n\n"
+    )
+    # Exit with non-zero code recognizable by the orchestrator
+    sys.exit(3)
 
 # Add src directory to Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
@@ -221,7 +236,9 @@ def annotate_single_genome(
 
         if use_mock:
             # Use our mock ABRicate script
-            command = ["python3", mock_tool_path, fasta_path, tsv_path]
+            # Use 'python' on Windows, 'python3' on Linux/Mac
+            python_cmd = "python" if sys.platform.startswith("win") else "python3"
+            command = [python_cmd, mock_tool_path, fasta_path, tsv_path]
             result = subprocess.run(
                 command,
                 check=True,

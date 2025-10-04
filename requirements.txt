@@ -1,32 +1,44 @@
-# MutationScan Dependencies
-# Core scientific computing
-pandas>=1.3.0
-numpy>=1.21.0
-biopython>=1.79
+# MutationScan Pipeline - Production Dependencies
+# ===============================================
+# Comprehensive AMR Analysis Pipeline for Windows, Linux, and macOS
+# Install with: pip install -r requirements.txt
 
-# Web and API interactions
-requests>=2.25.0
-urllib3>=1.26.0
+# Core Scientific Computing
+biopython>=1.79,<2.0       # Biological sequence analysis and NCBI integration
+pandas>=1.3.0,<3.0         # Data manipulation and analysis
+numpy>=1.21.0,<2.0         # Numerical computing foundation
 
-# Report generation and visualization
-jinja2>=3.0.0
-plotly>=5.0.0
+# Web and Network Communication
+requests>=2.25.0,<3.0      # HTTP library for NCBI genome downloads
+urllib3>=1.26.0,<3.0       # HTTP client utilities
 
-# File and data processing
-openpyxl>=3.0.0
-xlsxwriter>=3.0.0
+# Progress and User Experience
+tqdm>=4.64.0,<5.0          # Progress bars for long-running operations
+colorama>=0.4.4,<1.0       # Cross-platform colored terminal output
 
-# Command-line interface
-click>=8.0.0
-argparse
+# File and Data Processing
+openpyxl>=3.0.0,<4.0       # Excel file processing
+xlsxwriter>=3.0.0,<4.0     # Excel file creation
 
-# Logging and utilities
-tqdm>=4.60.0
-colorama>=0.4.4
+# Report Generation and Visualization
+jinja2>=3.0.0,<4.0         # HTML template engine for reports
+plotly>=5.6.0,<6.0         # Interactive visualizations in HTML reports
+matplotlib>=3.5.0,<4.0     # Static plotting and visualization
+seaborn>=0.11.0,<1.0       # Statistical data visualization
 
-# Testing (for development)
-pytest>=6.0.0
-pytest-cov>=2.12.0
+# Command-line Interface
+click>=8.0.0,<9.0          # Advanced CLI framework
 
-# Optional: For enhanced performance
-numba>=0.55.0
+# Configuration and Data Validation
+PyYAML>=6.0,<7.0           # YAML configuration files
+jsonschema>=4.4.0,<5.0     # JSON schema validation for manifests
+
+# Performance and Parallel Processing
+joblib>=1.1.0,<2.0         # Parallel processing utilities
+multiprocess>=0.70.0,<1.0  # Enhanced multiprocessing support
+
+# Development and Testing (Optional - uncomment for development)
+# pytest>=7.0.0,<9.0         # Testing framework
+# pytest-cov>=4.0.0,<6.0     # Coverage reporting
+# black>=22.0.0,<24.0        # Code formatting
+# pylint>=2.12.0,<4.0        # Code analysis
