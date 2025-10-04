@@ -105,18 +105,34 @@ python run_demo.py --full-pipeline --output-dir complete_demo
 
 ## 🧪 Testing Examples
 
-### Verification Commands
+# Example Data & Demo Workflow Testing
 
-```bash
-# Test harvester with demo data
-python ../subscan/tools/run_harvester.py --test --quick
+To test the MutationScan pipeline with example data:
 
-# Validate pipeline components
-python -m pytest ../subscan/tests/ -v
+1. Create `examples/demo_accessions.txt` with a few NCBI accessions (one per line):
+   - CP139196.1
+   - CP178438.1
+   - NZ_JAVRGK010000002.1
+   - NZ_JBQGWU010000032.1
+   - NZ_JBQGWV010000050.1
 
-# Check output quality
-python validate_results.py demo_output/
-```
+2. Create `examples/gene_list.txt` with a few gene names (one per line):
+   - acrA
+   - acrB
+   - tolC
+
+3. Run the pipeline:
+   ```bash
+   python subscan/tools/run_pipeline.py --accessions examples/demo_accessions.txt --gene-list examples/gene_list.txt --email you@example.com --output-dir data_output/demo_workflow --sepi-species "Escherichia coli" --threads 2 --verbose
+   ```
+
+4. Check for errors (logic, unicode, syntax, path). If any domino tool is missing, follow the README instructions to install.
+
+5. After testing, delete the demo files to keep the repository clean:
+   - `examples/demo_accessions.txt`
+   - `examples/gene_list.txt`
+
+You can repeat this process any time to validate the pipeline with sample data.
 
 ## 📞 Support
 

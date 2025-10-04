@@ -1,788 +1,275 @@
 #!/usr/bin/env python3
+"""MutationScan Pipeline Orchestrator (clean, ASCII-safe)
+
+Provides two modes:
+  1. Full execution of the 7 domino tools.
+  2. --dry-run structural validation producing placeholder manifests + report.
+
+Domino chain & expected manifests:
+  1 Harvester     -> genome_manifest.json
+  2 Annotator     -> annotation_manifest.json
+  3 Extractor     -> protein_manifest.json
+  4 Aligner       -> alignment_manifest.json
+  5 Analyzer      -> analysis_manifest.json
+  6 CoOccurrence  -> cooccurrence_manifest.json
+  7 Reporter      -> final_report.html (or mutation_analysis_report.html)
 """
-MutationScan Pipeline Orchestrator
-
-This module serves as the main entry point for the complete MutationScan bioinformatics
-pipeline, orchestrating the execution of all seven domino tools in sequence. It manages
-data flow between tools, provides comprehensive progress tracking, and handles error
-recovery for the antimicrobial resistance (AMR) analysis workflow.
-
-The orchestrator ensures proper execution order, validates inter-domino data handoffs,
-and provides a unified interface for researchers to run complete AMR mutation analysis
-from genome accessions to interactive reports.
-
-Pipeline Architecture:
-    Domino 1 (Harvester) → genome_manifest.json →
-    Domino 2 (Annotator) → annotation_manifest.json →
-    Domino 3 (Extractor) → protein_manifest.json →
-    Domino 4 (Aligner) → alignment_manifest.json →
-    Domino 5 (Analyzer) → analysis_manifest.json →
-    Domino 6 (Co-occurrence) → cooccurrence_manifest.json →
-    Domino 7 (Reporter) → Interactive HTML Dashboard
-
-Usage:
-    python run_pipeline.py --accessions accessions.txt --gene-list genes.txt 
-                          --email user@domain.com --output-dir ./results 
-                          --sepi-species "Escherichia coli"
-
-Features:
-    - Automated data flow management between all domino tools
-    - Comprehensive error handling and recovery mechanisms
-    - Progress tracking with estimated completion times
-    - Parallel processing support where applicable
-    - Reference sequence management (SEPI and user-provided)
-    - Detailed logging and audit trails
-
-Author: MutationScan Development Team
-Version: 1.0.0
-"""
+from __future__ import annotations
 
 import argparse
+import json
 import os
-import sys
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List
 
+TOTAL_STAGES = 7
 
 class DominoToolError(Exception):
-    """
-    Custom exception for domino tool execution failures with enhanced debugging information.
-    
-    This exception provides detailed information about which specific domino tool failed,
-    making it easier for users to identify and debug pipeline issues.
-    """
-    
-    def __init__(self, domino_name: str, step_number: int, error_info: Dict[str, Any]) -> None:
-        self.domino_name = domino_name
-        self.step_number = step_number
-        self.error_info = error_info
-        
-        # Create detailed error message
-        message = f"\n❌ DOMINO TOOL FAILURE: {domino_name} (Step {step_number}/7)\n"
-        message += f"   🔧 Tool Script: {error_info['tool_script']}\n"
-        message += f"   ⏱️  Execution Time: {error_info['execution_time']}\n"
-        message += f"   📤 Exit Code: {error_info['exit_code']}\n"
-        message += f"   💻 Command: {error_info['command']}\n"
-        
-        if error_info['stderr'] != "No error output captured":
-            message += f"   🚨 Error Output: {error_info['stderr'][:500]}{'...' if len(error_info['stderr']) > 500 else ''}\n"
-        
-        if error_info['stdout'] != "No output captured" and len(error_info['stdout']) > 0:
-            message += f"   📝 Standard Output: {error_info['stdout'][:300]}{'...' if len(error_info['stdout']) > 300 else ''}\n"
-        
-        message += f"   💡 Debug Tip: Check the {step_number:02d}_{domino_name.lower().split(' ')[0]}_results/ directory for more details"
-        
-        super().__init__(message)
+    """Raised when a domino tool returns non-zero exit."""
+    pass
 
-
-def create_argument_parser() -> argparse.ArgumentParser:
-    """
-    Create and configure the master command-line argument parser.
-
-    This parser collects all parameters needed for the complete pipeline run,
-    providing a unified interface for users to configure the entire workflow.
-
-    Returns:
-        argparse.ArgumentParser: Configured argument parser
-    """
-    parser = argparse.ArgumentParser(
-        description="MutationScan Pipeline Orchestrator - Complete AMR Analysis Workflow",
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="MutationScan pipeline orchestrator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Basic pipeline run with SEPI reference mode
-  python run_pipeline.py --accessions research_accessions.txt --gene-list resistance_genes.txt --email researcher@university.edu --output-dir ./pipeline_results --sepi-species "Escherichia coli"
-  
-  # High-performance run with user-provided references
-  python run_pipeline.py --accessions genome_list.txt --gene-list target_genes.txt --email user@domain.com --output-dir ./results --user-reference-dir ./my_references --threads 16
-  
-  # Quick analysis with default settings
-  python run_pipeline.py --accessions short_list.txt --gene-list core_genes.txt --email analyst@lab.org --output-dir ./quick_run --sepi-species "Escherichia coli" --threads 8
-
-Pipeline Stages:
-  [1/7] Harvester    - Extract genomes from NCBI database
-  [2/7] Annotator    - Identify AMR genes using CARD database
-  [3/7] Extractor    - Extract protein sequences for target genes
-  [4/7] Aligner      - Align sequences to wild-type references
-  [5/7] Analyzer     - Detect mutations and variants
-  [6/7] Co-occurrence- Analyze mutation co-occurrence patterns
-  [7/7] Reporter     - Generate interactive HTML dashboard
-
-Output Structure:
-  <output-dir>/
-  └── mutationscan_run_YYYYMMDD_HHMMSS/
-      ├── 01_harvester_results/
-      ├── 02_annotator_results/
-      ├── 03_extractor_results/
-      ├── 04_aligner_results/
-      ├── 05_analyzer_results/
-      ├── 06_cooccurrence_results/
-      ├── 07_reporter_results/
-      └── final_report.html          <- Main result file
-        """,
+        epilog=(
+            "Examples:\n"
+            "  python run_pipeline.py --accessions acc.txt --gene-list genes.txt --email you@lab.org --output-dir run --sepi-species 'Escherichia coli'\n"
+            "  python run_pipeline.py --accessions acc.txt --gene-list genes.txt --email you@lab.org --output-dir dry --sepi-species 'Escherichia coli' --dry-run"
+        ),
     )
+    req = p.add_argument_group("Required")
+    req.add_argument("--accessions", required=True)
+    req.add_argument("--gene-list", required=True)
+    req.add_argument("--email", required=True)
+    req.add_argument("--output-dir", required=True)
+    ref = p.add_mutually_exclusive_group(required=True)
+    ref.add_argument("--user-reference-dir")
+    ref.add_argument("--sepi-species")
+    opt = p.add_argument_group("Optional")
+    opt.add_argument("--threads", type=int, default=4)
+    opt.add_argument("--verbose", action="store_true")
+    opt.add_argument("--open-report", action="store_true")
+    opt.add_argument("--dry-run", action="store_true")
+    return p
 
-    # Required input arguments
-    required = parser.add_argument_group("Required Arguments")
+def validate_inputs(a) -> None:
+    if not os.path.isfile(a.accessions):
+        raise FileNotFoundError(f"Accessions file missing: {a.accessions}\nPlease provide a valid file with NCBI accession numbers, one per line.")
+    if not os.path.isfile(a.gene_list):
+        raise FileNotFoundError(f"Gene list file missing: {a.gene_list}\nPlease provide a valid file with gene names, one per line.")
+    if a.user_reference_dir and not os.path.isdir(a.user_reference_dir):
+        raise FileNotFoundError(f"Reference dir missing: {a.user_reference_dir}\nPlease provide a valid directory containing reference sequences.")
+    if "@" not in a.email:
+        raise ValueError("Invalid email (must contain '@'). Please enter a valid email address for NCBI queries.")
+    # Validate accession file format
+    with open(a.accessions, "r", encoding="utf-8") as f:
+        lines = [line.strip() for line in f if line.strip()]
+        if not lines:
+            raise ValueError(f"Accessions file '{a.accessions}' is empty. Please add at least one NCBI accession number.")
+        for i, line in enumerate(lines, 1):
+            if not (line.startswith("NZ_") or line.startswith("CP") or line.startswith("BA") or line.isalnum()):
+                print(f"Warning: Line {i} in accessions file may not be a valid NCBI accession: '{line}'")
+    # Validate gene list format
+    with open(a.gene_list, "r", encoding="utf-8") as f:
+        genes = [line.strip() for line in f if line.strip()]
+        if not genes:
+            raise ValueError(f"Gene list file '{a.gene_list}' is empty. Please add at least one gene name.")
+        for i, gene in enumerate(genes, 1):
+            if not gene.isalnum():
+                print(f"Warning: Line {i} in gene list may not be a valid gene name: '{gene}'")
 
-    required.add_argument(
-        "--accessions",
-        required=True,
-        help="Path to text file containing NCBI accession numbers (one per line)",
-        metavar="FILE",
-    )
+def make_run_dir(base: str) -> str:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    rd = os.path.join(base, f"mutationscan_run_{ts}")
+    os.makedirs(rd, exist_ok=True)
+    return rd
 
-    required.add_argument(
-        "--gene-list",
-        required=True,
-        help="Path to text file containing target gene names for analysis (one per line)",
-        metavar="FILE",
-    )
+def ensure_manifest(out_dir: str, name: str) -> str:
+    path = os.path.join(out_dir, name)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Expected manifest not found: {path}")
+    return path
 
-    required.add_argument(
-        "--email",
-        required=True,
-        help="Valid email address for NCBI API access (required by NCBI guidelines)",
-        metavar="EMAIL",
-    )
-
-    required.add_argument(
-        "--output-dir",
-        required=True,
-        help="Base directory where all pipeline results will be stored",
-        metavar="DIR",
-    )
-
-    # Reference mode (mutually exclusive group)
-    reference_group = parser.add_mutually_exclusive_group(required=True)
-
-    reference_group.add_argument(
-        "--user-reference-dir",
-        help="Path to directory containing user-provided wild-type reference sequences",
-        metavar="DIR",
-    )
-
-    reference_group.add_argument(
-        "--sepi-species",
-        help="Species name for SEPI wild-type reference lookup (e.g., 'Escherichia coli')",
-        metavar="SPECIES",
-    )
-
-    # Performance and optional arguments
-    optional = parser.add_argument_group("Performance & Optional")
-
-    optional.add_argument(
-        "--threads",
-        type=int,
-        default=4,
-        help="Number of CPU threads to use for parallel processing (default: 4)",
-        metavar="N",
-    )
-
-    optional.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose logging for detailed progress information",
-    )
-
-    optional.add_argument(
-        "--keep-intermediates",
-        action="store_true",
-        help="Keep all intermediate files for debugging (increases disk usage)",
-    )
-
-    optional.add_argument(
-        "--open-report",
-        action="store_true",
-        help="Automatically open the final HTML report in default browser",
-    )
-
-    return parser
-
-
-def validate_input_files(args: argparse.Namespace) -> None:
-    """
-    Validate that all required input files exist and are readable.
-
-    Args:
-        args: Parsed command-line arguments
-
-    Raises:
-        FileNotFoundError: If any required file is missing
-        ValueError: If file format is invalid
-    """
-    # Check accessions file
-    if not os.path.isfile(args.accessions):
-        raise FileNotFoundError(f"Accessions file not found: {args.accessions}")
-
-    # Check gene list file
-    if not os.path.isfile(args.gene_list):
-        raise FileNotFoundError(f"Gene list file not found: {args.gene_list}")
-
-    # Check user reference directory if specified
-    if args.user_reference_dir and not os.path.isdir(args.user_reference_dir):
-        raise FileNotFoundError(
-            f"User reference directory not found: {args.user_reference_dir}"
-        )
-
-    # Validate email format (basic check)
-    if "@" not in args.email or "." not in args.email:
-        raise ValueError(f"Invalid email format: {args.email}")
-
-    print("✅ Input file validation completed successfully")
-
-
-def create_run_directory(base_output_dir: str) -> str:
-    """
-    Create a timestamped subdirectory for this pipeline run.
-
-    Args:
-        base_output_dir: Base output directory path
-
-    Returns:
-        str: Path to the created run-specific directory
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(base_output_dir, f"mutationscan_run_{timestamp}")
-
-    os.makedirs(run_dir, exist_ok=True)
-    print(f"📁 Created pipeline run directory: {run_dir}")
-
-    return run_dir
-
-
-def find_manifest_file(output_dir: str, manifest_pattern: str) -> str:
-    """
-    Find the output manifest file from a domino tool execution.
-
-    Args:
-        output_dir: Directory where domino tool wrote its results
-        manifest_pattern: Expected manifest filename pattern
-
-    Returns:
-        str: Full path to the found manifest file
-
-    Raises:
-        FileNotFoundError: If manifest file cannot be found
-    """
-    manifest_path = os.path.join(output_dir, manifest_pattern)
-
-    if not os.path.isfile(manifest_path):
-        raise FileNotFoundError(f"Expected manifest file not found: {manifest_path}")
-
-    return manifest_path
-
-
-def execute_domino_tool(
-    tool_script: str,
-    tool_args: List[str],
-    domino_name: str,
-    step_number: int,
-    total_steps: int,
-    verbose: bool = False,
-) -> subprocess.CompletedProcess[str]:
-    """
-    Execute a single domino tool with proper error handling and enhanced logging.
-
-    Args:
-        tool_script: Path to the domino tool script
-        tool_args: List of command-line arguments for the tool
-        domino_name: Human-readable name of the domino tool
-        step_number: Current step number (1-based)
-        total_steps: Total number of steps in pipeline
-        verbose: Enable verbose subprocess output
-
-    Returns:
-        subprocess.CompletedProcess: Result of the subprocess execution
-
-    Raises:
-        DominoToolError: If the domino tool fails with enhanced error information
-    """
-    # Enhanced status message with progress bar visualization
-    progress_bar = "█" * step_number + "░" * (total_steps - step_number)
-    percentage = int((step_number / total_steps) * 100)
-
-    print(f"\n🔧 [{step_number}/{total_steps}] {domino_name}")
-    print(f"   Progress: [{progress_bar}] {percentage}%")
-
+def run_tool(script: Path, args_list: List[str], label: str, step: int, verbose: bool) -> None:
+    print(f"\n=== Domino {step}/{TOTAL_STAGES}: {label} ===")
+    cmd = [sys.executable, str(script)] + args_list
     if verbose:
-        print(f"   Command: python {tool_script} {' '.join(tool_args)}")
-
-    # Show estimated time for each step
-    step_start_time = time.time()
-
-    # Construct full command
-    cmd = [sys.executable, tool_script] + tool_args
-
-    # Execute with proper error handling
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-
+        print("  Command:", " ".join(cmd))
+    start = time.time()
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=not verbose,  # Show output in verbose mode
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=True,  # Raises CalledProcessError on non-zero exit
-        )
-
-        # Calculate step execution time
-        step_duration = time.time() - step_start_time
-        minutes = int(step_duration // 60)
-        seconds = int(step_duration % 60)
-
-        print(f"   ✅ Completed in {minutes:02d}:{seconds:02d}")
-        return result
-        
+        subprocess.run(cmd, check=True, text=True)
+        print(f"✅ {label} completed successfully in {time.time() - start:.1f}s.")
     except subprocess.CalledProcessError as e:
-        # Enhanced error handling with specific domino information
-        step_duration = time.time() - step_start_time
-        minutes = int(step_duration // 60)
-        seconds = int(step_duration % 60)
-        
-        # Create detailed error information
-        error_info = {
-            "domino_step": step_number,
-            "domino_name": domino_name,
-            "tool_script": os.path.basename(tool_script),
-            "execution_time": f"{minutes:02d}:{seconds:02d}",
-            "exit_code": e.returncode,
-            "command": ' '.join(e.cmd),
-            "stdout": e.stdout.strip() if e.stdout else "No output captured",
-            "stderr": e.stderr.strip() if e.stderr else "No error output captured"
-        }
-        
-        # Raise custom exception with enhanced information
-        raise DominoToolError(domino_name, step_number, error_info) from e
+        print(f"❌ ERROR in {label} (Domino {step}): Tool failed with exit code {e.returncode}.", file=sys.stderr)
+        print(f"  Command: {' '.join(cmd)}", file=sys.stderr)
+        print("  Please check the output directory and logs for details.", file=sys.stderr)
+        print("  Refer to the README troubleshooting section for help.", file=sys.stderr)
+        raise DominoToolError(f"{label} failed (exit {e.returncode})") from e
 
-
-def run_pipeline_sequence(args: argparse.Namespace, run_directory: str) -> str:
-    """
-    Execute the complete pipeline sequence of domino tools.
-
-    This function orchestrates all seven domino tools in the correct order,
-    managing manifest file handoffs between each stage.
-
-    Args:
-        args: Parsed command-line arguments
-        run_directory: Directory for this specific pipeline run
-
-    Returns:
-        str: Path to the final HTML report
-
-    Raises:
-        subprocess.CalledProcessError: If any domino tool fails
-        FileNotFoundError: If expected manifest files are missing
-    """
-    print("\n" + "🧬" * 25)
-    print("🚀 STARTING MUTATIONSCAN PIPELINE EXECUTION")
-    print("🧬" * 25)
-    print("📋 Pipeline Overview:")
-    print("   🔸 Step 1: Harvester    - Extract genomes from NCBI")
-    print("   🔸 Step 2: Annotator    - Identify AMR genes with CARD")
-    print("   🔸 Step 3: Extractor    - Extract protein sequences")
-    print("   🔸 Step 4: Aligner      - Align to wild-type references")
-    print("   🔸 Step 5: Analyzer     - Detect mutations and variants")
-    print("   🔸 Step 6: Co-occurrence- Analyze mutation patterns")
-    print("   🔸 Step 7: Reporter     - Generate interactive dashboard")
-    print()
-
-    # Get the tools directory path (relative to this script)
-    tools_dir = Path(__file__).parent
-    current_manifest = None
-    pipeline_start_time = time.time()
-
-    # Step 1: Domino 1 - Harvester (NCBI Genome Extraction)
-    print("🧬 PHASE 1: GENOME ACQUISITION")
-    print("-" * 35)
-    harvester_output = os.path.join(run_directory, "01_harvester_results")
-    harvester_args = [
-        "--accessions",
-        args.accessions,
-        "--email",
-        args.email,
-        "--output-dir",
-        harvester_output,
+def dry_run(run_dir: str) -> str:
+    print("Dry-run: generating placeholder manifests")
+    stages = [
+        ("01_harvester_results", "genome_manifest.json"),
+        ("02_annotator_results", "annotation_manifest.json"),
+        ("03_extractor_results", "protein_manifest.json"),
+        ("04_aligner_results", "alignment_manifest.json"),
+        ("05_analyzer_results", "analysis_manifest.json"),
+        ("06_cooccurrence_results", "cooccurrence_manifest.json"),
     ]
+    prev = None
+    for idx, (folder, manifest) in enumerate(stages, start=1):
+        od = os.path.join(run_dir, folder)
+        os.makedirs(od, exist_ok=True)
+        mp = os.path.join(od, manifest)
+        with open(mp, "w", encoding="utf-8") as fh:
+            json.dump({
+                "stage": idx,
+                "manifest": manifest,
+                "placeholder": True,
+                "input_manifest": prev,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }, fh, indent=2)
+        print(f"  [dry-run] {manifest}")
+        prev = mp
+    reporter_dir = os.path.join(run_dir, "07_reporter_results")
+    os.makedirs(reporter_dir, exist_ok=True)
+    report = os.path.join(reporter_dir, "final_report.html")
+    with open(report, "w", encoding="utf-8") as fh:
+        fh.write("<html><body><h1>MutationScan Dry-Run</h1><p>Placeholder.</p></body></html>")
+    print("  [dry-run] final_report.html")
+    print("Dry-run complete")
+    return report
 
-    execute_domino_tool(
-        str(tools_dir / "run_harvester.py"),
-        harvester_args,
-        "Harvester - NCBI Genome Extraction",
-        1,
-        7,
-        args.verbose,
-    )
-
-    # Find genome manifest for next step
-    current_manifest = find_manifest_file(harvester_output, "genome_manifest.json")
-    print(f"   📄 Manifest Generated: {os.path.basename(current_manifest)}")
-
-    # Step 2: Domino 2 - Annotator (AMR Gene Annotation)
-    print("\n🦠 PHASE 2: AMR GENE IDENTIFICATION")
-    print("-" * 35)
-    annotator_output = os.path.join(run_directory, "02_annotator_results")
-    annotator_args = [
-        "--manifest",
-        current_manifest,
-        "--output-dir",
-        annotator_output,
-        "--threads",
-        str(args.threads),
+def execute_pipeline(a, run_dir: str) -> str:
+    if a.dry_run:
+        return dry_run(run_dir)
+    tools = Path(__file__).parent
+    current = None
+    domino_labels = [
+        "Harvester (Genome Download)",
+        "Annotator (AMR Gene Identification)",
+        "Extractor (Sequence Extraction)",
+        "Aligner (Reference Alignment)",
+        "Analyzer (Mutation Analysis)",
+        "CoOccurrence (Pattern Analysis)",
+        "Reporter (HTML Dashboard)"
     ]
-
-    execute_domino_tool(
-        str(tools_dir / "run_annotator.py"),
-        annotator_args,
-        "Annotator - AMR Gene Detection (CARD)",
-        2,
-        7,
-        args.verbose,
-    )
-
-    # Find annotation manifest for next step
-    current_manifest = find_manifest_file(annotator_output, "annotation_manifest.json")
-    print(f"   📄 Manifest Generated: {os.path.basename(current_manifest)}")
-
-    # Step 3: Domino 3 - Extractor (Protein Sequence Extraction)
-    print("\n🧪 PHASE 3: PROTEIN SEQUENCE EXTRACTION")
-    print("-" * 40)
-    extractor_output = os.path.join(run_directory, "03_extractor_results")
-    extractor_args = [
-        "--manifest",
-        current_manifest,
-        "--gene-list",
-        args.gene_list,
-        "--output-dir",
-        extractor_output,
-        "--threads",
-        str(args.threads),
-    ]
-
-    execute_domino_tool(
-        str(tools_dir / "run_extractor.py"),
-        extractor_args,
-        "Extractor - Protein Sequence Extraction",
-        3,
-        7,
-        args.verbose,
-    )
-
-    # Find protein manifest for next step
-    current_manifest = find_manifest_file(extractor_output, "protein_manifest.json")
-    print(f"   📄 Manifest Generated: {os.path.basename(current_manifest)}")
-
-    # Step 4: Domino 4 - Aligner (Wild-Type Sequence Alignment)
-    print("\n🎯 PHASE 4: REFERENCE ALIGNMENT")
-    print("-" * 30)
-    aligner_output = os.path.join(run_directory, "04_aligner_results")
-    aligner_args = [
-        "--manifest",
-        current_manifest,
-        "--output-dir",
-        aligner_output,
-        "--threads",
-        str(args.threads),
-    ]
-
-    # Add reference mode arguments
-    if args.sepi_species:
-        aligner_args.extend(["--sepi-species", args.sepi_species])
-        print(f"   🧬 Reference Mode: SEPI Database ({args.sepi_species})")
+    # 1 Harvester
+    out1 = os.path.join(run_dir, "01_harvester_results")
+    run_tool(tools / "run_harvester.py", ["--accessions", a.accessions, "--email", a.email, "--output-dir", out1], domino_labels[0], 1, a.verbose)
+    current = ensure_manifest(out1, "genome_manifest.json")
+    # 2 Annotator
+    out2 = os.path.join(run_dir, "02_annotator_results")
+    run_tool(tools / "run_annotator.py", ["--manifest", current, "--output-dir", out2, "--threads", str(a.threads)], domino_labels[1], 2, a.verbose)
+    current = ensure_manifest(out2, "annotation_manifest.json")
+    # 3 Extractor
+    out3 = os.path.join(run_dir, "03_extractor_results")
+    run_tool(tools / "run_extractor.py", ["--manifest", current, "--gene-list", a.gene_list, "--output-dir", out3, "--threads", str(a.threads)], domino_labels[2], 3, a.verbose)
+    current = ensure_manifest(out3, "protein_manifest.json")
+    # 4 Aligner
+    out4 = os.path.join(run_dir, "04_aligner_results")
+    align_args = ["--manifest", current, "--output-dir", out4, "--threads", str(a.threads)]
+    if a.sepi_species:
+        align_args += ["--sepi-species", a.sepi_species]
     else:
-        aligner_args.extend(["--user-reference-dir", args.user_reference_dir])
-        print(f"   🧬 Reference Mode: User-Provided ({args.user_reference_dir})")
+        align_args += ["--user-reference-dir", a.user_reference_dir]
+    run_tool(tools / "run_aligner.py", align_args, domino_labels[3], 4, a.verbose)
+    current = ensure_manifest(out4, "alignment_manifest.json")
+    # 5 Analyzer
+    out5 = os.path.join(run_dir, "05_analyzer_results")
+    run_tool(tools / "run_analyzer.py", ["--manifest", current, "--output-dir", out5, "--threads", str(a.threads)], domino_labels[4], 5, a.verbose)
+    current = ensure_manifest(out5, "analysis_manifest.json")
+    # 6 CoOccurrence
+    out6 = os.path.join(run_dir, "06_cooccurrence_results")
+    run_tool(tools / "run_cooccurrence_analyzer.py", ["--manifest", current, "--output-dir", out6, "--threads", str(a.threads)], domino_labels[5], 6, a.verbose)
+    current = ensure_manifest(out6, "cooccurrence_manifest.json")
+    # 7 Reporter
+    out7 = os.path.join(run_dir, "07_reporter_results")
+    run_tool(tools / "run_reporter.py", ["--manifest", current, "--output-dir", out7], domino_labels[6], 7, a.verbose)
+    for name in ("final_report.html", "mutation_analysis_report.html"):
+        candidate = os.path.join(out7, name)
+        if os.path.isfile(candidate):
+            print(f"\n🎉 All domino stages completed! Your results are ready: {candidate}")
+            return candidate
+    print(f"\n⚠️  Final report not found. Check {out7} for output files.")
+    return out7
 
-    execute_domino_tool(
-        str(tools_dir / "run_aligner.py"),
-        aligner_args,
-        "Aligner - Wild-Type Reference Alignment",
-        4,
-        7,
-        args.verbose,
-    )
-
-    # Find alignment manifest for next step
-    current_manifest = find_manifest_file(aligner_output, "alignment_manifest.json")
-    print(f"   📄 Manifest Generated: {os.path.basename(current_manifest)}")
-
-    # Step 5: Domino 5 - Analyzer (Mutation Detection & Analysis)
-    print("\n🔬 PHASE 5: MUTATION ANALYSIS")
-    print("-" * 28)
-    analyzer_output = os.path.join(run_directory, "05_analyzer_results")
-    analyzer_args = [
-        "--manifest",
-        current_manifest,
-        "--output-dir",
-        analyzer_output,
-        "--threads",
-        str(args.threads),
-    ]
-
-    execute_domino_tool(
-        str(tools_dir.parent / "analyzer" / "tools" / "run_analyzer.py"),
-        analyzer_args,
-        "Analyzer - Mutation Detection & Analysis",
-        5,
-        7,
-        args.verbose,
-    )
-
-    # Find analysis manifest for next step
-    current_manifest = find_manifest_file(analyzer_output, "analysis_manifest.json")
-    print(f"   📄 Manifest Generated: {os.path.basename(current_manifest)}")
-
-    # Step 6: Domino 6 - Co-occurrence Analyzer (Mutation Pattern Analysis)
-    print("\n🕸️  PHASE 6: PATTERN ANALYSIS")
-    print("-" * 28)
-    cooccurrence_output = os.path.join(run_directory, "06_cooccurrence_results")
-    cooccurrence_args = [
-        "--manifest",
-        current_manifest,
-        "--output-dir",
-        cooccurrence_output,
-        "--threads",
-        str(args.threads),
-    ]
-
-    execute_domino_tool(
-        str(tools_dir / "run_cooccurrence_analyzer.py"),
-        cooccurrence_args,
-        "Co-occurrence - Mutation Pattern Analysis",
-        6,
-        7,
-        args.verbose,
-    )
-
-    # Find cooccurrence manifest for final step
-    current_manifest = find_manifest_file(
-        cooccurrence_output, "cooccurrence_manifest.json"
-    )
-    print(f"   📄 Manifest Generated: {os.path.basename(current_manifest)}")
-
-    # Step 7: Domino 7 - Reporter (Interactive HTML Dashboard)
-    print("\n📊 PHASE 7: REPORT GENERATION")
-    print("-" * 30)
-    reporter_output = os.path.join(run_directory, "07_reporter_results")
-    reporter_args = ["--manifest", current_manifest, "--output-dir", reporter_output]
-
-    execute_domino_tool(
-        str(tools_dir / "run_reporter.py"),
-        reporter_args,
-        "Reporter - Interactive HTML Dashboard",
-        7,
-        7,
-        args.verbose,
-    )
-
-    # Calculate total pipeline time
-    total_pipeline_time = time.time() - pipeline_start_time
-    hours = int(total_pipeline_time // 3600)
-    minutes = int((total_pipeline_time % 3600) // 60)
-    seconds = int(total_pipeline_time % 60)
-
-    print(f"\n⏱️  Pipeline Execution Time: {hours:02d}:{minutes:02d}:{seconds:02d}")
-
-    # Find final HTML report
-    final_report = os.path.join(reporter_output, "mutation_analysis_report.html")
-    if not os.path.isfile(final_report):
-        # Try alternative report name
-        final_report = os.path.join(reporter_output, "final_report.html")
-
-    if not os.path.isfile(final_report):
-        print("⚠️  Warning: Final HTML report not found in expected location")
-        final_report = reporter_output  # Return directory if specific file not found
-
-    return final_report
-
-
-if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = create_argument_parser()
-    args = parser.parse_args()
-
-    print("🧬 MutationScan Pipeline Orchestrator")
+def main():
+    p = build_parser()
+    a = p.parse_args()
+    print("MutationScan Pipeline Orchestrator")
     print("=" * 50)
-    print(f"📅 Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📊 Configuration:")
-    print(f"   • Accessions file: {args.accessions}")
-    print(f"   • Gene list: {args.gene_list}")
-    print(f"   • Email: {args.email}")
-    print(f"   • Output directory: {args.output_dir}")
-    print(f"   • Threads: {args.threads}")
-
-    if args.sepi_species:
-        print(f"   • Reference mode: SEPI ({args.sepi_species})")
-    else:
-        print(f"   • Reference mode: User-provided ({args.user_reference_dir})")
-
-    print()
-
+    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("Mode:", "DRY-RUN" if a.dry_run else "FULL")
+    start = time.time()
     try:
-        # Validate input files
-        print("🔍 Validating input files...")
-        validate_input_files(args)
+        print("Validating inputs...")
+        validate_inputs(a)
 
-        # Create run directory
-        print("📁 Setting up output directory...")
-        run_directory = create_run_directory(args.output_dir)
+        # Pre-flight check for all domino tool scripts
+        domino_scripts = [
+            "run_harvester.py",
+            "run_annotator.py",
+            "run_extractor.py",
+            "run_aligner.py",
+            "run_analyzer.py",
+            "run_cooccurrence_analyzer.py",
+            "run_reporter.py",
+        ]
+        missing = []
+        tools_dir = Path(__file__).parent
+        for script in domino_scripts:
+            if not (tools_dir / script).is_file():
+                missing.append(str(tools_dir / script))
+        # Check for external tool: ncbi_genome_extractor
+        ncbi_path = tools_dir.parent / "ncbi_genome_extractor" / "ncbi_genome_extractor.py"
+        if not ncbi_path.is_file():
+            missing.append(str(ncbi_path))
+        if missing:
+            print("\nERROR: The following required domino tool scripts are missing:")
+            for m in missing:
+                print(f"  - {m}")
+            print("\nPlease ensure all domino tools are installed and available in the expected locations.")
+            print("Refer to the README for installation instructions.")
+            sys.exit(10)
 
-        # Execute the complete pipeline sequence
-        print("🚀 Beginning pipeline execution...")
-        start_time = time.time()
-
-        final_report_path = run_pipeline_sequence(args, run_directory)
-
-        # Calculate execution time
-        end_time = time.time()
-        execution_time = end_time - start_time
-        hours = int(execution_time // 3600)
-        minutes = int((execution_time % 3600) // 60)
-        seconds = int(execution_time % 60)
-
-        # GRAND FINALE - Professional Success Message
-        print("\n" + "🎉" * 25)
-        print("� MUTATIONSCAN PIPELINE COMPLETED SUCCESSFULLY! �")
-        print("�🎉" * 25)
-        print()
-        print("📊 EXECUTION SUMMARY:")
-        print("=" * 50)
-        print(f"⏱️  Total Runtime:     {hours:02d}:{minutes:02d}:{seconds:02d}")
-        print(f"📁 Results Directory:  {run_directory}")
-        print(f"� Configuration:")
-        print(f"   • Input Genomes:    {os.path.basename(args.accessions)}")
-        print(f"   • Target Genes:     {os.path.basename(args.gene_list)}")
-        print(f"   • CPU Threads:      {args.threads}")
-        if args.sepi_species:
-            print(f"   • Reference Mode:   SEPI ({args.sepi_species})")
+        run_dir = make_run_dir(a.output_dir)
+        print("Run directory:", run_dir)
+        report = execute_pipeline(a, run_dir)
+        elapsed = time.time() - start
+        h, rem = divmod(elapsed, 3600)
+        m, s = divmod(rem, 60)
+        print("\nPipeline complete")
+        print(f"Runtime: {int(h):02d}:{int(m):02d}:{int(s):02d}")
+        if os.path.isfile(report):
+            print("Report:", report)
+            if a.open_report and not a.dry_run:
+                try:
+                    import webbrowser  # type: ignore
+                    webbrowser.open(f"file://{os.path.abspath(report)}")
+                except Exception:
+                    pass
         else:
-            print(f"   • Reference Mode:   User-provided")
-        print()
-
-        print("🔬 ANALYSIS PIPELINE RESULTS:")
-        print("=" * 50)
-        print("✅ Genome Extraction     - NCBI genomes successfully retrieved")
-        print("✅ AMR Gene Annotation   - Resistance genes identified with CARD")
-        print("✅ Protein Extraction    - Target protein sequences extracted")
-        print("✅ Reference Alignment   - Wild-type alignments completed")
-        print("✅ Mutation Analysis     - Variants and mutations detected")
-        print("✅ Pattern Analysis      - Co-occurrence relationships mapped")
-        print("✅ Report Generation     - Interactive dashboard created")
-        print()
-
-        print("🎯 YOUR RESULTS ARE READY!")
-        print("=" * 50)
-
-        if os.path.isfile(final_report_path):
-            print(f"📊 Interactive Report:  {final_report_path}")
-            print("🌐 Open this HTML file in your web browser to explore:")
-            print("   • Mutation frequency distributions")
-            print("   • Gene-by-gene resistance profiles")
-            print("   • Co-occurrence network visualizations")
-            print("   • Statistical summaries and trends")
-        else:
-            print(f"📁 Results Directory:   {final_report_path}")
-            print("📊 Check the reporter results folder for output files")
-
-        print()
-        print("💡 NEXT STEPS:")
-        print("   1. Open the HTML report in your favorite browser")
-        print("   2. Explore the interactive visualizations")
-        print("   3. Export specific datasets for further analysis")
-        print("   4. Share findings with your research team")
-        print()
-        print("🙏 Thank you for using MutationScan!")
-        print("   For support: https://github.com/vihaankulkarni29/MutationScan")
-        print()
-
-        # Optionally open report in browser
-        if args.open_report and os.path.isfile(final_report_path):
-            try:
-                import webbrowser
-
-                webbrowser.open(f"file://{os.path.abspath(final_report_path)}")
-                print("🚀 Opening report in your default browser...")
-                print("   (If it doesn't open automatically, copy the file path above)")
-            except Exception as e:
-                print(f"⚠️  Could not auto-open browser: {e}")
-                print("   Please manually open the HTML file in your browser.")
-
-        print("🧬" * 25)
-
+            print("Report directory:", report)
     except DominoToolError as e:
-        # Enhanced error handling for specific domino tool failures
-        print(str(e), file=sys.stderr)  # Print the detailed error message
-        print(
-            f"\n💡 DEBUGGING GUIDANCE:",
-            file=sys.stderr,
-        )
-        print(
-            f"   • Check the output directory for intermediate results and logs",
-            file=sys.stderr,
-        )
-        print(
-            f"   • Verify that all dependencies are installed (see requirements.txt)",
-            file=sys.stderr,
-        )
-        print(
-            f"   • Ensure input files are in the correct format",
-            file=sys.stderr,
-        )
-        print(
-            f"   • Try running the failed domino tool individually for more details",
-            file=sys.stderr,
-        )
-        print(
-            f"   • Report issues at: https://github.com/vihaankulkarni29/MutationScan/issues",
-            file=sys.stderr,
-        )
+        print(str(e), file=sys.stderr)
         sys.exit(3)
-        
-    except subprocess.CalledProcessError as e:
-        print(f"\n❌ Pipeline Error: Domino tool failed", file=sys.stderr)
-        print(f"   Command: {' '.join(e.cmd)}", file=sys.stderr)
-        print(f"   Exit code: {e.returncode}", file=sys.stderr)
-        if e.stdout:
-            print(f"   Output: {e.stdout}", file=sys.stderr)
-        if e.stderr:
-            print(f"   Error: {e.stderr}", file=sys.stderr)
-        print(
-            f"\n💡 Check the individual domino tool logs for detailed error information.",
-            file=sys.stderr,
-        )
-        sys.exit(3)
-
-    except FileNotFoundError as e:
-        print(f"\n❌ File System Error: {e}", file=sys.stderr)
-        print(
-            "💡 Ensure all domino tools are present and manifest files are generated correctly.",
-            file=sys.stderr,
-        )
-        sys.exit(4)
-
-    except (ValueError, OSError) as e:
-        print(f"\n❌ Configuration Error: {e}", file=sys.stderr)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
         sys.exit(1)
-
     except KeyboardInterrupt:
-        print(f"\n⏹️  Pipeline interrupted by user", file=sys.stderr)
-        print(
-            "🧹 Clean up any partial results in the output directory if needed.",
-            file=sys.stderr,
-        )
-        sys.exit(130)  # Standard exit code for Ctrl+C
-
-    except Exception as e:
-        print(f"\n❌ Unexpected Error: {e}", file=sys.stderr)
-        print(f"📍 Error type: {type(e).__name__}", file=sys.stderr)
+        print("Interrupted by user", file=sys.stderr)
+        sys.exit(130)
+    except Exception as e:  # noqa: BLE001
+        print(f"Unexpected error: {e}", file=sys.stderr)
         import traceback
-
-        print("📋 Full traceback:", file=sys.stderr)
         traceback.print_exc()
         sys.exit(2)
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

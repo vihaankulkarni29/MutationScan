@@ -1,4 +1,3 @@
-# MutationScan Pipeline: Production Guide for Researchers
 
 ## Overview
 

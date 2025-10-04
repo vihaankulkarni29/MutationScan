@@ -1,58 +1,62 @@
-# MutationScan Documentation
+# MutationScan Advanced Documentation
 
-Welcome to the MutationScan documentation hub. This directory contains comprehensive guides, tutorials, and references for the MutationScan antimicrobial resistance analysis pipeline.
-
-## 📚 Documentation Structure
-
-### User Guides
-- **[Installation Guide](installation.md)** - Complete setup instructions for all platforms
-- **[Quick Start Tutorial](quick_start.md)** - Get started with MutationScan in 15 minutes
-- **[User Manual](user_manual.md)** - Comprehensive usage guide with examples
-- **[Pipeline Overview](pipeline_overview.md)** - Understanding the 7-domino architecture
-
-### Technical References
-- **[API Reference](api_reference.md)** - Complete module and function documentation
-- **[Configuration Guide](configuration.md)** - Advanced configuration options
-- **[Performance Tuning](performance.md)** - Optimization tips for large datasets
-- **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
-
-### Advanced Topics
-- **[Custom Workflows](custom_workflows.md)** - Building specialized analysis pipelines
-- **[Integration Guide](integration.md)** - Integrating with other bioinformatics tools
-- **[Development Guide](development.md)** - Contributing to MutationScan development
-- **[Testing Guide](testing.md)** - Running and writing tests
-
-## 🎯 Quick Navigation
-
-### New Users
-1. Start with the [Installation Guide](installation.md)
-2. Follow the [Quick Start Tutorial](quick_start.md)
-3. Explore [Examples](../examples/) for sample workflows
-
-### Developers
-1. Read the [Development Guide](development.md)
-2. Check the [API Reference](api_reference.md)
-3. Review [Contributing Guidelines](../CONTRIBUTING.md)
-
-### Researchers
-1. Review the [Pipeline Overview](pipeline_overview.md)
-2. Study [Custom Workflows](custom_workflows.md)
-3. Explore [Performance Tuning](performance.md)
-
-## 📄 Additional Resources
-
-- **Main README**: [../README.md](../README.md)
-- **Contributing**: [../CONTRIBUTING.md](../CONTRIBUTING.md)
-- **Security Policy**: [../SECURITY.md](../SECURITY.md)
-- **Changelog**: [../CHANGELOG.md](../CHANGELOG.md)
-- **License**: [../LICENSE](../LICENSE)
-
-## 🚀 Getting Help
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/vihaankulkarni29/MutationScan/issues)
-- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/vihaankulkarni29/MutationScan/discussions)
-- **Email**: vihaankulkarni29@gmail.com
+This file contains all advanced, technical, and developer-facing documentation for MutationScan. For user setup, pipeline usage, and troubleshooting, see the main README.md.
 
 ---
 
-**Note**: This documentation is actively maintained and updated with each release. For the most current information, always refer to the latest version on GitHub.
+## ⚙️ Advanced Configuration
+
+- All pipeline parameters can be set via CLI flags (see main README).
+- For custom workflows, modify input files or domino tool arguments as needed.
+- Environment variables for advanced users:
+  - `MUTATIONSCAN_THREADS`: Override default thread count
+  - `MUTATIONSCAN_OUTPUT_DIR`: Set default output directory
+
+---
+
+## 👨‍💻 Developer Guide
+
+- Clone the repo and install with `pip install -e .[dev]`
+- All domino tools are in `subscan/tools/` and `subscan/ncbi_genome_extractor/`
+- To contribute:
+  1. Fork the repo
+  2. Create a feature branch
+  3. Submit a pull request
+- Code style: Black, Flake8, Mypy
+- Tests: Pytest (see `subscan/tests/`)
+
+---
+
+## 🧬 API Reference
+
+- Main entry point: `subscan.tools.run_pipeline:main`
+- Each domino tool exposes a CLI and Python API (see source code for details)
+- Manifest files are JSON, CSV, and HTML (see pipeline overview in main README)
+
+---
+
+## 🚀 Performance Tuning
+
+- Use multi-threading for large datasets (`--threads` flag)
+- Analyze 10-50 genomes for fastest results
+- Ensure SSD storage and stable internet for optimal performance
+
+---
+
+## 🤝 Contribution & Security
+
+- All contributions welcome via GitHub pull requests
+- Security issues: Please report via [GitHub Issues](https://github.com/vihaankulkarni29/MutationScan/issues)
+- MIT License: Free for academic, commercial, and personal use
+
+---
+
+## 📚 Additional Resources
+
+- Main README: [../README.md](../README.md)
+- Example Data: [../examples/](../examples/)
+- Contact: vihaankulkarni29@gmail.com
+
+---
+
+*This file replaces all other technical markdowns. For any topic not covered, open a GitHub Issue or discussion.*
