@@ -64,4 +64,7 @@ dev = [
 ]
 
 [project.scripts]
-mutationscan = "subscan.tools.run_pipeline:main"
+mutationscan = "tools.run_pipeline:main"
+
+[tool.setuptools.packages.find]
+include = ["tools*", "src*"]
