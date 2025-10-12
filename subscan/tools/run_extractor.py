@@ -42,6 +42,7 @@ import sys
 import multiprocessing
 import subprocess
 import json
+import shutil
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from tqdm import tqdm
@@ -219,39 +220,43 @@ def extract_proteins_for_single_genome(work_item):
         output_protein_path = os.path.join(output_dir, output_filename)
 
         # Construct the full command-line call to FastaAAExtractor
-        # Expected command format: fasta_aa_extractor --genome FASTA --coordinates TSV --genes GENELIST --output OUTPUT
+        # Preferred console script: 'fasta_aa_extractor'; fallback: 'python -m fasta_aa_extractor'
 
-        # For testing, check if mock tool exists in the same directory
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        mock_tool_path = os.path.join(script_dir, "mock_fasta_aa_extractor.py")
+        def _resolve_extractor_command(genome_fa: str, coords_tsv: str, genes: str, out_path: str) -> list:
+            """Resolve the best available way to invoke FastaAAExtractor.
 
-        if os.path.isfile(mock_tool_path):
-            # Use mock tool for testing
-            command = [
-                "python",
-                mock_tool_path,
+            Order:
+              1) Local mock script (for tests)
+              2) Console script on PATH: fasta_aa_extractor
+              3) Module execution: python -m fasta_aa_extractor
+            """
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            mock_tool_path = os.path.join(script_dir, "mock_fasta_aa_extractor.py")
+
+            common_args = [
                 "--genome",
-                genome_fasta_path,
+                genome_fa,
                 "--coordinates",
-                tsv_coordinate_path,
+                coords_tsv,
                 "--genes",
-                gene_list_path,
+                genes,
                 "--output",
-                output_protein_path,
+                out_path,
             ]
-        else:
-            # Use real tool
-            command = [
-                "fasta_aa_extractor",
-                "--genome",
-                genome_fasta_path,
-                "--coordinates",
-                tsv_coordinate_path,
-                "--genes",
-                gene_list_path,
-                "--output",
-                output_protein_path,
-            ]
+
+            if os.path.isfile(mock_tool_path):
+                return [sys.executable, mock_tool_path, *common_args]
+
+            exe = shutil.which("fasta_aa_extractor")
+            if exe:
+                return [exe, *common_args]
+
+            # Fallback to module execution
+            return [sys.executable, "-m", "fasta_aa_extractor", *common_args]
+
+        command = _resolve_extractor_command(
+            genome_fasta_path, tsv_coordinate_path, gene_list_path, output_protein_path
+        )
 
         # Execute the FastaAAExtractor command
         result = subprocess.run(
@@ -276,11 +281,17 @@ def extract_proteins_for_single_genome(work_item):
         return None
 
     except subprocess.CalledProcessError as e:
-        print(f"❌ Error: FastaAAExtractor failed for {accession}: {e.stderr}")
+        # Provide clearer guidance and include stderr if available
+        print(f"❌ Error: FastaAAExtractor failed for {accession}")
+        if e.stderr:
+            print(e.stderr)
+        print("👉 Tip: Verify the CLI locally with 'fasta_aa_extractor --help' or 'python -m fasta_aa_extractor --help'.")
         return None
 
     except FileNotFoundError:
-        print(f"❌ Error: fasta_aa_extractor command not found in PATH")
+        print("❌ Error: FastaAAExtractor not found.")
+        print("   Neither 'fasta_aa_extractor' console script nor 'python -m fasta_aa_extractor' is available.")
+        print("   Ensure the extractor package is installed in this environment (pip install -e .) and re-run.")
         return None
 
     except Exception as e:

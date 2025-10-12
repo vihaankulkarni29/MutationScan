@@ -32,6 +32,16 @@
    python subscan/tools/run_pipeline.py --accessions data_input/accession_list.txt --gene-list data_input/gene_list.txt --email you@example.com --output-dir data_output/run1 --sepi-species "Escherichia coli" --threads 4
    ```
 
+   Note on Domino 3 (Extractor): The pipeline now uses the CLI-capable FastaAAExtractor. Before running full analyses, you can verify it is available with either of the following in your active environment:
+
+   ```bash
+   fasta_aa_extractor --help
+   # or
+   python -m fasta_aa_extractor --help
+   ```
+
+   If neither works, install the extractor in your environment and ensure the console script is on PATH.
+
 ---
 
 ## 🛠️ Installation & Domino Tool Setup

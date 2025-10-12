@@ -25,6 +25,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
+import shutil
 
 TOTAL_STAGES = 7
 
@@ -169,6 +170,20 @@ def execute_pipeline(a, run_dir: str) -> str:
     current = ensure_manifest(out2, "annotation_manifest.json")
     # 3 Extractor
     out3 = os.path.join(run_dir, "03_extractor_results")
+    # Pre-flight: ensure FastaAAExtractor is available (console or module)
+    if not shutil.which("fasta_aa_extractor"):
+        # Try module help to see if import works
+        try:
+            cp = subprocess.run([sys.executable, "-m", "fasta_aa_extractor", "--help"], capture_output=True, text=True)
+            if cp.returncode != 0:
+                print("\nERROR: FastaAAExtractor is not available in the current environment.")
+                print("Please install it so the extractor can run:")
+                print("  pip install -e .  # from the extractor project")
+                print("Or ensure the console script 'fasta_aa_extractor' is on PATH.")
+                raise DominoToolError(3, "Extractor (Sequence Extraction)")
+        except FileNotFoundError:
+            print("\nERROR: Python executable not found to attempt 'python -m fasta_aa_extractor'.")
+            raise DominoToolError(3, "Extractor (Sequence Extraction)")
     run_tool(tools / "run_extractor.py", ["--manifest", current, "--gene-list", a.gene_list, "--output-dir", out3, "--threads", str(a.threads)], domino_labels[2], 3, a.verbose)
     current = ensure_manifest(out3, "protein_manifest.json")
     # 4 Aligner
