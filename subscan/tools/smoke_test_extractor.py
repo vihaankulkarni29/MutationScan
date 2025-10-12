@@ -15,9 +15,10 @@ import tempfile
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
-def which(cmd: str) -> str | None:
+def which(cmd: str) -> Optional[str]:
     return shutil.which(cmd)
 
 
