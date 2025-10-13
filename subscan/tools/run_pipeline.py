@@ -241,10 +241,10 @@ def main():
         for script in domino_scripts:
             if not (tools_dir / script).is_file():
                 missing.append(str(tools_dir / script))
-        # Check for external tool: ncbi_genome_extractor
-        ncbi_path = tools_dir.parent / "ncbi_genome_extractor" / "ncbi_genome_extractor.py"
-        if not ncbi_path.is_file():
-            missing.append(str(ncbi_path))
+        # Check for external tool: federated_genome_extractor
+        federated_extractor_path = tools_dir.parent / "federated_genome_extractor" / "harvester.py"
+        if not federated_extractor_path.is_file():
+            missing.append(str(federated_extractor_path))
         if missing:
             print("\nERROR: The following required domino tool scripts are missing:")
             for m in missing:

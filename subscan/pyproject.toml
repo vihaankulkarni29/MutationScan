@@ -41,7 +41,7 @@ dependencies = [
     "plotly>=5.0.0,<6.0",
     
     # GitHub-based Domino Tools
-    "ncbi-genome-extractor @ git+https://github.com/vihaankulkarni29/ncbi_genome_extractor.git",
+    "federated-genome-extractor @ git+https://github.com/vihaankulkarni29/federated_genome_extractor.git",
     "abricate-automator @ git+https://github.com/vihaankulkarni29/ABRicate-Automator.git",
     "fasta-aa-extractor @ git+https://github.com/vihaankulkarni29/FastaAAExtractor.git",
     "wildtype-aligner @ git+https://github.com/vihaankulkarni29/wildtype-aligner.git",

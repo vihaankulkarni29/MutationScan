@@ -7,18 +7,18 @@ for downloading genome assemblies from NCBI based on accession numbers. It serve
 as the entry point for the AMR analysis workflow, converting accession lists into
 local FASTA files with comprehensive metadata tracking.
 
-The harvester interfaces with the ncbi_genome_extractor tool to download genomes
-and creates standardized JSON manifests for downstream domino tools. It handles
-various genome formats and provides robust error handling for network issues
-and invalid accessions.
+The harvester interfaces with the federated_genome_extractor tool to download genomes
+from multiple databases (NCBI, BV-BRC, EnteroBase, PATRIC) and creates standardized 
+JSON manifests for downstream domino tools. It handles various genome formats and 
+provides robust error handling for network issues and invalid accessions.
 
 Usage:
     python run_harvester.py --accessions genome_list.txt --email user@email.com 
-                           --output-dir results/genomes/
+                           --output-dir results/genomes/ [--database ncbi|all]
 
 Integration:
-    - Input: Text file with NCBI genome accession numbers
-    - Output: genome_manifest.json + downloaded FASTA files
+    - Input: Text file with genome accession numbers (one per line)
+    - Output: genome_manifest.json + downloaded FASTA files with source database metadata
     - Next Domino: run_annotator.py (AMR gene annotation)
 
 Author: MutationScan Development Team
@@ -80,48 +80,58 @@ def parse_arguments() -> argparse.Namespace:
         help="Path to the directory where results will be saved.",
     )
 
+    parser.add_argument(
+        "--database",
+        choices=["ncbi", "bvbrc", "enterobase", "patric", "all"],
+        default="all",
+        help="Database source(s) to query for genomes (default: all). "
+             "Use 'ncbi' for NCBI-only, or 'all' for federated multi-database search.",
+    )
+
     return parser.parse_args()
 
 
-def execute_ncbi_genome_extractor(
-    accessions: str, email: str, output_dir: str
+def execute_federated_genome_extractor(
+    accessions: str, email: str, output_dir: str, database: str = "all"
 ) -> CompletedProcess[str]:
     """
-    Execute the external NCBI Genome Extractor tool for automated genome harvesting.
+    Execute the federated genome extractor for multi-database genome harvesting.
 
-    Interfaces with the ncbi_genome_extractor.py tool to download complete genome
-    sequences from NCBI using provided accession numbers. Handles NCBI API 
-    interactions, rate limiting, file organization, and metadata generation.
+    Interfaces with the federated_genome_extractor/harvester.py tool to download complete genome
+    sequences from NCBI, BV-BRC, EnteroBase, or PATRIC databases using provided accession numbers.
+    Handles multi-database API interactions, rate limiting, file organization, and metadata generation
+    with source database tracking.
 
     Args:
-        accessions (str): Path to text file containing NCBI accession numbers (one per line)
-        email (str): Valid email address for NCBI API access (required by NCBI guidelines)
+        accessions (str): Path to text file containing genome accession numbers (one per line)
+        email (str): Valid email address for API access (required by NCBI guidelines)
         output_dir (str): Directory path where harvested genomes and metadata will be saved
+        database (str): Database source - 'ncbi', 'bvbrc', 'enterobase', 'patric', or 'all' (default: 'all')
 
     Returns:
         CompletedProcess[str]: Result of subprocess execution with returncode and output
 
     Raises:
-        FileNotFoundError: If ncbi_genome_extractor.py script cannot be found in expected location
+        FileNotFoundError: If federated_genome_extractor/harvester.py script cannot be found in expected location
         subprocess.CalledProcessError: If the external harvesting tool fails during execution
         PermissionError: If output directory cannot be created or accessed due to permissions
 
     Side Effects:
         - Creates output directory structure if it doesn't exist
         - Downloads FASTA files to output_dir with standardized naming
-        - Generates CSV metadata file with comprehensive genome information
-        - Handles NCBI rate limiting and retry logic automatically
+        - Generates JSON/CSV metadata file with comprehensive genome information including source database
+        - Handles multi-database rate limiting and retry logic automatically
 
     Example:
-        >>> result = execute_ncbi_genome_extractor("accessions.txt", "user@email.com", "results/")
+        >>> result = execute_federated_genome_extractor("accessions.txt", "user@email.com", "results/", "all")
         >>> if result.returncode == 0:
-        ...     print("Genomes downloaded successfully")
+        ...     print("Genomes downloaded successfully from federated databases")
     """
-    # Find the ncbi_genome_extractor script
+    # Find the federated_genome_extractor script
     script_path = os.path.join(
         os.path.dirname(os.path.dirname(__file__)),
-        "ncbi_genome_extractor",
-        "ncbi_genome_extractor.py",
+        "federated_genome_extractor",
+        "harvester.py",
     )
 
     # Create output directory if it doesn't exist
@@ -133,28 +143,29 @@ def execute_ncbi_genome_extractor(
         with open(accessions, "r", encoding="utf-8") as f:
             accession_list = [line.strip() for line in f if line.strip()]
 
-        # Create a query string from accessions
-        query = " OR ".join([f'"{acc}"' for acc in accession_list])
+        # Create comma-separated list for download_only mode
+        query = ",".join(accession_list)
 
     except (FileNotFoundError, PermissionError, OSError) as e:
         print(f"Error reading accessions file: {e}")
         sys.exit(1)
 
-    # Construct the command to run the external tool
+    # Construct the command to run the federated genome extractor
     command = [
         "python",
         script_path,
+        "--source",
+        database,
         "--query",
         query,
         "--output_dir",
         output_dir,
-        "--max_results",
-        str(len(accession_list)),
+        "--download_only",  # Download FASTAs without metadata search
         "--metadata_format",
         "csv",
     ]
 
-    print("Executing ncbi_genome_extractor with command:")
+    print(f"Executing federated genome extractor (database: {database})...")
     print(" ".join([f'"{arg}"' if " " in arg else arg for arg in command]))
     print()
 
@@ -169,21 +180,21 @@ def execute_ncbi_genome_extractor(
                 os.path.dirname(__file__)
             ),  # Run from subscan directory
         )
-        print("\nncbi_genome_extractor completed successfully!")
+        print("\nFederated genome extractor completed successfully!")
         return result
 
     except subprocess.CalledProcessError as e:
-        print(f"\nError: ncbi_genome_extractor failed with exit code {e.returncode}")
+        print(f"\nError: Federated genome extractor failed with exit code {e.returncode}")
         print("The external tool encountered an error during execution.")
         sys.exit(1)
 
     except FileNotFoundError:
-        print(f"\nError: ncbi_genome_extractor script not found at: {script_path}")
+        print(f"\nError: Federated genome extractor script not found at: {script_path}")
         print(
-            "Please ensure the ncbi_genome_extractor repository is cloned in the parent directory."
+            "Please ensure the federated_genome_extractor repository is installed via pip."
         )
         print(
-            "Run: git clone https://github.com/vihaankulkarni29/ncbi_genome_extractor.git"
+            "Run: pip install git+https://github.com/vihaankulkarni29/federated_genome_extractor.git"
         )
         sys.exit(1)
 
@@ -373,10 +384,11 @@ if __name__ == "__main__":
     print(f"Accessions file: {args.accessions}")
     print(f"Email: {args.email}")
     print(f"Output directory: {args.output_dir}")
+    print(f"Database source: {args.database}")
     print()
 
-    # Execute the external ncbi_genome_extractor tool
-    execute_ncbi_genome_extractor(args.accessions, args.email, args.output_dir)
+    # Execute the external federated genome extractor tool
+    execute_federated_genome_extractor(args.accessions, args.email, args.output_dir, args.database)
 
     # Generate the standardized manifest for pipeline integration
     manifest_path = generate_genome_manifest(
