@@ -241,15 +241,34 @@ def main():
         for script in domino_scripts:
             if not (tools_dir / script).is_file():
                 missing.append(str(tools_dir / script))
+        
         # Check for external tool: federated_genome_extractor
-        federated_extractor_path = tools_dir.parent / "federated_genome_extractor" / "harvester.py"
-        if not federated_extractor_path.is_file():
-            missing.append(str(federated_extractor_path))
+        # Look for it in common locations
+        possible_paths = [
+            tools_dir.parent.parent.parent / "federated_genome_extractor" / "harvester.py",  # Adjacent to MutationScan
+            tools_dir.parent / "external" / "federated_genome_extractor" / "harvester.py",  # In external dir
+            tools_dir.parent / "federated_genome_extractor" / "harvester.py",  # As submodule
+        ]
+        
+        federated_extractor_found = False
+        for path in possible_paths:
+            if path.is_file():
+                federated_extractor_found = True
+                break
+        
+        if not federated_extractor_found:
+            missing.append("federated_genome_extractor/harvester.py (not found in expected locations)")
+            
         if missing:
             print("\nERROR: The following required domino tool scripts are missing:")
             for m in missing:
                 print(f"  - {m}")
             print("\nPlease ensure all domino tools are installed and available in the expected locations.")
+            if not federated_extractor_found:
+                print("\nFor federated_genome_extractor:")
+                print("1. Clone: git clone https://github.com/vihaankulkarni29/federated_genome_extractor.git")
+                print("2. Place it adjacent to MutationScan directory, or")
+                print("3. Place it in subscan/external/ directory")
             print("Refer to the README for installation instructions.")
             sys.exit(10)
 

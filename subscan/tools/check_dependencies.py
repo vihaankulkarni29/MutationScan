@@ -175,7 +175,7 @@ def main() -> int:
     print(color_text("Checking GitHub-based pipeline tools...", BLUE))
     
     github_tools = [
-        ('ncbi_genome_extractor', 'Genome Harvester'),
+        ('federated_genome_extractor', 'Federated Genome Harvester'),
         ('fasta_aa_extractor', 'Protein Extractor'),
         ('wildtype_aligner', 'Sequence Aligner'),
         ('subscan', 'SubScan Core'),
@@ -364,7 +364,7 @@ def main() -> int:
         print(color_text("Remediation:", YELLOW))
         print("  Install GitHub-based tools:")
         print("    pip install -U \\")
-        print("      'git+https://github.com/vihaankulkarni29/ncbi_genome_extractor.git' \\")
+        print("      'git+https://github.com/vihaankulkarni29/federated_genome_extractor.git' \\")
         print("      'git+https://github.com/vihaankulkarni29/FastaAAExtractor.git' \\")
         print("      'git+https://github.com/vihaankulkarni29/wildtype-aligner.git' \\")
         print("      'git+https://github.com/vihaankulkarni29/SubScan.git'")

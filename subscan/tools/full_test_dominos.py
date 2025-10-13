@@ -179,12 +179,14 @@ def test_domino_1_harvester(
                 {
                     "accession": "GCF_000005825.2",
                     "fasta_path": str(output_dir / "GCF_000005825.2.fna"),
-                    "source": "mock"
+                    "source": "mock",
+                    "database": "ncbi"  # Source database field for federated extractor compatibility
                 },
                 {
                     "accession": "GCF_000009605.1",
                     "fasta_path": str(output_dir / "GCF_000009605.1.fna"),
-                    "source": "mock"
+                    "source": "mock",
+                    "database": "ncbi"  # Source database field for federated extractor compatibility
                 }
             ],
             "metadata_csv": str(output_dir / "metadata.csv"),
@@ -204,9 +206,9 @@ def test_domino_1_harvester(
         
         # Create mock metadata CSV
         with open(output_dir / "metadata.csv", 'w') as f:
-            f.write("accession,organism,size\n")
-            f.write("GCF_000005825.2,Mock organism 1,1000\n")
-            f.write("GCF_000009605.1,Mock organism 2,1000\n")
+            f.write("accession,organism,size,database\n")
+            f.write("GCF_000005825.2,Mock organism 1,1000,ncbi\n")
+            f.write("GCF_000009605.1,Mock organism 2,1000,ncbi\n")
         
         print(color_text("✓ Mock harvester output created", GREEN))
     else:

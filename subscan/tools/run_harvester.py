@@ -128,11 +128,49 @@ def execute_federated_genome_extractor(
         ...     print("Genomes downloaded successfully from federated databases")
     """
     # Find the federated_genome_extractor script
-    script_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        "federated_genome_extractor",
-        "harvester.py",
-    )
+    # Look for it in a few common locations:
+    # 1. Adjacent to subscan (for development)
+    # 2. In a tools/external directory
+    # 3. As a system command (if installed globally)
+    
+    possible_paths = [
+        # Option 1: Adjacent to MutationScan directory (common development setup)
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+            "federated_genome_extractor", 
+            "harvester.py"
+        ),
+        # Option 2: Within subscan external tools directory
+        os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "external", 
+            "federated_genome_extractor", 
+            "harvester.py"
+        ),
+        # Option 3: Within subscan as submodule
+        os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "federated_genome_extractor", 
+            "harvester.py"
+        ),
+    ]
+    
+    script_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            script_path = path
+            break
+    
+    if not script_path:
+        print(f"Error: federated_genome_extractor not found in expected locations:")
+        for path in possible_paths:
+            print(f"  - {path}")
+        print()
+        print("Please install federated_genome_extractor by:")
+        print("1. Clone: git clone https://github.com/vihaankulkarni29/federated_genome_extractor.git")
+        print("2. Place it adjacent to MutationScan directory, or")
+        print("3. Place it in subscan/external/ directory")
+        sys.exit(1)
 
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
@@ -160,7 +198,7 @@ def execute_federated_genome_extractor(
         query,
         "--output_dir",
         output_dir,
-        "--download_only",  # Download FASTAs without metadata search
+        "--download_only",  # Download FASTAs (metadata will be created manually)
         "--metadata_format",
         "csv",
     ]
@@ -181,6 +219,14 @@ def execute_federated_genome_extractor(
             ),  # Run from subscan directory
         )
         print("\nFederated genome extractor completed successfully!")
+        
+        # Create metadata CSV if it doesn't exist (for download_only mode)
+        output_dir_name = os.path.basename(output_dir.rstrip("/\\"))
+        expected_metadata_path = os.path.join(output_dir, f"{output_dir_name}_metadata.csv")
+        
+        if not os.path.exists(expected_metadata_path):
+            _create_minimal_metadata_csv(output_dir, expected_metadata_path, database)
+            
         return result
 
     except subprocess.CalledProcessError as e:
@@ -197,6 +243,54 @@ def execute_federated_genome_extractor(
             "Run: pip install git+https://github.com/vihaankulkarni29/federated_genome_extractor.git"
         )
         sys.exit(1)
+
+
+def _create_minimal_metadata_csv(output_dir: str, metadata_csv_path: str, database: str) -> None:
+    """
+    Create minimal metadata CSV from downloaded FASTA files when federated extractor 
+    uses --download_only mode and doesn't generate metadata.
+    
+    Args:
+        output_dir (str): Directory containing downloaded FASTA files
+        metadata_csv_path (str): Path where metadata CSV should be created
+        database (str): Source database name
+    """
+    import glob
+    
+    print(f"Creating minimal metadata CSV from downloaded FASTA files...")
+    
+    # Find all FASTA files in output directory
+    fasta_files = glob.glob(os.path.join(output_dir, "*.fasta")) + \
+                  glob.glob(os.path.join(output_dir, "*.fna")) + \
+                  glob.glob(os.path.join(output_dir, "*.fa"))
+    
+    if not fasta_files:
+        print("Warning: No FASTA files found to create metadata")
+        return
+    
+    # Create minimal metadata CSV
+    with open(metadata_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # Write header
+        writer.writerow(['accession', 'genome_id', 'database', 'organism', 'title'])
+        
+        # Write minimal data for each FASTA file
+        for fasta_file in fasta_files:
+            filename = os.path.basename(fasta_file)
+            # Extract accession from filename (remove extension)
+            accession = os.path.splitext(filename)[0]
+            
+            # Create minimal metadata row
+            writer.writerow([
+                accession,           # accession
+                accession,           # genome_id (same as accession)
+                database.upper(),    # database (NCBI, BV-BRC, etc.)
+                f"Unknown organism", # organism (placeholder)
+                f"{accession} genome sequence"  # title (placeholder)
+            ])
+    
+    print(f"Created minimal metadata CSV with {len(fasta_files)} entries: {metadata_csv_path}")
 
 
 def _read_metadata_csv(metadata_csv_path: str) -> List[Dict[str, Any]]:
