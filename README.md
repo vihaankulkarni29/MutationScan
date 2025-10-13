@@ -25,55 +25,79 @@
    > 📹 **New User?** - For step-by-step video installation guide, see our [Installation Video Guide](docs/INSTALLATION_GUIDE.md)
 
 3. **Prepare input files:**
-   - `data_input/accession_list.txt`: NCBI accession numbers (one per line)
+   - `data_input/accession_list.txt`: Genome accession numbers (one per line)
    - `data_input/gene_list.txt`: Target gene names (one per line)
 4. **Run the pipeline:**
    ```bash
    python subscan/tools/run_pipeline.py --accessions data_input/accession_list.txt --gene-list data_input/gene_list.txt --email you@example.com --output-dir data_output/run1 --sepi-species "Escherichia coli" --threads 4
    ```
 
-   Note on Domino 3 (Extractor): The pipeline now uses the CLI-capable FastaAAExtractor. Before running full analyses, you can verify it is available with either of the following in your active environment:
+   **🌐 Multi-Database Support:** MutationScan now supports federated genome extraction from multiple databases:
+   - **NCBI** (National Center for Biotechnology Information)  
+   - **BV-BRC** (Bacterial and Viral Bioinformatics Resource Center)
+   - **EnteroBase** (Salmonella, Escherichia/Shigella, and other Enterobacteriaceae)
+   - **PATRIC** (Pathosystems Resource Integration Center)
 
+   The pipeline automatically uses all databases by default for maximum genome coverage. Individual domino tools can specify database sources with the `--database` flag:
    ```bash
-   fasta_aa_extractor --help
-   # or
-   python -m fasta_aa_extractor --help
+   # Use all databases (default, recommended)
+   python subscan/tools/run_harvester.py --accessions list.txt --email you@example.com --output-dir results/ --database all
+   
+   # Use NCBI only (legacy behavior)
+   python subscan/tools/run_harvester.py --accessions list.txt --email you@example.com --output-dir results/ --database ncbi
+   
+   # Use specific database
+   python subscan/tools/run_harvester.py --accessions list.txt --email you@example.com --output-dir results/ --database bvbrc
    ```
-
-   If neither works, install the extractor in your environment and ensure the console script is on PATH.
 
 ---
 
-## 🛠️ Installation & Domino Tool Setup
+## 🛠️ Installation & Setup
 
-MutationScan requires several domino tools. If you see an error about missing scripts, follow these steps:
+### Quick Setup
+```bash
+cd subscan/
+pip install -e .
+```
 
-1. **Clone required domino tools:**
-   ```bash
-   cd subscan
-   # Example for NCBI Genome Extractor
-   mkdir -p ncbi_genome_extractor
-   cd ncbi_genome_extractor
-   git clone https://github.com/vihaankulkarni29/ncbi_genome_extractor.git .
-   # Repeat for other tools as needed (see pyproject.toml)
-   ```
-2. **Verify file locations:**
-   - `subscan/ncbi_genome_extractor/ncbi_genome_extractor.py`
-   - `subscan/tools/run_harvester.py`, `run_annotator.py`, `run_extractor.py`, `run_aligner.py`, `run_analyzer.py`, `run_cooccurrence_analyzer.py`, `run_reporter.py`
-3. **Re-run the pipeline.**
+### 🌍 Multi-Database Genome Extraction
+MutationScan uses a **federated genome extractor** supporting multiple microbial databases:
+
+| Database | Coverage | Specialization |
+|----------|----------|----------------|
+| **NCBI** | Global reference genomes | Comprehensive, curated assemblies |
+| **BV-BRC** | Bacterial & viral pathogens | NIAID priority pathogens |
+| **EnteroBase** | Enterobacteriaceae | Salmonella, E. coli, Shigella specialization |
+| **PATRIC** | Bacterial pathogens | Legacy bacterial genomics platform |
+
+The federated extractor is automatically integrated and requires no additional setup. It gracefully handles:
+- **Cross-database accession lookup** (finds genomes across all sources)
+- **Metadata standardization** (unified JSON manifest format)
+- **Network resilience** (automatic fallback between databases)
+- **Platform compatibility** (Windows development, Linux production)
+
+### Domino Tool Architecture
+All domino tools are included in the MutationScan package:
+- `subscan/tools/run_harvester.py` - Multi-database genome extraction
+- `subscan/tools/run_annotator.py` - AMR gene annotation  
+- `subscan/tools/run_extractor.py` - Gene sequence extraction
+- `subscan/tools/run_aligner.py` - Wild-type alignment
+- `subscan/tools/run_analyzer.py` - Mutation detection
+- `subscan/tools/run_cooccurrence_analyzer.py` - Resistance pattern analysis
+- `subscan/tools/run_reporter.py` - Interactive report generation
 
 ---
 
 ## 🧩 Pipeline Overview
 
-MutationScan is a 7-stage pipeline:
-1. **Genome Harvester**: Downloads genomes from NCBI
-2. **Gene Annotator**: Identifies AMR genes
-3. **Sequence Extractor**: Extracts target gene sequences
-4. **Wild-type Aligner**: Aligns sequences to reference genes
-5. **Mutation Analyzer**: Detects SNPs, insertions, deletions
-6. **Co-occurrence Analyzer**: Discovers resistance gene patterns
-7. **Report Generator**: Creates interactive HTML reports
+MutationScan is a 7-stage federated AMR analysis pipeline:
+1. **🌐 Genome Harvester**: Downloads genomes from NCBI, BV-BRC, EnteroBase, PATRIC
+2. **🧬 Gene Annotator**: Identifies AMR genes using ABRicate
+3. **✂️ Sequence Extractor**: Extracts target gene sequences  
+4. **🎯 Wild-type Aligner**: Aligns sequences to reference genes
+5. **🔍 Mutation Analyzer**: Detects SNPs, insertions, deletions
+6. **🔗 Co-occurrence Analyzer**: Discovers resistance gene patterns
+7. **📊 Report Generator**: Creates interactive HTML reports
 
 **Output:**
 - Interactive HTML dashboard
@@ -83,41 +107,106 @@ MutationScan is a 7-stage pipeline:
 
 ---
 
-## 🧪 Example Usage
+## 🧪 Example Usage & Results
 
+### Basic Pipeline Run
 ```bash
 python subscan/tools/run_pipeline.py --accessions data_input/accession_list.txt --gene-list data_input/gene_list.txt --email you@example.com --output-dir data_output/run1 --sepi-species "Escherichia coli" --threads 4
 ```
 
-**Results:**
-- `data_output/run1/07_reporter_results/final_report.html`
-- All intermediate manifests and CSVs in stage folders
+### Individual Domino with Database Selection
+```bash
+# Multi-database genome harvesting (recommended)
+python subscan/tools/run_harvester.py --accessions examples/demo_accessions.txt --email you@example.com --output-dir test_results/ --database all
+
+# NCBI-only harvesting (legacy mode)  
+python subscan/tools/run_harvester.py --accessions examples/demo_accessions.txt --email you@example.com --output-dir test_results/ --database ncbi
+```
+
+### Expected Output Structure
+```
+data_output/run1/
+├── 01_harvester_results/
+│   ├── genome_manifest.json     # Multi-database genome metadata
+│   └── genomes/                 # Downloaded FASTA files
+├── 02_annotator_results/
+│   ├── annotation_manifest.json # AMR gene annotations
+│   └── abricate_results.tsv     # ABRicate output
+├── ...                          # Intermediate domino outputs
+└── 07_reporter_results/
+    ├── final_report.html        # 📊 Interactive dashboard
+    └── mutation_summary.csv     # 📋 Structured results
+```
 
 ---
 
 ## 🆘 Troubleshooting
 
-- **Missing domino tool error:** See "Domino Tool Setup" above.
-- **No results:** Check input file paths and formats.
-- **Permission errors:** Ensure folders are writable.
-- **Network errors:** Verify internet connection for NCBI downloads.
-- **Other issues:** See FAQ or report on GitHub Issues.
+### Common Issues
+
+**🌐 Database Connection Problems**
+```bash
+# Test federated extractor connectivity
+python -c "from subscan.tools.run_harvester import execute_federated_genome_extractor; print('Federated extractor ready')"
+```
+
+**📁 Missing Output Files**
+- Check input file formats (one accession/gene per line)
+- Verify email format (required for NCBI API compliance)
+- Ensure output directories are writable
+
+**🔧 Platform-Specific Issues**
+- **Windows**: ABRicate is mocked for development (see `mock_abricate.py`)
+- **Linux**: Full tool support including native ABRicate
+- **macOS**: Use Linux-compatible tooling via Docker/containers
+
+**🚫 Permission Errors**
+```powershell
+# Windows PowerShell
+New-Item -Path "data_output" -ItemType Directory -Force
+```
+
+**🌍 Network Issues**
+- Multi-database extraction provides automatic fallback
+- Check internet connectivity for genome downloads
+- Verify email is valid for NCBI API access
+
+**⚠️ Advanced Debugging**
+```bash
+# Validate pipeline structure
+python subscan/check_structure.py
+
+# Test dependencies
+python subscan/check_dependencies.py
+
+# Run smoke tests
+python subscan/smoke_test_dominos.py
+```
 
 ---
 
 ## ❓ FAQ
 
 **Q: Do I need bioinformatics experience?**
-A: No. MutationScan is designed for all users.
+A: No. MutationScan provides a user-friendly pipeline for all researchers.
+
+**Q: What databases are supported?**
+A: NCBI, BV-BRC, EnteroBase, and PATRIC via our federated genome extractor. The pipeline automatically searches all databases for maximum genome coverage.
 
 **Q: Can I use my own genome files?**
-A: Currently, only NCBI accessions are supported. Local file support is planned.
+A: Currently, the pipeline uses accession-based downloading from public databases. Local FASTA file support is planned for future releases.
 
-**Q: How do I install all dependencies?**
-A: Use `pip install -e .[dev]` and clone all domino tools as described above.
+**Q: Which operating systems are supported?**
+A: **Windows** (development with mocked tools), **Linux** (full production support), **macOS** (via containerization). The federated extractor works on all platforms.
+
+**Q: How do I install dependencies?**
+A: Simple: `cd subscan && pip install -e .` - All domino tools are included.
+
+**Q: What if a database is down?**
+A: The federated extractor automatically tries alternative databases. Use `--database all` for maximum resilience.
 
 **Q: Where do I get help?**
-A: Read this README, check the Troubleshooting section, or open a GitHub Issue.
+A: Check this README, run diagnostic tools (`check_*.py`), or open a GitHub Issue.
 
 ---
 

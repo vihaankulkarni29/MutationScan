@@ -1,0 +1,8 @@
+#FILE	SEQUENCE	START	END	STRAND	GENE	COVERAGE	COVERAGE_MAP	GAPS	%COVERAGE	%IDENTITY	DATABASE	ACCESSION	PRODUCT	RESISTANCE
+test.fasta	contig_40	289756	290392	+	blaCTX-M-15	1-636/636	1-636/636	1/3	92.1	99.78	card	ARO:3000223	Beta-lactam resistance	ceftriaxone;cefotaxime
+test.fasta	contig_39	257317	258036	-	tet(A)	1-719/719	1-719/719	0/1	92.2	96.76	card	ARO:3000179	Tetracycline resistance	tetracycline;doxycycline
+test.fasta	contig_40	481236	482018	+	blaTEM-1	1-782/782	1-782/782	0/1	91.0	96.17	card	ARO:3000007	Beta-lactam resistance	ampicillin;amoxicillin
+test.fasta	contig_20	358429	359251	-	qnrS1	1-822/822	1-822/822	0/1	93.9	95.02	card	ARO:3000248	Fluoroquinolone resistance	ciprofloxacin;levofloxacin
+test.fasta	contig_21	171522	172180	+	dfrA17	1-658/658	1-658/658	0/0	91.0	95.31	card	ARO:3002567	Trimethoprim resistance	trimethoprim
+test.fasta	contig_15	153118	154134	+	sul1	1-1016/1016	1-1016/1016	0/1	99.1	95.70	card	ARO:3000410	Sulfonamide resistance	sulfamethoxazole
+test.fasta	contig_1	178746	179642	-	catA1	1-896/896	1-896/896	0/1	99.9	97.42	card	ARO:3000191	Phenicol resistance	chloramphenicol
