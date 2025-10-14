@@ -11,11 +11,10 @@ authors = [
 description = "A comprehensive pipeline for targeted, reference-driven mutation analysis of antimicrobial resistance genes."
 readme = "README.md"
 requires-python = ">=3.9"
-license = {file = "LICENSE"}
+license = "MIT"
 keywords = ["bioinformatics", "antimicrobial-resistance", "mutation-analysis", "genomics", "pipeline"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
@@ -64,7 +63,8 @@ dev = [
 ]
 
 [project.scripts]
-mutationscan = "tools.run_pipeline:main"
+mutationscan = "subscan.tools.run_pipeline:main"
 
-[tool.setuptools.packages.find]
-include = ["tools*", "src*"]
+[tool.setuptools]
+package-dir = {"subscan" = "src/subscan", "subscan.tools" = "tools"}
+packages = ["subscan", "subscan.tools"]
