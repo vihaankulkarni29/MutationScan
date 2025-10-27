@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MutationScan - Pipeline Running</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --pending-color: #94a3b8;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem 0;
+        }
+        
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 1rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .pipeline-stage {
+            background: white;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border-left: 5px solid var(--pending-color);
+            transition: all 0.3s ease;
+        }
+        
+        .pipeline-stage.pending {
+            border-left-color: var(--pending-color);
+            opacity: 0.6;
+        }
+        
+        .pipeline-stage.running {
+            border-left-color: var(--primary-color);
+            background: #eff6ff;
+            box-shadow: 0 5px 15px rgba(37, 99, 235, 0.2);
+        }
+        
+        .pipeline-stage.completed {
+            border-left-color: var(--success-color);
+            opacity: 0.9;
+        }
+        
+        .pipeline-stage.error {
+            border-left-color: var(--danger-color);
+            background: #fef2f2;
+        }
+        
+        .stage-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .stage-icon {
+            font-size: 2rem;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: #f1f5f9;
+        }
+        
+        .stage-icon.pending {
+            color: var(--pending-color);
+        }
+        
+        .stage-icon.running {
+            color: var(--primary-color);
+            animation: pulse 2s infinite;
+        }
+        
+        .stage-icon.completed {
+            color: var(--success-color);
+            background: #ecfdf5;
+        }
+        
+        .stage-icon.error {
+            color: var(--danger-color);
+            background: #fee2e2;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .stage-title {
+            flex-grow: 1;
+        }
+        
+        .stage-title h5 {
+            margin: 0;
+            font-weight: 700;
+        }
+        
+        .stage-status {
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+        
+        .progress {
+            height: 8px;
+            border-radius: 1rem;
+        }
+        
+        .progress-bar {
+            transition: width 0.5s ease;
+        }
+        
+        .log-container {
+            background: #1e293b;
+            color: #e2e8f0;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            margin-bottom: 0.25rem;
+            padding: 0.25rem 0;
+        }
+        
+        .log-entry.info {
+            color: #93c5fd;
+        }
+        
+        .log-entry.success {
+            color: #86efac;
+        }
+        
+        .log-entry.warning {
+            color: #fcd34d;
+        }
+        
+        .log-entry.error {
+            color: #fca5a5;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        
+        .stat-label {
+            font-size: 0.875rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .btn-stop {
+            background: var(--danger-color);
+            border: none;
+        }
+        
+        .btn-stop:hover {
+            background: #dc2626;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <!-- Header -->
+        <div class="text-center text-white mb-4">
+            <h1 class="display-5 fw-bold mb-2">
+                <i class="fas fa-dna"></i> Pipeline Execution
+            </h1>
+            <p class="lead" id="pipelineStatus">Starting pipeline...</p>
+        </div>
+
+        <!-- Stats Row -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value" id="overallProgress">0%</div>
+                    <div class="stat-label">Overall Progress</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value" id="currentStage">-</div>
+                    <div class="stat-label">Current Stage</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value" id="elapsedTime">00:00</div>
+                    <div class="stat-label">Elapsed Time</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-value" id="estimatedTime">--:--</div>
+                    <div class="stat-label">Est. Remaining</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- Pipeline Stages (Left) -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="mb-4">
+                            <i class="fas fa-project-diagram me-2"></i>Pipeline Stages
+                        </h5>
+                        
+                        <div id="pipelineStages">
+                            <!-- Stages will be dynamically populated -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs & Controls (Right) -->
+            <div class="col-lg-4">
+                <!-- Control Panel -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h6 class="mb-3"><i class="fas fa-sliders-h me-2"></i>Controls</h6>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-danger btn-stop" id="stopPipeline">
+                                <i class="fas fa-stop me-2"></i>Stop Pipeline
+                            </button>
+                            <button class="btn btn-outline-primary" id="viewResults" disabled>
+                                <i class="fas fa-chart-bar me-2"></i>View Results
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="window.location.href='/setup'">
+                                <i class="fas fa-arrow-left me-2"></i>Back to Setup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Logs -->
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="mb-3">
+                            <i class="fas fa-terminal me-2"></i>Live Logs
+                            <button class="btn btn-sm btn-outline-secondary float-end" id="clearLogs">
+                                Clear
+                            </button>
+                        </h6>
+                        <div class="log-container" id="logContainer">
+                            <div class="log-entry info">[INFO] Initializing pipeline...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Global state
+        let startTime = null;
+        let timerInterval = null;
+        let eventSource = null;
+
+        // Stage configurations
+        const stageConfig = [
+            { id: 1, name: 'Genome Harvester', icon: 'fa-download', description: 'Downloading genomes from database' },
+            { id: 2, name: 'Gene Annotator', icon: 'fa-tags', description: 'Identifying AMR genes' },
+            { id: 3, name: 'Sequence Extractor', icon: 'fa-cut', description: 'Extracting protein sequences' },
+            { id: 4, name: 'Wild-type Aligner', icon: 'fa-align-justify', description: 'Aligning to references' },
+            { id: 5, name: 'Mutation Analyzer', icon: 'fa-dna', description: 'Detecting mutations' },
+            { id: 6, name: 'Co-occurrence Analyzer', icon: 'fa-project-diagram', description: 'Finding mutation patterns' },
+            { id: 7, name: 'Report Generator', icon: 'fa-file-alt', description: 'Generating final report' }
+        ];
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            renderPipelineStages();
+            startProgressMonitoring();
+            setupControls();
+            startTimer();
+        });
+
+        // Render pipeline stages
+        function renderPipelineStages() {
+            const container = document.getElementById('pipelineStages');
+            
+            stageConfig.forEach(stage => {
+                const stageHtml = `
+                    <div class="pipeline-stage pending" id="stage-${stage.id}" data-stage-id="${stage.id}">
+                        <div class="stage-header">
+                            <div class="stage-icon pending">
+                                <i class="fas ${stage.icon}"></i>
+                            </div>
+                            <div class="stage-title">
+                                <h5>${stage.id}. ${stage.name}</h5>
+                                <div class="stage-status">${stage.description}</div>
+                            </div>
+                            <div class="stage-percentage">
+                                <span class="badge bg-secondary">0%</span>
+                            </div>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += stageHtml;
+            });
+        }
+
+        // Start progress monitoring via SSE
+        function startProgressMonitoring() {
+            eventSource = new EventSource('/api/stream/progress');
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updatePipelineState(data);
+            };
+            
+            eventSource.onerror = function() {
+                console.error('SSE connection error');
+            };
+        }
+
+        // Update pipeline state from server
+        function updatePipelineState(state) {
+            // Update overall status
+            document.getElementById('pipelineStatus').textContent = getStatusMessage(state.status);
+            
+            // Update stages
+            state.stages.forEach(stage => {
+                updateStage(stage.id, stage.status, stage.progress);
+            });
+            
+            // Update stats
+            const completedStages = state.stages.filter(s => s.status === 'completed').length;
+            const overallProgress = Math.round((completedStages / state.stages.length) * 100);
+            document.getElementById('overallProgress').textContent = overallProgress + '%';
+            document.getElementById('currentStage').textContent = state.current_stage || '-';
+            
+            // Update logs
+            if (state.log_messages && state.log_messages.length > 0) {
+                const lastLog = state.log_messages[state.log_messages.length - 1];
+                addLogEntry(lastLog.level, lastLog.message);
+            }
+            
+            // Check if completed
+            if (state.status === 'completed') {
+                onPipelineComplete(state);
+            } else if (state.status === 'error') {
+                onPipelineError(state);
+            }
+        }
+
+        // Update individual stage
+        function updateStage(stageId, status, progress) {
+            const stageElement = document.getElementById(`stage-${stageId}`);
+            const icon = stageElement.querySelector('.stage-icon');
+            const progressBar = stageElement.querySelector('.progress-bar');
+            const badge = stageElement.querySelector('.badge');
+            
+            // Remove all status classes
+            stageElement.classList.remove('pending', 'running', 'completed', 'error');
+            icon.classList.remove('pending', 'running', 'completed', 'error');
+            
+            // Add current status class
+            stageElement.classList.add(status);
+            icon.classList.add(status);
+            
+            // Update progress
+            progressBar.style.width = progress + '%';
+            badge.textContent = progress + '%';
+            badge.className = `badge bg-${getStatusColor(status)}`;
+        }
+
+        // Add log entry
+        function addLogEntry(level, message) {
+            const logContainer = document.getElementById('logContainer');
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${level}`;
+            entry.textContent = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // Timer
+        function startTimer() {
+            startTime = Date.now();
+            timerInterval = setInterval(updateTimer, 1000);
+        }
+
+        function updateTimer() {
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('elapsedTime').textContent = 
+                `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        // Setup controls
+        function setupControls() {
+            document.getElementById('stopPipeline').addEventListener('click', function() {
+                if (confirm('Are you sure you want to stop the pipeline?')) {
+                    fetch('/api/pipeline/stop', { method: 'POST' })
+                        .then(response => response.json())
+                        .then(data => {
+                            addLogEntry('warning', 'Pipeline stopped by user');
+                            clearInterval(timerInterval);
+                            eventSource.close();
+                        });
+                }
+            });
+
+            document.getElementById('clearLogs').addEventListener('click', function() {
+                document.getElementById('logContainer').innerHTML = '';
+            });
+        }
+
+        // Pipeline completion
+        function onPipelineComplete(state) {
+            clearInterval(timerInterval);
+            eventSource.close();
+            
+            document.getElementById('pipelineStatus').textContent = '✓ Pipeline Completed Successfully!';
+            document.getElementById('viewResults').disabled = false;
+            document.getElementById('stopPipeline').disabled = true;
+            
+            // Enable results button
+            document.getElementById('viewResults').addEventListener('click', function() {
+                window.location.href = '/results';
+            });
+            
+            addLogEntry('success', 'Pipeline completed! Click "View Results" to see your analysis.');
+        }
+
+        // Pipeline error
+        function onPipelineError(state) {
+            clearInterval(timerInterval);
+            eventSource.close();
+            
+            document.getElementById('pipelineStatus').textContent = '✗ Pipeline Failed';
+            document.getElementById('stopPipeline').disabled = true;
+            
+            addLogEntry('error', state.error_message || 'Unknown error occurred');
+        }
+
+        // Helper functions
+        function getStatusMessage(status) {
+            const messages = {
+                'idle': 'Preparing to start...',
+                'running': 'Pipeline is running...',
+                'completed': '✓ Pipeline completed successfully!',
+                'error': '✗ Pipeline encountered an error',
+                'stopped': 'Pipeline stopped'
+            };
+            return messages[status] || 'Unknown status';
+        }
+
+        function getStatusColor(status) {
+            const colors = {
+                'pending': 'secondary',
+                'running': 'primary',
+                'completed': 'success',
+                'error': 'danger'
+            };
+            return colors[status] || 'secondary';
+        }
+    </script>
+</body>
+</html>

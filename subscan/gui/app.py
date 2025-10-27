@@ -5,6 +5,7 @@ Provides a local web interface for running the MutationScan pipeline.
 """
 
 import os
+import sys
 import json
 import time
 import threading
@@ -89,17 +90,38 @@ def results():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Check system health and dependencies"""
-    health_status = {
-        'python': True,
-        'emboss': check_command_exists('needle'),
-        'abricate': check_command_exists('abricate'),
-        'disk_space_gb': get_disk_space(),
-        'internet': check_internet_connection(),
-        'timestamp': datetime.now().isoformat()
-    }
-    
-    return jsonify(health_status)
+    """Check system health and dependencies using health_check.py tool"""
+    try:
+        # Call health_check.py with --json flag
+        health_check_path = Path(__file__).parent.parent / 'tools' / 'health_check.py'
+        
+        result = subprocess.run(
+            [sys.executable, str(health_check_path), '--json'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            text=True
+        )
+        
+        if result.returncode in [0, 1]:  # 0 = good/warning, 1 = error but still valid JSON
+            health_status = json.loads(result.stdout)
+            health_status['timestamp'] = datetime.now().isoformat()
+            return jsonify(health_status)
+        else:
+            raise Exception(f"Health check failed: {result.stderr}")
+            
+    except Exception as e:
+        # Fallback to basic checks if health_check.py fails
+        return jsonify({
+            'python': {'status': 'good', 'installed': True, 'version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"},
+            'emboss': {'status': 'good' if check_command_exists('needle') else 'error', 'installed': check_command_exists('needle')},
+            'abricate': {'status': 'good' if check_command_exists('abricate') else 'error', 'installed': check_command_exists('abricate')},
+            'disk': {'free_gb': get_disk_space(), 'status': 'good' if get_disk_space() >= 10 else 'warning'},
+            'internet': {'connected': check_internet_connection(), 'status': 'good' if check_internet_connection() else 'warning'},
+            'overall_status': 'warning',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        })
 
 
 @app.route('/api/upload/accessions', methods=['POST'])
@@ -409,44 +431,283 @@ def update_stage_progress(stage_id: int, progress: int, status: str = 'running')
             break
 
 
+def run_subprocess_with_progress(cmd: List[str], stage_id: int, stage_name: str) -> tuple:
+    """
+    Run a subprocess command and capture output
+    Returns: (success: bool, stdout: str, stderr: str)
+    """
+    try:
+        # Run the command and capture output
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        stdout_lines = []
+        stderr_lines = []
+        
+        # Track progress (incremental updates)
+        progress = 10
+        progress_increment = 15  # Increment by 15% for each output line (max 90%)
+        
+        # Read stdout in real-time
+        for line in process.stdout:
+            line = line.strip()
+            if line:
+                stdout_lines.append(line)
+                add_log_message('info', f'[{stage_name}] {line}')
+                
+                # Update progress incrementally
+                progress = min(progress + progress_increment, 90)
+                update_stage_progress(stage_id, progress, 'running')
+        
+        # Wait for completion
+        process.wait()
+        
+        # Read any remaining stderr
+        stderr_output = process.stderr.read()
+        if stderr_output:
+            stderr_lines = stderr_output.strip().split('\n')
+            for line in stderr_lines:
+                if line.strip():
+                    add_log_message('warning', f'[{stage_name}] {line.strip()}')
+        
+        stdout = '\n'.join(stdout_lines)
+        stderr = '\n'.join(stderr_lines)
+        
+        success = process.returncode == 0
+        
+        if not success:
+            add_log_message('error', f'{stage_name} failed with exit code {process.returncode}')
+        
+        return success, stdout, stderr
+        
+    except Exception as e:
+        add_log_message('error', f'Failed to run {stage_name}: {str(e)}')
+        return False, '', str(e)
+
+
 def run_pipeline_worker(config: Dict, output_dir: Path):
     """
     Background worker that executes the pipeline
-    This is a placeholder - will be implemented in TODO 4
+    Calls actual domino tools as subprocesses
     """
     global pipeline_state
     
     try:
         add_log_message('info', f'Output directory: {output_dir}')
+        add_log_message('info', 'Preparing pipeline execution...')
         
-        # Simulate pipeline execution (will be replaced with actual pipeline calls)
-        stages = [
-            ('Genome Harvester', 'run_harvester.py'),
-            ('Gene Annotator', 'run_annotator.py'),
-            ('Sequence Extractor', 'run_extractor.py'),
-            ('Wild-type Aligner', 'run_aligner.py'),
-            ('Mutation Analyzer', 'run_analyzer.py'),
-            ('Co-occurrence Analyzer', 'run_cooccurrence_analyzer.py'),
-            ('Report Generator', 'run_reporter.py'),
+        # Get tools directory
+        tools_dir = Path(__file__).parent.parent / 'tools'
+        
+        # Prepare gene list (from file, template, or manual entry)
+        gene_list_path = None
+        if config.get('genes_file'):
+            gene_list_path = config['genes_file']
+        elif config.get('genes_list'):
+            # Create temporary gene list file
+            gene_list_path = output_dir / 'genes.txt'
+            with open(gene_list_path, 'w') as f:
+                for gene in config['genes_list']:
+                    f.write(f"{gene.strip()}\n")
+            add_log_message('info', f'Created gene list with {len(config["genes_list"])} genes')
+        
+        # Stage 1: Genome Harvester
+        stage_1_dir = output_dir / '01_harvester_results'
+        stage_1_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 1/7: Downloading genomes...')
+        update_stage_progress(1, 10, 'running')
+        
+        harvester_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_harvester.py'),
+            '--accessions', config['accessions_file'],
+            '--email', config.get('email', 'user@example.com'),
+            '--output-dir', str(stage_1_dir),
+            '--database', config.get('database', 'ncbi')
         ]
         
-        for idx, (stage_name, script) in enumerate(stages, 1):
-            add_log_message('info', f'Starting {stage_name}...')
-            update_stage_progress(idx, 0, 'running')
-            
-            # Simulate work (will be replaced with actual subprocess calls in TODO 4)
-            for progress in range(0, 101, 20):
-                time.sleep(0.5)  # Simulate processing time
-                update_stage_progress(idx, progress, 'running')
-            
-            update_stage_progress(idx, 100, 'completed')
-            add_log_message('success', f'{stage_name} completed')
+        success, stdout, stderr = run_subprocess_with_progress(harvester_cmd, 1, 'Genome Harvester')
+        if not success:
+            raise Exception(f"Harvester failed: {stderr}")
+        
+        update_stage_progress(1, 100, 'completed')
+        add_log_message('success', 'Genome download completed')
+        
+        genome_manifest = stage_1_dir / 'genome_manifest.json'
+        if not genome_manifest.exists():
+            raise Exception('Genome manifest not created')
+        
+        # Stage 2: Gene Annotator
+        stage_2_dir = output_dir / '02_annotator_results'
+        stage_2_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 2/7: Identifying AMR genes...')
+        update_stage_progress(2, 10, 'running')
+        
+        annotator_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_annotator.py'),
+            '--manifest', str(genome_manifest),
+            '--output-dir', str(stage_2_dir),
+            '--threads', str(config.get('threads', 'auto'))
+        ]
+        
+        success, stdout, stderr = run_subprocess_with_progress(annotator_cmd, 2, 'Gene Annotator')
+        if not success:
+            raise Exception(f"Annotator failed: {stderr}")
+        
+        update_stage_progress(2, 100, 'completed')
+        add_log_message('success', 'AMR gene annotation completed')
+        
+        annotation_manifest = stage_2_dir / 'annotation_manifest.json'
+        if not annotation_manifest.exists():
+            raise Exception('Annotation manifest not created')
+        
+        # Stage 3: Sequence Extractor
+        stage_3_dir = output_dir / '03_extractor_results'
+        stage_3_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 3/7: Extracting protein sequences...')
+        update_stage_progress(3, 10, 'running')
+        
+        extractor_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_extractor.py'),
+            '--manifest', str(annotation_manifest),
+            '--gene-list', str(gene_list_path),
+            '--output-dir', str(stage_3_dir),
+            '--threads', str(config.get('threads', 'auto'))
+        ]
+        
+        success, stdout, stderr = run_subprocess_with_progress(extractor_cmd, 3, 'Sequence Extractor')
+        if not success:
+            raise Exception(f"Extractor failed: {stderr}")
+        
+        update_stage_progress(3, 100, 'completed')
+        add_log_message('success', 'Sequence extraction completed')
+        
+        protein_manifest = stage_3_dir / 'protein_manifest.json'
+        if not protein_manifest.exists():
+            raise Exception('Protein manifest not created')
+        
+        # Stage 4: Wild-type Aligner
+        stage_4_dir = output_dir / '04_aligner_results'
+        stage_4_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 4/7: Aligning to reference sequences...')
+        update_stage_progress(4, 10, 'running')
+        
+        aligner_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_aligner.py'),
+            '--manifest', str(protein_manifest),
+            '--output-dir', str(stage_4_dir),
+            '--threads', str(config.get('threads', 'auto')),
+            '--sepi-species', config.get('species', 'Escherichia coli')
+        ]
+        
+        success, stdout, stderr = run_subprocess_with_progress(aligner_cmd, 4, 'Wild-type Aligner')
+        if not success:
+            raise Exception(f"Aligner failed: {stderr}")
+        
+        update_stage_progress(4, 100, 'completed')
+        add_log_message('success', 'Alignment completed')
+        
+        alignment_manifest = stage_4_dir / 'alignment_manifest.json'
+        if not alignment_manifest.exists():
+            raise Exception('Alignment manifest not created')
+        
+        # Stage 5: Mutation Analyzer
+        stage_5_dir = output_dir / '05_analyzer_results'
+        stage_5_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 5/7: Analyzing mutations...')
+        update_stage_progress(5, 10, 'running')
+        
+        analyzer_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_analyzer.py'),
+            '--manifest', str(alignment_manifest),
+            '--output-dir', str(stage_5_dir),
+            '--threads', str(config.get('threads', 'auto'))
+        ]
+        
+        success, stdout, stderr = run_subprocess_with_progress(analyzer_cmd, 5, 'Mutation Analyzer')
+        if not success:
+            raise Exception(f"Analyzer failed: {stderr}")
+        
+        update_stage_progress(5, 100, 'completed')
+        add_log_message('success', 'Mutation analysis completed')
+        
+        analysis_manifest = stage_5_dir / 'analysis_manifest.json'
+        if not analysis_manifest.exists():
+            raise Exception('Analysis manifest not created')
+        
+        # Stage 6: Co-occurrence Analyzer
+        stage_6_dir = output_dir / '06_cooccurrence_results'
+        stage_6_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 6/7: Finding mutation patterns...')
+        update_stage_progress(6, 10, 'running')
+        
+        cooccurrence_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_cooccurrence_analyzer.py'),
+            '--manifest', str(analysis_manifest),
+            '--output-dir', str(stage_6_dir)
+        ]
+        
+        success, stdout, stderr = run_subprocess_with_progress(cooccurrence_cmd, 6, 'Co-occurrence Analyzer')
+        if not success:
+            raise Exception(f"Co-occurrence analyzer failed: {stderr}")
+        
+        update_stage_progress(6, 100, 'completed')
+        add_log_message('success', 'Co-occurrence analysis completed')
+        
+        cooccurrence_manifest = stage_6_dir / 'cooccurrence_manifest.json'
+        if not cooccurrence_manifest.exists():
+            raise Exception('Co-occurrence manifest not created')
+        
+        # Stage 7: Report Generator
+        stage_7_dir = output_dir / '07_reporter_results'
+        stage_7_dir.mkdir(exist_ok=True)
+        
+        add_log_message('info', 'Stage 7/7: Generating final report...')
+        update_stage_progress(7, 10, 'running')
+        
+        reporter_cmd = [
+            sys.executable,
+            str(tools_dir / 'run_reporter.py'),
+            '--manifest', str(cooccurrence_manifest),
+            '--output-dir', str(stage_7_dir)
+        ]
+        
+        success, stdout, stderr = run_subprocess_with_progress(reporter_cmd, 7, 'Report Generator')
+        if not success:
+            raise Exception(f"Reporter failed: {stderr}")
+        
+        update_stage_progress(7, 100, 'completed')
+        add_log_message('success', 'Report generation completed')
+        
+        # Check for final report
+        final_report = stage_7_dir / 'final_report.html'
+        if not final_report.exists():
+            # Try alternative name
+            final_report = stage_7_dir / 'mutation_analysis_report.html'
         
         # Mark pipeline as completed
         pipeline_state['status'] = 'completed'
         pipeline_state['end_time'] = datetime.now().isoformat()
-        pipeline_state['report_path'] = str(output_dir / 'final_report.html')
+        pipeline_state['report_path'] = str(final_report) if final_report.exists() else None
         add_log_message('success', 'Pipeline completed successfully!')
+        add_log_message('success', f'Report available at: {final_report}')
         
     except Exception as e:
         pipeline_state['status'] = 'error'
