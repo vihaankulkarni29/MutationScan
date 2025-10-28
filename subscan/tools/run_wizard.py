@@ -72,6 +72,29 @@ def print_error(message):
     print(f"{Colors.RED}✗{Colors.END}  {message}")
 
 
+def limit_accessions_file(src_path: str, max_n: int) -> str:
+    """Create a trimmed accession file with first N non-empty lines.
+
+    Returns path to the new file. If anything fails, returns original path.
+    """
+    try:
+        src = Path(src_path)
+        dst = src.with_name(f"{src.stem}_first_{max_n}{src.suffix or '.txt'}")
+        count = 0
+        with open(src, 'r', encoding='utf-8') as fin, open(dst, 'w', encoding='utf-8') as fout:
+            for line in fin:
+                if line.strip():
+                    fout.write(line)
+                    count += 1
+                    if count >= max_n:
+                        break
+        print_success(f"Created limited accession file: {dst} ({count} entries)")
+        return str(dst)
+    except Exception as e:
+        print_warning(f"Could not create limited accession file, using full list instead: {e}")
+        return src_path
+
+
 def ask_question(question, default=None, validator=None):
     """Ask a question and get user input with optional validation"""
     while True:
@@ -258,6 +281,20 @@ def main():
         else:
             print_error("Cannot proceed without accessions. Exiting.")
             sys.exit(1)
+
+    # Optional: limit to first N genomes for initial run safety
+    print_info("Optionally limit to the first N accessions to avoid heavy first runs")
+    limit_answer = ask_question("Limit to first N genomes? (press Enter for no limit)", default="")
+    if limit_answer:
+        try:
+            n = int(limit_answer)
+            if n > 0:
+                config['accessions'] = limit_accessions_file(config['accessions'], n)
+                config['max_genomes'] = n
+            else:
+                print_warning("Ignoring non-positive limit; proceeding without limiting")
+        except ValueError:
+            print_warning("Invalid number; proceeding without limiting")
     
     # ========================================================================
     # STEP 2: Target Genes
@@ -384,7 +421,10 @@ def main():
     print(f"{Colors.BOLD}{Colors.GREEN}Configuration Summary{Colors.END}")
     print(f"{Colors.BOLD}{Colors.GREEN}{'='*70}{Colors.END}\n")
     
-    print(f"{Colors.BOLD}Accessions:{Colors.END} {config['accessions']}")
+    if 'max_genomes' in config:
+        print(f"{Colors.BOLD}Accessions:{Colors.END} {config['accessions']} (limited to first {config['max_genomes']})")
+    else:
+        print(f"{Colors.BOLD}Accessions:{Colors.END} {config['accessions']}")
     print(f"{Colors.BOLD}Gene List:{Colors.END} {config['gene_list']}")
     print(f"{Colors.BOLD}Email:{Colors.END} {config['email']}")
     
