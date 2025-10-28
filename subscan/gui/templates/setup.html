@@ -293,9 +293,15 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Thread Count</label>
-                                        <input type="number" class="form-control" id="threads" 
-                                               value="auto" placeholder="auto">
-                                        <small class="text-muted">Use 'auto' for optimal detection</small>
+                                        <input type="text" class="form-control" id="threads" 
+                                               value="auto" placeholder="auto or a number (e.g., 4)">
+                                        <small class="text-muted">Use 'auto' to let the pipeline choose; or enter a number to fix CPU threads.</small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label">Max Genomes (optional)</label>
+                                        <input type="number" class="form-control" id="maxGenomes" 
+                                               min="1" placeholder="e.g., 100">
+                                        <small class="text-muted">Limit how many accessions to process from your list on this run.</small>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label">Quality Threshold</label>
@@ -571,6 +577,12 @@
                     database: document.getElementById('database').value,
                     output_dir: document.getElementById('outputDir').value || 'results',
                     threads: document.getElementById('threads').value,
+                    max_genomes: (function(){
+                        const v = document.getElementById('maxGenomes').value;
+                        if (!v) return null;
+                        const n = parseInt(v, 10);
+                        return isNaN(n) || n <= 0 ? null : n;
+                    })(),
                     quality: parseFloat(document.getElementById('quality').value)
                 };
 

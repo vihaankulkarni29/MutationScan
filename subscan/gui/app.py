@@ -517,6 +517,37 @@ def run_pipeline_worker(config: Dict, output_dir: Path):
                     f.write(f"{gene.strip()}\n")
             add_log_message('info', f'Created gene list with {len(config["genes_list"])} genes')
         
+        # Resolve threads configuration (auto -> os.cpu_count())
+        threads_cfg = str(config.get('threads', 'auto')).strip()
+        if threads_cfg.lower() == 'auto' or threads_cfg == '' or threads_cfg == 'None':
+            threads = os.cpu_count() or 4
+            add_log_message('info', f"Threads: auto -> using {threads} cores")
+        else:
+            try:
+                threads = max(1, int(float(threads_cfg)))
+            except Exception:
+                threads = os.cpu_count() or 4
+                add_log_message('warning', f"Invalid threads value '{threads_cfg}', defaulting to {threads}")
+
+        # Optionally limit number of genomes for first run
+        accessions_path = Path(config['accessions_file'])
+        max_genomes = config.get('max_genomes')
+        if isinstance(max_genomes, int) and max_genomes > 0:
+            limited_path = output_dir / f"accessions_first_{max_genomes}.txt"
+            try:
+                with open(accessions_path, 'r', encoding='utf-8') as fin, open(limited_path, 'w', encoding='utf-8') as fout:
+                    count = 0
+                    for line in fin:
+                        if line.strip():
+                            fout.write(line)
+                            count += 1
+                            if count >= max_genomes:
+                                break
+                add_log_message('info', f'Limiting accessions to first {max_genomes} entries for this run')
+                accessions_path = limited_path
+            except Exception as e:
+                add_log_message('warning', f'Failed to create limited accessions file; proceeding with full list: {e}')
+
         # Stage 1: Genome Harvester
         stage_1_dir = output_dir / '01_harvester_results'
         stage_1_dir.mkdir(exist_ok=True)
@@ -527,7 +558,7 @@ def run_pipeline_worker(config: Dict, output_dir: Path):
         harvester_cmd = [
             sys.executable,
             str(tools_dir / 'run_harvester.py'),
-            '--accessions', config['accessions_file'],
+            '--accessions', str(accessions_path),
             '--email', config.get('email', 'user@example.com'),
             '--output-dir', str(stage_1_dir),
             '--database', config.get('database', 'ncbi')
@@ -556,7 +587,7 @@ def run_pipeline_worker(config: Dict, output_dir: Path):
             str(tools_dir / 'run_annotator.py'),
             '--manifest', str(genome_manifest),
             '--output-dir', str(stage_2_dir),
-            '--threads', str(config.get('threads', 'auto'))
+            '--threads', str(threads)
         ]
         
         success, stdout, stderr = run_subprocess_with_progress(annotator_cmd, 2, 'Gene Annotator')
@@ -583,7 +614,7 @@ def run_pipeline_worker(config: Dict, output_dir: Path):
             '--manifest', str(annotation_manifest),
             '--gene-list', str(gene_list_path),
             '--output-dir', str(stage_3_dir),
-            '--threads', str(config.get('threads', 'auto'))
+            '--threads', str(threads)
         ]
         
         success, stdout, stderr = run_subprocess_with_progress(extractor_cmd, 3, 'Sequence Extractor')
@@ -609,7 +640,7 @@ def run_pipeline_worker(config: Dict, output_dir: Path):
             str(tools_dir / 'run_aligner.py'),
             '--manifest', str(protein_manifest),
             '--output-dir', str(stage_4_dir),
-            '--threads', str(config.get('threads', 'auto')),
+            '--threads', str(threads),
             '--sepi-species', config.get('species', 'Escherichia coli')
         ]
         
@@ -636,7 +667,7 @@ def run_pipeline_worker(config: Dict, output_dir: Path):
             str(tools_dir / 'run_analyzer.py'),
             '--manifest', str(alignment_manifest),
             '--output-dir', str(stage_5_dir),
-            '--threads', str(config.get('threads', 'auto'))
+            '--threads', str(threads)
         ]
         
         success, stdout, stderr = run_subprocess_with_progress(analyzer_cmd, 5, 'Mutation Analyzer')
