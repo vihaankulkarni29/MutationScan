@@ -1,6 +1,6 @@
 # 🧬 MutationScan
 
-**Comprehensive Antimicrobial Resistance Mutation Analysis Pipeline for researchers**
+**Comprehensive Antimicrobial Resistance Mutation Analysis Pipeline for researchers and scinetists**
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](VERSION)
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)](RELEASE_NOTES.md)
@@ -442,3 +442,4 @@ If problems persist:
 
 
 *MutationScan: Professional, user-centric AMR mutation analysis for everyone.*
+
