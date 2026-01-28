@@ -1,12 +1,27 @@
 # MutationScan Configuration File
 # Edit this file to customize pipeline parameters
 
-# NCBI Entrez API Settings
+# NCBI Datasets API v2 Settings
 ncbi:
-  email: "your.email@example.com"  # REQUIRED: Your email for NCBI
-  api_key: null                     # Optional: NCBI API key (faster requests)
+  email: "your.email@example.com"  # REQUIRED: Your email for NCBI Datasets API
+  api_key: null                     # Optional: NCBI API key (faster/priority requests)
   max_retries: 3                    # Maximum retry attempts for API calls
   retry_delay: 1.0                  # Delay between retries (seconds)
+  timeout: 60                       # Timeout for API requests (seconds)
+  batch_size: 50                    # Max genomes per batch download
+  include_plasmids: true            # Include plasmid sequences in downloads
+
+# Genome Extraction Settings
+genome_extraction:
+  input_mode: "search"              # Input mode: search (query string) or file (accession list)
+  input_query: ""                   # Search query (if mode=search)
+  input_file: ""                    # Path to accession list file (if mode=file)
+  output_dir: "data/genomes"        # Directory to save downloaded genomes
+  max_genomes: 100                  # Maximum number of genomes to download
+  min_coverage: 90                  # Minimum sequence coverage threshold (%)
+  min_length: 1000000               # Minimum genome length (bp)
+  extract_metadata: true            # Extract clinical metadata
+  metadata_output: "data/genomes/metadata_master.csv"  # CSV file for metadata
 
 # ABRicate Gene Screening Settings
 abricate:

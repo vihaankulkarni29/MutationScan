@@ -10,6 +10,8 @@ PyYAML>=5.4,<7.0
 
 # Network and API
 requests>=2.26.0,<3.0
+ncbi-datasets-pylib>=16.0.0
+python-requests-cache>=1.0.0
 
 # Visualization
 matplotlib>=3.4.0,<4.0
