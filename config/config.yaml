@@ -1,0 +1,81 @@
+# MutationScan Configuration File
+# Edit this file to customize pipeline parameters
+
+# NCBI Entrez API Settings
+ncbi:
+  email: "your.email@example.com"  # REQUIRED: Your email for NCBI
+  api_key: null                     # Optional: NCBI API key (faster requests)
+  max_retries: 3                    # Maximum retry attempts for API calls
+  retry_delay: 1.0                  # Delay between retries (seconds)
+
+# ABRicate Gene Screening Settings
+abricate:
+  database: "card"                  # Database: card, ncbi, resfinder, megares, vfdb
+  min_coverage: 80                  # Minimum percent identity (%)
+  min_identity: 90                  # Minimum percent coverage (%)
+  evalue: 1e-6                      # E-value threshold
+  executable: "abricate"            # Path to abricate executable
+
+# Local BLAST Settings
+blast:
+  database_path: "data/databases"   # Path to BLAST database
+  executable: "blastn"              # Path to blastn executable
+  evalue: 1e-5                      # E-value threshold
+  num_threads: 4                    # Number of parallel threads
+  word_size: 11                     # BLAST word size
+  max_target_seqs: 500              # Maximum target sequences
+
+# Sequence Extraction Settings
+sequence_extraction:
+  genetic_code: "standard"          # Genetic code table: standard, vertebrate, bacterial
+  min_orf_length: 100               # Minimum ORF length (bp)
+  min_protein_length: 30            # Minimum protein length (aa)
+
+# Sequence Alignment Settings
+alignment:
+  algorithm: "global"               # Algorithm: global (Needleman-Wunsch) or local (Smith-Waterman)
+  match_score: 2                    # Score for matching residues
+  mismatch_penalty: -1              # Penalty for mismatches
+  gap_penalty: -1                   # Penalty for gaps
+  gap_extend_penalty: -0.5          # Penalty for gap extension
+
+# Variant Calling Settings
+variant_calling:
+  min_variant_frequency: 0.01       # Minimum variant frequency threshold
+  variant_types: ["SNP", "indel"]   # Types of variants to detect
+  report_format: "json"             # Output format: json or csv
+
+# PyMOL Visualization Settings
+visualization:
+  pymol_executable: "pymol"         # Path to PyMOL executable
+  pymol_headless: true              # Run PyMOL without GUI
+  dpi: 300                          # Image resolution (dots per inch)
+  color_scheme: "default"           # Color scheme for visualization
+  highlight_color: "red"            # Color for mutation highlights
+  background_color: "white"         # Background color
+  figure_width: 800                 # Image width (pixels)
+  figure_height: 600                # Image height (pixels)
+
+# Output Settings
+output:
+  results_dir: "data/output"        # Directory for results
+  format: "json"                    # Output format: json or csv
+  compress_results: false           # Compress output files
+  keep_intermediates: false         # Keep intermediate files
+  log_level: "INFO"                 # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+
+# Logging Settings
+logging:
+  log_dir: "logs"                   # Directory for log files
+  log_level: "INFO"                 # Console log level
+  file_log_level: "DEBUG"           # File log level (more detailed)
+  max_log_size: 10485760            # Max log file size (10MB)
+  backup_count: 5                   # Number of backup logs to keep
+
+# Advanced Settings
+advanced:
+  cache_ncbi_results: true          # Cache NCBI API results
+  cache_dir: ".cache"               # Cache directory
+  parallel_processing: false        # Enable parallel processing (experimental)
+  max_parallel_jobs: 4              # Maximum parallel jobs
+  timeout_seconds: 300              # Timeout for long-running operations
