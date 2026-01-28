@@ -6,6 +6,16 @@
 
 A professional, modular bioinformatics pipeline for automated detection, analysis, and visualization of antimicrobial resistance (AMR) genes in bacterial genomes.
 
+## 📚 Documentation
+
+All documentation is organized in the [docs/](docs/) folder:
+
+- **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
+- **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed directory architecture
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - Quick lookup guide
+- **[Documentation Index](docs/INDEX.md)** - Complete documentation index
+- **[Setup Details](docs/SETUP_COMPLETE.md)** - Installation and setup verification
+
 ## Overview
 
 MutationScan streamlines the complex process of genomic analysis by automating:
@@ -398,7 +408,7 @@ See `.github/workflows/tests.yml` for workflow configuration.
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
+We welcome contributions! Please see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for:
 - Code standards and style guide
 - Pull request process
 - Bug reporting guidelines
