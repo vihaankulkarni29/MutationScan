@@ -317,8 +317,7 @@ class NCBIDatasetsGenomeDownloader:
         """
         Extract FASTA from zip and parse metadata_report.jsonl.
         
-        Critical QC: Checks if extracted length >= 90% of reference.
-        If not, flags as QC_FAIL and skips alignment.
+        Simple QC: Checks if file is populated (> 1KB).
 
         Args:
             zip_data: BytesIO object of the downloaded zip
@@ -342,50 +341,28 @@ class NCBIDatasetsGenomeDownloader:
         
         try:
             with zipfile.ZipFile(zip_data, 'r') as zf:
-                # List files in zip
                 file_list = zf.namelist()
-                logger.debug(f"Zip contents: {file_list}")
                 
-                # Find .fna file (FASTA nucleic acid)
-                fna_file = None
-                for fname in file_list:
-                    if fname.endswith(".fna"):
-                        fna_file = fname
-                        break
-                
+                # 1. Find and Validate FASTA
+                fna_file = next((f for f in file_list if f.endswith(".fna")), None)
                 if not fna_file:
-                    logger.error(f"No .fna file found in zip for {accession}")
+                    logger.error(f"No .fna file found for {accession}")
                     return None, metadata_dict
                 
-                # Extract FASTA content
                 fasta_content = zf.read(fna_file).decode('utf-8')
                 
-                # Parse metadata from data_report.jsonl
-                jsonl_file = None
-                for fname in file_list:
-                    if "data_report.jsonl" in fname:
-                        jsonl_file = fname
-                        break
-                
-                if jsonl_file:
-                    metadata_dict.update(
-                        self._parse_jsonl_metadata(zf.read(jsonl_file).decode('utf-8'))
-                    )
-                
-                # QC Check: Calculate coverage
-                fasta_length = len([line for line in fasta_content.split('\n') if not line.startswith('>')])
-                reference_length = len(fasta_content)  # Simplified; ideally compare to reference
-                
-                coverage = (fasta_length / reference_length * 100) if reference_length > 0 else 0
-                
-                if coverage < 90:
-                    logger.warning(
-                        f"QC FAIL: {accession} - Coverage: {coverage:.1f}% (< 90%)"
-                    )
+                # Simple QC: Is the file actually populated? (> 1KB)
+                if len(fasta_content) < 1000:
+                    logger.warning(f"QC FAIL: {accession} is empty or too small.")
                     metadata_dict["QC Status"] = "QC_FAIL"
                     return None, metadata_dict
+
+                # 2. Parse Metadata
+                jsonl_file = next((f for f in file_list if "data_report.jsonl" in f), None)
+                if jsonl_file:
+                    metadata_dict.update(self._parse_jsonl_metadata(zf.read(jsonl_file).decode('utf-8')))
                 
-                # Save FASTA with standardized naming
+                # 3. Save File
                 output_file = self.output_dir / f"{accession}.fasta"
                 with open(output_file, 'w') as f:
                     f.write(fasta_content)
@@ -394,18 +371,15 @@ class NCBIDatasetsGenomeDownloader:
                 logger.info(f"Saved {accession}.fasta ({len(fasta_content)} bytes)")
                 return output_file, metadata_dict
                 
-        except zipfile.BadZipFile as e:
-            logger.error(f"Invalid zip file for {accession}: {e}")
-            return None, metadata_dict
         except Exception as e:
-            logger.error(f"Error processing zip for {accession}: {e}")
+            logger.error(f"Error processing {accession}: {e}")
             return None, metadata_dict
 
     def _parse_jsonl_metadata(self, jsonl_content: str) -> Dict:
         """
         Parse NCBI data_report.jsonl to extract clinical metadata.
         
-        Extracts: Organism, Strain, Collection Date, Host, Isolation Source, Country.
+        Navigates nested JSON structure: assembly_info -> biosample -> attributes.
         Defaults to "N/A" for missing fields (anti-hallucination).
 
         Args:
@@ -414,45 +388,32 @@ class NCBIDatasetsGenomeDownloader:
         Returns:
             Dictionary with clinical metadata
         """
-        metadata = {
-            "Organism Name": "N/A",
-            "Strain": "N/A",
-            "Collection Date": "N/A",
-            "Host": "N/A",
-            "Isolation Source": "N/A",
-            "Geo Location": "N/A",
-        }
-        
+        metadata = {}
         try:
-            for line in jsonl_content.strip().split('\n'):
-                if not line.strip():
-                    continue
-                
-                record = json.loads(line)
-                
-                # Extract high-value clinical fields
-                metadata["Organism Name"] = record.get(
-                    "organism_name", record.get("infraspecific_name", "N/A")
-                ) or "N/A"
-                metadata["Strain"] = record.get("strain", "N/A") or "N/A"
-                metadata["Collection Date"] = record.get(
-                    "collection_date", "N/A"
-                ) or "N/A"
-                metadata["Host"] = record.get("host", "N/A") or "N/A"
-                metadata["Isolation Source"] = record.get(
-                    "isolation_source", "N/A"
-                ) or "N/A"
-                
-                # Geographic location
-                country = record.get("country", "N/A") or "N/A"
-                geo_location = record.get("geo_location", "") or ""
-                metadata["Geo Location"] = f"{country}/{geo_location}".rstrip("/") or "N/A"
-                
-                break  # Take first record
-                
-        except json.JSONDecodeError as e:
-            logger.debug(f"Could not parse JSONL metadata: {e}")
-        
+            # Parse only the first line (first record)
+            line = jsonl_content.strip().split('\n')[0]
+            record = json.loads(line)
+            
+            # 1. Extract Assembly Info
+            asm_info = record.get("assembly_info", {})
+            biosample = asm_info.get("biosample", {})
+            
+            metadata["Organism Name"] = record.get("organism", {}).get("organism_name", "N/A")
+            metadata["Strain"] = biosample.get("strain", "N/A")
+            
+            # 2. Extract Attributes (The tricky part)
+            # attributes is a list: [{'name': 'host', 'value': 'Homo sapiens'}, ...]
+            attributes = biosample.get("attributes", [])
+            attr_map = {item["name"]: item["value"] for item in attributes}
+            
+            metadata["Collection Date"] = attr_map.get("collection_date", "N/A")
+            metadata["Host"] = attr_map.get("host", "N/A")
+            metadata["Isolation Source"] = attr_map.get("isolation_source", "N/A")
+            metadata["Geo Location"] = attr_map.get("geo_loc_name", "N/A")
+            
+        except Exception as e:
+            logger.debug(f"Metadata parsing warning: {e}")
+            
         return metadata
 
     def _save_metadata_master(self, metadata_list: List[Dict]) -> Path:
