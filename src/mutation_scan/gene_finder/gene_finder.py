@@ -229,11 +229,12 @@ class GeneFinder:
         
         try:
             # Run blastn with tabular output (outfmt 6)
+            # Added 'slen' (Subject Length) for true coverage calculation
             cmd = [
                 'blastn',
                 '-query', str(fasta_file),
                 '-subject', str(reference_db),
-                '-outfmt', '6 qseqid sseqid pident length qstart qend sstart send sstrand',
+                '-outfmt', '6 qseqid sseqid pident length qstart qend sstart send sstrand slen',
                 '-evalue', '1e-5',
             ]
             
@@ -279,7 +280,7 @@ class GeneFinder:
         """
         Parse BLASTn tabular output to standardized DataFrame.
 
-        BLAST outfmt 6 columns: qseqid, sseqid, pident, length, qstart, qend, sstart, send, sstrand
+        BLAST outfmt 6 columns: qseqid, sseqid, pident, length, qstart, qend, sstart, send, sstrand, slen
 
         Args:
             output: Raw BLASTn output text
@@ -294,8 +295,8 @@ class GeneFinder:
             return self._empty_dataframe()
         
         try:
-            # Parse tab-delimited output
-            columns = ['qseqid', 'sseqid', 'pident', 'length', 'qstart', 'qend', 'sstart', 'send', 'sstrand']
+            # Parse tab-delimited output (includes slen for coverage calculation)
+            columns = ['qseqid', 'sseqid', 'pident', 'length', 'qstart', 'qend', 'sstart', 'send', 'sstrand', 'slen']
             df = pd.read_csv(StringIO(output), sep='\t', names=columns, comment='#')
             
             if df.empty:
@@ -304,17 +305,25 @@ class GeneFinder:
             # Filter by identity
             df = df[df['pident'] >= min_identity]
             
-            # Calculate coverage (simplified: alignment length / subject length)
-            # Note: True coverage would require subject sequence length
-            # For now, we'll filter by alignment length as a proxy
-            df = df[df['length'] >= 100]  # Minimum 100bp alignment
+            # Calculate true coverage percentage (alignment length / subject length)
+            df['coverage_pct'] = (df['length'] / df['slen']) * 100
+            df = df[df['coverage_pct'] >= min_coverage]
+            
+            if df.empty:
+                return self._empty_dataframe()
             
             # Standardize columns
             df['Gene'] = df['sseqid']  # Subject sequence ID (gene name from reference)
             df['Contig'] = df['qseqid']  # Query sequence ID (contig name)
-            df['Start'] = df['sstart']
-            df['End'] = df['send']
-            df['Strand'] = df['sstrand'].apply(lambda x: '+' if x == 'plus' else '-')
+            
+            # Use QUERY coordinates (qstart/qend) for contig positions
+            # Ensure Start < End for Python slicing (regardless of strand)
+            df['Start'] = df[['qstart', 'qend']].min(axis=1)
+            df['End'] = df[['qstart', 'qend']].max(axis=1)
+            
+            # Strand standardization (BLAST returns 'plus'/'minus', we use +/-)
+            df['Strand'] = df['sstrand'].apply(lambda x: '-' if 'minus' in str(x) else '+')
+            
             df['Identity'] = df['pident']
             df['Source'] = 'BLAST'
             
@@ -327,7 +336,7 @@ class GeneFinder:
             df['End'] = df['End'].astype(int)
             df['Identity'] = df['Identity'].astype(float)
             
-            logger.info(f"Found {len(df)} housekeeping genes")
+            logger.info(f"Found {len(df)} housekeeping genes after QC")
             return df
             
         except Exception as e:
