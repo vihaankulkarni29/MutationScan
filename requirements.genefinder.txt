@@ -1,0 +1,12 @@
+# =============================================================================
+# GeneFinder Module - Python Dependencies
+# =============================================================================
+# Minimal production dependencies for hybrid gene detection
+# ABRicate and BLAST+ are provided by staphb/abricate base image
+# =============================================================================
+
+# DataFrame manipulation for standardized output
+pandas>=1.5.0
+
+# Optional: Add biopython if we need FASTA parsing utilities later
+# biopython>=1.80

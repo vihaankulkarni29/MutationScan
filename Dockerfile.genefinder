@@ -1,0 +1,87 @@
+# =============================================================================
+# GeneFinder Module - Production Dockerfile
+# =============================================================================
+# Base: StaPH-B ABRicate image (includes ABRicate + BLAST+ pre-installed)
+# Strategy: Layer Python 3 support on top of battle-tested bioinformatics base
+# =============================================================================
+
+FROM staphb/abricate:latest
+
+# Metadata
+LABEL maintainer="MutationScan Project"
+LABEL description="Hybrid gene detection using ABRicate (resistance) and BLASTn (housekeeping)"
+LABEL version="1.0.0"
+
+# Install Python 3 and system dependencies
+# StaPH-B images are Debian-based, so we use apt-get
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy Python requirements and install dependencies
+# Doing this before source code copy enables Docker layer caching
+COPY requirements.genefinder.txt .
+RUN pip3 install --no-cache-dir -r requirements.genefinder.txt
+
+# CRITICAL: Download ABRicate databases during build
+# This pre-downloads CARD/ResFinder/etc. so users don't wait at runtime
+# Expected databases: card, resfinder, ncbi, argannot, plasmidfinder, vfdb
+RUN abricate --setupdb && \
+    abricate --list && \
+    echo "ABRicate databases successfully installed"
+
+# Create reference directory for housekeeping gene database
+# Users will mount their custom reference FASTA here
+RUN mkdir -p /app/refs && \
+    chmod 755 /app/refs
+
+# Copy source code
+COPY src/ ./src/
+
+# Verify installations
+RUN echo "=== Verifying Installation ===" && \
+    python3 --version && \
+    abricate --version && \
+    blastn -version && \
+    echo "=== Installation Complete ==="
+
+# Set entrypoint to Python module
+# Override with custom commands at runtime if needed
+ENTRYPOINT ["python3", "-m", "mutation_scan.gene_finder.gene_finder"]
+
+# Default command (can be overridden)
+CMD ["--help"]
+
+# =============================================================================
+# USAGE INSTRUCTIONS:
+# =============================================================================
+# 
+# Build the image:
+#   docker build -f Dockerfile.genefinder -t mutationscan/genefinder:latest .
+#
+# Run with volume mounts:
+#   docker run -v /path/to/genomes:/data \
+#              -v /path/to/housekeeping_refs:/app/refs \
+#              -v /path/to/output:/output \
+#              mutationscan/genefinder:latest \
+#              --input /data/genome.fasta \
+#              --output /output/genes.csv \
+#              --reference /app/refs/housekeeping.fasta
+#
+# Volume mount breakdown:
+#   -v /path/to/genomes:/data          → Input FASTA files (from GenomeExtractor)
+#   -v /path/to/housekeeping_refs:/app/refs → Custom housekeeping gene database
+#   -v /path/to/output:/output         → Output CSV files with gene coordinates
+#
+# Interactive shell for debugging:
+#   docker run -it --entrypoint /bin/bash mutationscan/genefinder:latest
+#
+# Check ABRicate databases:
+#   docker run mutationscan/genefinder:latest abricate --list
+#
+# =============================================================================
