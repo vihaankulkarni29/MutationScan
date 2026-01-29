@@ -1,11 +1,7 @@
-"""
-Sequence Extractor Module
+"""Sequence Extractor module for extracting and translating gene sequences."""
 
-Handles coordinate-based protein sequence extraction from genomic sequences.
-Provides translation and sequence processing utilities.
-"""
+from .sequence_extractor import SequenceExtractor
 
-from .coordinate_parser import CoordinateParser
-from .translator import SequenceTranslator
+__all__ = ['SequenceExtractor']
 
 __all__ = ["CoordinateParser", "SequenceTranslator"]
