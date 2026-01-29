@@ -1,98 +1,70 @@
-# Multi-stage Docker build for MutationScan
+# =============================================================================
+# MutationScan - Production Dockerfile
+# =============================================================================
+# Optimized for "Democratization": Low bandwidth, fast deployment, offline-ready
+# 
+# Architecture:
+# - Base: StaPH-B ABRicate image (proven bioinformatics base)
+# - Layer 1: Python 3 installation
+# - Layer 2: ABRicate database pre-download (20-30 min at build time)
+# - Layer 3: Python dependencies (pandas, biopython, NCBI Datasets)
+# - Layer 4: Directory structure & permissions
+#
+# Result: Container is 100% ready on first run (no runtime database downloads)
+# =============================================================================
 
-# Stage 1: Base image with dependencies
-FROM python:3.10-slim as base
+FROM staphb/abricate:latest
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# METADATA
+LABEL maintainer="MutationScan Team"
+LABEL version="1.0"
+LABEL description="Democratized AMR Pipeline: NCBI Ingestion -> ABRicate/BLAST -> Variant Calling"
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
+# 1. SWITCH TO ROOT
+# The base image defaults to a non-root user, but we need root to install Python.
+USER root
+
+# 2. INSTALL PYTHON & SYSTEM TOOLS
+# We clean apt lists immediately to keep the image small (Democratization = Low Bandwidth)
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-dev \
     curl \
-    wget \
-    ncbi-blast+ \
-    abricate \
+    unzip \
+    zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Create application directory
+# 3. SETUP ABRICATE DATABASES (The "Offline" Fix)
+# We force the download of CARD and NCBI databases during the build.
+# This ensures the container works 100% offline once pulled.
+RUN abricate --setupdb
+
+# 4. INSTALL PYTHON DEPENDENCIES
+# We copy requirements first to leverage Docker caching.
 WORKDIR /app
-
-# Stage 2: Development image
-FROM base as development
-
-# Install development dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    vim \
-    less \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements
 COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Install Python dependencies with dev extras
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir \
-    pytest>=6.2.5 \
-    pytest-cov>=2.12.1 \
-    black>=21.7b0 \
-    flake8>=3.9.2 \
-    mypy>=0.910 \
-    isort>=5.9.3
+# 5. SETUP DIRECTORY STRUCTURE
+# Create standard folders so the script never fails on "DirectoryNotFound"
+RUN mkdir -p /app/data/genomes \
+    /app/data/raw \
+    /app/data/results \
+    /app/logs \
+    /app/refs
 
-# Copy source code
-COPY . .
+# 6. COPY SOURCE CODE
+# Copy the entire src folder
+COPY src /app/src
 
-# Install package in development mode
-RUN pip install -e .
+# 7. PERMISSIONS (Security Best Practice)
+# Create a dedicated user so we don't run as root
+RUN useradd -m bioinfo && \
+    chown -R bioinfo:bioinfo /app
+USER bioinfo
 
-# Stage 3: Production image
-FROM base as production
-
-# Copy requirements
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy source code
-COPY . .
-
-# Install package
-RUN pip install .
-
-# Create non-root user
-RUN useradd -m -u 1000 mutationscan && \
-    chown -R mutationscan:mutationscan /app
-
-USER mutationscan
-
-# Set up volumes for data
-VOLUME ["/app/data", "/app/logs"]
-
-# Default command
-ENTRYPOINT ["python", "-m", "mutation_scan"]
-
-# Stage 4: Testing image
-FROM development as testing
-
-# Set PYTHONPATH for testing
-ENV PYTHONPATH=/app/src
-
-# Run tests as default command
-CMD ["pytest", "-v", "--cov=src", "tests/"]
-
-# Final: Production ready image
-FROM production as final
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import mutation_scan; print('healthy')" || exit 1
-
-LABEL maintainer="Your Organization <contact@example.com>" \
-      version="0.1.0" \
-      description="MutationScan: Bioinformatics pipeline for AMR gene detection"
+# 8. ENTRYPOINT
+# Default command prints the python version to verify install, 
+# but user can override this to run specific scripts.
+CMD ["python3", "--version"]
