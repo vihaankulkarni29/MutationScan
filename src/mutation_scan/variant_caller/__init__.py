@@ -5,7 +5,6 @@ Performs pairwise sequence alignments and identifies variants/mutations
 between sequences.
 """
 
-from .alignment import SequenceAligner
-from .variant_detector import VariantDetector
+from .variant_caller import VariantCaller
 
-__all__ = ["SequenceAligner", "VariantDetector"]
+__all__ = ['VariantCaller']

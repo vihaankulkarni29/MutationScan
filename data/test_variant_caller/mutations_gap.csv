@@ -1,0 +1,3 @@
+Accession,Gene,Mutation,Status,Phenotype,Reference_PDB
+ACC001,test,K2R,Resistant,Test resistance,TEST
+ACC003,gyrA,S6L,VUS,N/A,N/A

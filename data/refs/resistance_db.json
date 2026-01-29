@@ -1,0 +1,286 @@
+{
+  "gyrA": [
+    {
+      "mutation": "S83L",
+      "phenotype": "Fluoroquinolone resistance (high-level)",
+      "pdb": "3NUU",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "S83A",
+      "phenotype": "Fluoroquinolone resistance (moderate)",
+      "pdb": "3NUU",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "D87N",
+      "phenotype": "Fluoroquinolone resistance (high-level)",
+      "pdb": "3NUU",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "D87G",
+      "phenotype": "Fluoroquinolone resistance (moderate)",
+      "pdb": "3NUU",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "D87Y",
+      "phenotype": "Fluoroquinolone resistance (moderate)",
+      "pdb": "3NUU",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "A67S",
+      "phenotype": "Fluoroquinolone resistance (low-level)",
+      "pdb": "3NUU",
+      "references": "PMID: 8878035"
+    }
+  ],
+  "parC": [
+    {
+      "mutation": "S80I",
+      "phenotype": "Fluoroquinolone resistance (moderate, requires gyrA mutation)",
+      "pdb": "N/A",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "S80R",
+      "phenotype": "Fluoroquinolone resistance (moderate)",
+      "pdb": "N/A",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "E84K",
+      "phenotype": "Fluoroquinolone resistance (moderate)",
+      "pdb": "N/A",
+      "references": "PMID: 8878035"
+    },
+    {
+      "mutation": "E84V",
+      "phenotype": "Fluoroquinolone resistance (moderate)",
+      "pdb": "N/A",
+      "references": "PMID: 8878035"
+    }
+  ],
+  "parE": [
+    {
+      "mutation": "L416F",
+      "phenotype": "Fluoroquinolone resistance (low-level)",
+      "pdb": "N/A",
+      "references": "PMID: 9023215"
+    },
+    {
+      "mutation": "S458A",
+      "phenotype": "Fluoroquinolone resistance (low-level)",
+      "pdb": "N/A",
+      "references": "PMID: 9023215"
+    }
+  ],
+  "acrA": [
+    {
+      "mutation": "G288D",
+      "phenotype": "Reduced efflux pump activity (sensitivity to antibiotics)",
+      "pdb": "N/A",
+      "references": "CARD database"
+    }
+  ],
+  "acrB": [
+    {
+      "mutation": "G141D",
+      "phenotype": "Reduced efflux pump activity (sensitivity to antibiotics)",
+      "pdb": "1IWG",
+      "references": "CARD database"
+    },
+    {
+      "mutation": "F610S",
+      "phenotype": "Reduced substrate binding (sensitivity to antibiotics)",
+      "pdb": "1IWG",
+      "references": "CARD database"
+    },
+    {
+      "mutation": "R620S",
+      "phenotype": "Reduced drug efflux (sensitivity to antibiotics)",
+      "pdb": "1IWG",
+      "references": "CARD database"
+    }
+  ],
+  "tolC": [
+    {
+      "mutation": "N356S",
+      "phenotype": "Reduced efflux channel stability (sensitivity to antibiotics)",
+      "pdb": "1EK9",
+      "references": "CARD database"
+    },
+    {
+      "mutation": "Y362H",
+      "phenotype": "Reduced efflux channel function (sensitivity to antibiotics)",
+      "pdb": "1EK9",
+      "references": "CARD database"
+    }
+  ],
+  "ampC": [
+    {
+      "mutation": "G154E",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL) activity",
+      "pdb": "1KE4",
+      "references": "PMID: 10617651"
+    },
+    {
+      "mutation": "E272K",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL) activity",
+      "pdb": "1KE4",
+      "references": "PMID: 10617651"
+    }
+  ],
+  "rpoB": [
+    {
+      "mutation": "S531L",
+      "phenotype": "Rifampicin resistance (high-level)",
+      "pdb": "N/A",
+      "references": "PMID: 7545155"
+    },
+    {
+      "mutation": "H526Y",
+      "phenotype": "Rifampicin resistance (high-level)",
+      "pdb": "N/A",
+      "references": "PMID: 7545155"
+    },
+    {
+      "mutation": "D516V",
+      "phenotype": "Rifampicin resistance (moderate)",
+      "pdb": "N/A",
+      "references": "PMID: 7545155"
+    }
+  ],
+  "folA": [
+    {
+      "mutation": "P21L",
+      "phenotype": "Trimethoprim resistance",
+      "pdb": "1RX2",
+      "references": "PMID: 8486736"
+    },
+    {
+      "mutation": "F153S",
+      "phenotype": "Trimethoprim resistance",
+      "pdb": "1RX2",
+      "references": "PMID: 8486736"
+    }
+  ],
+  "rpsL": [
+    {
+      "mutation": "K43R",
+      "phenotype": "Streptomycin resistance",
+      "pdb": "2UXB",
+      "references": "PMID: 6317668"
+    },
+    {
+      "mutation": "K88R",
+      "phenotype": "Streptomycin resistance",
+      "pdb": "2UXB",
+      "references": "PMID: 6317668"
+    }
+  ],
+  "fusA": [
+    {
+      "mutation": "G515D",
+      "phenotype": "Fusidic acid resistance",
+      "pdb": "N/A",
+      "references": "PMID: 15509770"
+    },
+    {
+      "mutation": "H457Y",
+      "phenotype": "Fusidic acid resistance",
+      "pdb": "N/A",
+      "references": "PMID: 15509770"
+    }
+  ],
+  "ponA": [
+    {
+      "mutation": "S307T",
+      "phenotype": "Beta-lactam resistance (low-level)",
+      "pdb": "N/A",
+      "references": "CARD database"
+    }
+  ],
+  "ompF": [
+    {
+      "mutation": "G119D",
+      "phenotype": "Reduced porin permeability (multidrug resistance)",
+      "pdb": "2OMF",
+      "references": "PMID: 9223621"
+    }
+  ],
+  "marR": [
+    {
+      "mutation": "L89V",
+      "phenotype": "Derepression of marRAB operon (multidrug resistance)",
+      "pdb": "N/A",
+      "references": "PMID: 8416922"
+    },
+    {
+      "mutation": "G103S",
+      "phenotype": "Derepression of marRAB operon (multidrug resistance)",
+      "pdb": "N/A",
+      "references": "PMID: 8416922"
+    }
+  ],
+  "soxR": [
+    {
+      "mutation": "R128L",
+      "phenotype": "Derepression of soxS (multidrug resistance)",
+      "pdb": "N/A",
+      "references": "PMID: 8416922"
+    }
+  ],
+  "blaTEM": [
+    {
+      "mutation": "R164S",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL, TEM-15)",
+      "pdb": "1BTL",
+      "references": "PMID: 1783943"
+    },
+    {
+      "mutation": "E104K",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL, TEM-3)",
+      "pdb": "1BTL",
+      "references": "PMID: 1783943"
+    },
+    {
+      "mutation": "G238S",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL, TEM-5)",
+      "pdb": "1BTL",
+      "references": "PMID: 1783943"
+    }
+  ],
+  "blaCTX-M": [
+    {
+      "mutation": "P167S",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL, CTX-M-15)",
+      "pdb": "1YLY",
+      "references": "PMID: 12654752"
+    },
+    {
+      "mutation": "D240G",
+      "phenotype": "Extended-spectrum beta-lactamase (ESBL)",
+      "pdb": "1YLY",
+      "references": "PMID: 12654752"
+    }
+  ],
+  "blaOXA": [
+    {
+      "mutation": "G157D",
+      "phenotype": "Carbapenemase activity (OXA-48 variant)",
+      "pdb": "3HBR",
+      "references": "PMID: 15249575"
+    }
+  ],
+  "blaNDM": [
+    {
+      "mutation": "M154L",
+      "phenotype": "Enhanced carbapenemase activity (NDM-1 variant)",
+      "pdb": "3S0Z",
+      "references": "PMID: 19704174"
+    }
+  ]
+}
