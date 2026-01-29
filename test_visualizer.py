@@ -116,13 +116,18 @@ def test_pml_generation():
     
     # Verify script contains key commands
     assert "fetch 3NUU" in pml_script, "Missing fetch command"
+    assert "async=0" in pml_script, "Missing async=0 (synchronous fetch)"
     assert "show cartoon" in pml_script, "Missing cartoon display"
+    assert "color white" in pml_script, "Missing white background"
     assert "resi 83" in pml_script, "Missing S83L position"
     assert "resi 87" in pml_script, "Missing D87N position"
     assert "color red" in pml_script, "Missing resistant color"
+    assert "label" in pml_script, "Missing mutation labels"
+    assert "zoom" in pml_script, "Missing zoom command"
+    assert "width=1200, height=1200" in pml_script, "Missing high-res output (1200x1200)"
     assert "png test_output.png" in pml_script, "Missing PNG output"
     
-    logger.info("✓ TEST 1 PASSED: Script generation correct")
+    logger.info("✓ TEST 1 PASSED: Script generation correct (with labels, zoom, white bg, 1200x1200)")
 
 
 def test_mutation_parsing():

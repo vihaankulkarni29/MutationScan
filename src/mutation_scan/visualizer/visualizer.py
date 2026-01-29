@@ -268,13 +268,13 @@ class PyMOLVisualizer:
             f"# PDB: {pdb_id}",
             f"# Mutations: {', '.join([m['mutation'] for m in mutations])}",
             "",
-            "# 1. FETCH STRUCTURE",
+            "# 1. FETCH STRUCTURE (SYNCHRONOUS)",
             f"fetch {pdb_id}, async=0",
             "",
             "# 2. CLEAN VIEW",
             "hide all",
             "show cartoon",
-            "color gray80",
+            "color white, all",
             "",
             "# 3. HIGHLIGHT MUTATIONS",
         ]
@@ -295,6 +295,7 @@ class PyMOLVisualizer:
             color = "red" if status == "Resistant" else "orange"
             
             selection_name = f"mut_{i+1}"
+            mutation_label = mutation
             
             script_lines.extend([
                 f"",
@@ -302,18 +303,41 @@ class PyMOLVisualizer:
                 f"select {selection_name}, resi {position}",
                 f"show spheres, {selection_name}",
                 f"color {color}, {selection_name}",
+                f"label {selection_name} and name CA, \"{mutation_label}\"",
+            ])
+        
+        # Calculate zoom target (average of all mutation positions if multiple)
+        if mutations:
+            positions = [self._extract_position(m['mutation']) for m in mutations]
+            positions = [p for p in positions if p is not None]
+            
+            if positions:
+                # If we have mutations, zoom to show them prominently
+                script_lines.extend([
+                    "",
+                    "# 4. CAMERA SETUP",
+                    f"zoom resi {'+'.join(map(str, positions))}, 10",
+                ])
+            else:
+                script_lines.extend([
+                    "",
+                    "# 4. CAMERA SETUP",
+                    "zoom",
+                ])
+        else:
+            script_lines.extend([
+                "",
+                "# 4. CAMERA SETUP",
+                "zoom",
             ])
         
         # Add rendering commands
         script_lines.extend([
             "",
-            "# 4. CAMERA SETUP",
-            "zoom",
+            "# 5. RENDER HIGH-QUALITY IMAGE",
             "set ray_shadows, 0",
             "set antialias, 2",
-            "",
-            "# 5. RENDER HIGH-QUALITY IMAGE",
-            f"png {str(output_png)}, ray=1, dpi=300",
+            f"png {str(output_png)}, width=1200, height=1200, ray=1",
             "",
             "# 6. QUIT",
             "quit"
