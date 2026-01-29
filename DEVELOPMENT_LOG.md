@@ -70,7 +70,33 @@ GenomeProcessor
 **Testing:**
 - Unit tests: 15 test cases covering initialization, file I/O, metadata parsing, validation
 - Integration tests: Full workflow (search → download → validate)
-- Status: All tests pass ✅
+- Status: All tests pass ✅ (14/14 tests passing in 2.41s)
+
+**Test Cases:**
+```
+✅ test_initialization: Class instantiation with all parameters
+✅ test_initialization_without_email: Error handling for missing email
+✅ test_read_accession_file: File I/O for accession lists
+✅ test_read_accession_file_not_found: Error handling for missing files
+✅ test_parse_jsonl_metadata: Metadata extraction from JSONL
+✅ test_parse_jsonl_missing_fields: Anti-hallucination (N/A defaults)
+✅ test_search_accessions: API mocking for search functionality
+✅ test_calculate_coverage: Coverage calculation logic
+✅ test_extract_metadata: FASTA metadata extraction
+✅ test_initialization (GenomeProcessor): Processor initialization
+✅ test_validate_invalid_file_not_found: Error handling
+✅ test_validate_invalid_genome_short: Length validation
+✅ test_validate_valid_genome: Valid FASTA acceptance
+✅ test_full_workflow: Complete integration test
+```
+
+**Issues Found & Fixed During Testing:**
+
+| Issue | Root Cause | Fix | Commit |
+|-------|-----------|-----|--------|
+| FileNotFoundError: log directory | Logger setup before directory creation | Move directory creation before `_setup_logging()` | af6e8c6 |
+| PermissionError: file lock on cleanup | Logger handlers not closed | Add handler cleanup in test tearDown() | af6e8c6 |
+| Module import failure | Wrong PYTHONPATH in test environment | Use pytest with sys.path manipulation in test file | af6e8c6 |
 
 **Dependencies Added:**
 ```
