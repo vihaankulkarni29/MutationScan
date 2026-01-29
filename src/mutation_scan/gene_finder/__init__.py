@@ -1,11 +1,12 @@
 """
 Gene Finder Module
 
-Wrapper module for AMR gene detection using ABRicate and local BLASTn.
-Provides unified interface for gene screening and annotation.
+Hybrid gene detection using ABRicate (resistance genes) and BLASTn (housekeeping genes).
+Returns standardized DataFrames for downstream processing.
 """
 
-from .abricate_wrapper import AbricateWrapper
-from .blast_wrapper import BLASTWrapper
+from .gene_finder import GeneFinder
+
+__all__ = ["GeneFinder"]
 
 __all__ = ["AbricateWrapper", "BLASTWrapper"]
