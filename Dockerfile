@@ -24,7 +24,8 @@ LABEL description="Democratized AMR Pipeline: NCBI Ingestion -> ABRicate/BLAST -
 # The base image defaults to a non-root user, but we need root to install Python.
 USER root
 
-# 2. INSTALL PYTHON & SYSTEM TOOLS
+# 2. INSTALL PYTHON, PYMOL & SYSTEM TOOLS
+# Added 'pymol' and 'libglew-dev' for the visualizer module
 # We clean apt lists immediately to keep the image small (Democratization = Low Bandwidth)
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -33,6 +34,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     unzip \
     zip \
+    pymol \
+    libglew-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. SETUP ABRICATE DATABASES (The "Offline" Fix)

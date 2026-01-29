@@ -1,0 +1,5 @@
+Accession,Gene,Mutation,Status,Phenotype,Reference_PDB
+GCF_001,gyrA,S83L,Resistant,Fluoroquinolone resistance (high-level),3NUU
+GCF_001,gyrA,D87N,Resistant,Fluoroquinolone resistance (high-level),3NUU
+GCF_002,parC,S80I,Resistant,Fluoroquinolone resistance (moderate),N/A
+GCF_003,acrB,G141D,VUS,N/A,1IWG

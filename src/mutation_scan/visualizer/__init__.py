@@ -5,7 +5,7 @@ Handles 3D structure visualization and mutation mapping using PyMOL.
 Provides automated visualization and rendering capabilities.
 """
 
-from .pymol_automation import PyMOLAutomator
-from .structure_mapper import StructureMapper
+from .visualizer import PyMOLVisualizer
 
-__all__ = ["PyMOLAutomator", "StructureMapper"]
+__all__ = ["PyMOLVisualizer"]
+
