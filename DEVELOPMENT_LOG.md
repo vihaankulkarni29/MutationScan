@@ -115,63 +115,234 @@ python-requests-cache>=1.0.0
 
 ---
 
+---
+
+### Tool 2: GeneFinder Module (ABRicate Integration)
+
+**Status:** ✅ COMPLETE (Commit: bd36f3a)
+
+**What was done:**
+- Implemented ABRicate-based resistance gene detection
+- Created Docker container with StaPH-B base image
+- Pre-downloaded 11 resistance databases (CARD, ResFinder, NCBI, etc.)
+- Gene coordinate extraction from ABRicate TSV output
+- Standardized output format for SequenceExtractor integration
+
+**Key Features:**
+- Database pre-loading in Docker (20-30 min build time saves runtime delays)
+- Offline-ready deployment
+- 11 databases: CARD (6052 seqs), ResFinder (3206), NCBI (8035), ARG-ANNOT, VFDB, etc.
+- Output: `{Accession}_genes.csv` with columns: Gene, Contig, Start, End, Strand, Identity, Source
+
+---
+
+### Tool 3: SequenceExtractor Module (OBO + Table 11 Translation)
+
+**Status:** ✅ COMPLETE (Commit: cfa95f6)
+
+**What was done:**
+- Efficient genome loading with `Bio.SeqIO.index()` (lazy loading)
+- **CRITICAL: OBO coordinate conversion** (1-based BLAST → 0-based Python)
+- Table 11 bacterial translation (Bacterial/Archaeal/Plant Plastid genetic code)
+- Reverse complement handling for minus strand genes
+- Stop codon trimming for partial genes
+- Standardized FASTA headers: `>GeneName|Accession|Contig|Start-End`
+
+**Key Implementation Details:**
+
+```python
+# OBO Conversion Formula
+dna_seq = contig_seq[start - 1 : end]  # 1-based → 0-based
+
+# Strand handling
+if strand == '-':
+    dna_seq = dna_seq.reverse_complement()
+
+# Table 11 translation
+protein_seq = dna_seq.translate(table=11)
+protein_str = str(protein_seq).rstrip('*')  # Trim stop codons
+```
+
+**Output Format:**
+- Individual protein FASTA files: `{Accession}_{GeneName}.faa`
+- Headers: `>GeneName|Accession|Contig|Start-End`
+- Compatible with VariantCaller input requirements
+
+---
+
+### Tool 4: VariantCaller Module (Python-Native Alignment)
+
+**Status:** ✅ COMPLETE (Commit: aa655bc)
+
+**What was done:**
+- Implemented Python-native global alignment with `Bio.Align.PairwiseAligner`
+- **CRITICAL: Residue Counter Algorithm** (gap-aware position tracking)
+- BLOSUM62 substitution matrix (industry standard)
+- Gap penalties optimized to prefer substitutions over indels
+- Resistance mutation interpretation via `resistance_db.json`
+- CSV output with 6 columns: Accession, Gene, Mutation, Status, Phenotype, Reference_PDB
+
+**Errors Encountered & Solutions:**
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| S83L detected as indel instead of substitution | Default gap penalties too lenient | Set `open_gap_score=-10.0`, `extend_gap_score=-0.5` |
+| Alignment order swapped | `align(query, ref)` instead of `align(ref, query)` | Corrected to `align(reference.seq, query.seq)` |
+| Position 83 counted as 85 | Gaps in reference counted as positions | Implemented Residue Counter Algorithm (skip gaps) |
+
+**Key Implementation Details:**
+
+```python
+# Residue Counter Algorithm (Gap-Aware Position Tracking)
+reference_position = 0
+
+for i in range(len(aligned_ref)):
+    ref_aa = aligned_ref[i]
+    query_aa = aligned_query[i]
+    
+    # Increment ONLY if reference is NOT a gap
+    if ref_aa != '-':
+        reference_position += 1
+    
+    # Check for substitution
+    if ref_aa != query_aa and ref_aa != '-' and query_aa != '-':
+        mutation_str = f"{ref_aa}{reference_position}{query_aa}"
+        # Record mutation (e.g., "S83L")
+```
+
+**Resistance Database (`data/refs/resistance_db.json`):**
+- 18 genes covered (gyrA, parC, parE, acrA, acrB, tolC, ampC, rpoB, folA, rpsL, fusA, etc.)
+- 70+ known resistance mutations
+- Each entry includes:
+  - Mutation (e.g., "S83L")
+  - Phenotype (e.g., "Fluoroquinolone resistance (high-level)")
+  - PDB ID (e.g., "3NUU")
+  - Literature references (PMID)
+
+**Testing:**
+- Unit tests: 4 comprehensive test cases
+- All tests pass ✅
+
+**Test Cases:**
+```
+✅ TEST 1: Residue Counter Algorithm (K2R detection)
+✅ TEST 2: Gap Handling (insertions ignored correctly)
+✅ TEST 3: S83L gyrA Mutation (real-world fluoroquinolone resistance)
+✅ TEST 4: Multiple Mutations (K2R + I4V in same protein)
+```
+
+**Anti-Hallucination Compliance:**
+- ✅ Never count gaps as positions
+- ✅ Never crash on partial proteins
+- ✅ Default phenotype to "N/A" if not in database
+- ✅ Position counter increments ONLY on non-gap reference residues
+- ✅ No subprocess calls to external binaries (pure Python)
+
+**Output Format:**
+```csv
+Accession,Gene,Mutation,Status,Phenotype,Reference_PDB
+GCF_001,gyrA,S83L,Resistant,Fluoroquinolone resistance (high-level),3NUU
+GCF_002,parC,S80I,Resistant,Fluoroquinolone resistance (moderate),N/A
+GCF_003,acrA,K45R,VUS,N/A,N/A
+```
+
+**Helper Methods:**
+- `_generate_dummy_references()`: Creates E. coli K12 gyrA wild-type for instant testing
+- `get_available_references()`: Lists available wild-type references
+- `get_mutation_summary()`: Statistics (total, resistant, VUS, by gene)
+
+**Dependencies Added:**
+```
+biopython>=1.79  # Already in requirements.txt (for PairwiseAligner)
+```
+
+---
+
 ## 📊 Current Repository Status
 
-**Total Commits:** 3
+**Total Commits:** 13
 1. Initial setup (48 files, 4,476 insertions)
 2. Repository cleanup (markdown → docs/)
 3. GenomeExtractor refactoring (10 files, 1,883 insertions)
+4-9. GeneFinder + SequenceExtractor implementations
+10-12. Docker infrastructure (production Dockerfile, requirements.txt, verification)
+13. VariantCaller module (17 files, 1,189 insertions)
 
 **File Structure:**
 ```
 MutationScan/
 ├── src/mutation_scan/
 │   ├── genome_extractor/
-│   │   ├── entrez_handler.py (528 lines - REFACTORED)
-│   │   ├── genome_processor.py (140 lines - ENHANCED)
-│   │   └── __init__.py (UPDATED)
+│   │   ├── entrez_handler.py (528 lines - COMPLETE ✅)
+│   │   ├── genome_processor.py (140 lines - COMPLETE ✅)
+│   │   └── __init__.py
 │   ├── gene_finder/
+│   │   ├── abricate_runner.py (COMPLETE ✅)
+│   │   ├── gene_finder.py (COMPLETE ✅)
+│   │   └── __init__.py
 │   ├── sequence_extractor/
+│   │   ├── sequence_extractor.py (412 lines - COMPLETE ✅)
+│   │   └── __init__.py
 │   ├── variant_caller/
+│   │   ├── variant_caller.py (581 lines - COMPLETE ✅)
+│   │   └── __init__.py
 │   ├── visualizer/
 │   └── utils/
+├── data/
+│   ├── refs/
+│   │   └── resistance_db.json (NEW - 279 lines)
+│   └── test_variant_caller/ (NEW - test fixtures)
 ├── tests/
-│   └── test_genome_extractor.py (NEW - 400 lines)
+│   ├── test_genome_extractor.py (400 lines)
+│   └── test_variant_caller.py (NEW - 230 lines)
 ├── examples/
-│   ├── genome_extractor_example.py (NEW)
-│   └── quick_start.py (NEW)
-├── docs/
-│   ├── GENOME_EXTRACTOR_API.md (CONSOLIDATED - removed after consolidation)
-│   └── GENOME_EXTRACTOR_REFACTORING.md (CONSOLIDATED - removed after consolidation)
-├── config/
-│   └── config.yaml (UPDATED)
-├── requirements.txt (UPDATED)
-└── setup.py
-```
+│   ├── genome_extractor_example.py
+│   └── quick_start.py
+├── docker/
+│   ├── Dockerfile (70 lines - production-ready)
+│   └── Dockerfile.genefinder (99 lines)
+├── requirements.txt (UPDATED - 18 lines)
+├── Docker_Structure.md (NEW - 385 lines, executive documentation)
+└── DEVELOPMENT_LOG.md (THIS FILE - UPDATED)
 
 ---
 
 ## 🎯 Next Tools to Incorporate
 
-### Tool 2: FastaAAExtractor (Sequence Extraction)
-- **Planned:** Integrate with GenomeExtractor output
-- **Expected:** Takes `{Accession}.fasta` → extracts coding sequences → translates to proteins
-- **Status:** Not started
+### Tool 5: Visualizer (PyMOL Integration) - OPTIONAL
+- **Planned:** 3D protein structure visualization with mutation mapping
+- **Expected:** Color-coded mutations on PDB structures
+- **Status:** Not started (optional enhancement)
 
-### Tool 3: ABRicate Integration (Antibiotic Resistance Detection)
-- **Planned:** Parse FASTA files with resistance gene database
-- **Expected:** Generates resistance profile per genome
-- **Status:** Not started
+### Tool 6: Utils Module
+- **Planned:** Common utilities (file I/O, logging, config management)
+- **Expected:** Extract shared code from existing modules
+- **Status:** Can be extracted later from existing modules
 
-### Tool 4: VariantCaller (Mutation Detection)
-- **Planned:** Compare sequences → identify variants
-- **Expected:** SNP/Indel detection with frequency
-- **Status:** Not started
+---
 
-### Tool 5: PyMOL Visualizer (3D Protein Visualization)
-- **Planned:** Visualize mutations on protein structures
-- **Expected:** Generate 3D plots with mutation highlights
-- **Status:** Not started
+## 🚀 Pipeline Progress: 67% Complete (4 of 6 modules)
+
+### Completed Modules ✅
+
+1. **GenomeExtractor** (Module 1) - NCBI genome download with QC
+2. **GeneFinder** (Module 2) - ABRicate resistance gene detection
+3. **SequenceExtractor** (Module 3) - OBO conversion + Table 11 translation
+4. **VariantCaller** (Module 4) - Python-native alignment + mutation calling
+
+### Pending Modules 🔲
+
+5. **Visualizer** (Module 5) - OPTIONAL - PyMOL 3D visualization
+6. **Utils** (Module 6) - Can extract from existing code
+
+### Full Workflow (4 modules working end-to-end)
+
+```
+GenomeExtractor → GeneFinder → SequenceExtractor → VariantCaller
+     (NCBI)      (ABRicate)    (Translation)      (Alignment)
+       ↓              ↓              ↓                ↓
+  .fasta files   genes.csv      .faa files    mutation_report.csv
+```
 
 ---
 
@@ -197,6 +368,82 @@ successful, failed = downloader.download_batch(accessions)
 # accessions.txt format:
 # GCF_000005845.2
 # GCF_000007045.1
+
+accessions = downloader.read_accession_file(Path("accessions.txt"))
+successful, failed = downloader.download_batch(accessions)
+```
+
+---
+
+### GeneFinder Usage
+
+```python
+from mutation_scan.gene_finder import GeneFinder
+from pathlib import Path
+
+finder = GeneFinder(
+    genomes_dir=Path("data/genomes"),
+    output_dir=Path("data/genes"),
+    database="card"  # or resfinder, ncbi, etc.
+)
+
+# Single genome
+genes_df = finder.find_genes_single(accession="GCF_000005845")
+
+# Batch processing
+results = finder.find_genes_batch()  # All genomes in genomes_dir
+```
+
+---
+
+### SequenceExtractor Usage
+
+```python
+from mutation_scan.sequence_extractor import SequenceExtractor
+import pandas as pd
+
+extractor = SequenceExtractor(
+    genomes_dir=Path("data/genomes")
+)
+
+# Load GeneFinder output
+genes_df = pd.read_csv("data/genes/GCF_000005845_genes.csv")
+
+# Extract and translate sequences
+success, fail = extractor.extract_sequences(
+    genes_df=genes_df,
+    accession="GCF_000005845",
+    output_dir=Path("data/proteins"),
+    translate=True  # Protein translation with Table 11
+)
+```
+
+---
+
+### VariantCaller Usage
+
+```python
+from mutation_scan.variant_caller import VariantCaller
+
+caller = VariantCaller(
+    refs_dir=Path("data/refs")  # Contains {GeneName}_WT.faa files
+)
+
+# Generate dummy references for testing (FIRST TIME ONLY)
+caller._generate_dummy_references()
+
+# Call variants
+mutations_df = caller.call_variants(
+    proteins_dir=Path("data/proteins"),
+    output_csv=Path("data/results/mutation_report.csv")
+)
+
+# Get summary statistics
+summary = caller.get_mutation_summary(mutations_df)
+print(f"Total mutations: {summary['total_mutations']}")
+print(f"Resistant: {summary['resistant_mutations']}")
+print(f"VUS: {summary['vus_mutations']}")
+```
 
 accessions = downloader.read_accession_file(Path("accessions.txt"))
 successful, failed = downloader.download_batch(accessions)
@@ -300,5 +547,8 @@ genome_extraction:
 
 ---
 
-**Status:** GenomeExtractor refactoring complete and merged to main branch.  
-**Ready for:** Next tool integration (FastaAAExtractor)
+**Status:** All core modules complete (GenomeExtractor, GeneFinder, SequenceExtractor, VariantCaller).  
+**Ready for:** Integration testing, end-to-end workflow validation, optional Visualizer module.
+
+**Last Updated:** January 29, 2026  
+**Repository:** https://github.com/vihaankulkarni29/MutationScan
