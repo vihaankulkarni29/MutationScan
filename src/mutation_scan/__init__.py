@@ -18,6 +18,7 @@ from . import gene_finder
 from . import sequence_extractor
 from . import variant_caller
 from . import visualizer
+from . import ml_predictor
 from . import utils
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "sequence_extractor",
     "variant_caller",
     "visualizer",
+    "ml_predictor",
     "utils",
 ]

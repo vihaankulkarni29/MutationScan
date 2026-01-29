@@ -10,6 +10,7 @@
 # Scientific Stack
 pandas>=1.3.0
 biopython>=1.79
+scikit-learn>=1.0.0
 
 # NCBI Interaction (GenomeExtractor)
 ncbi-datasets-pylib>=12.0.0

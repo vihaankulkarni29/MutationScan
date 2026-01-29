@@ -14,10 +14,14 @@ CRITICAL MUTATION CALLING LOGIC:
 ANTI-HALLUCINATION RULES:
 - Never count gaps as positions
 - Never crash on partial proteins (align what you have)
-- Status = "Resistant" if mutation in resistance_db.json, else "VUS" (Variant of Unknown Significance)
-- Default phenotype to "N/A" if not in database
+- Status = "Resistant" if mutation in resistance_db.json
+- If not in DB, optionally route to ML predictor (Module 6)
+- Default phenotype to "N/A" if not in database or prediction fails
+- Always label prediction_source in output for transparency
 """
 
+import importlib
+import inspect
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -48,7 +52,14 @@ class VariantCaller:
     - Helper: _generate_dummy_references() for instant testing
     """
 
-    def __init__(self, refs_dir: Path, resistance_db_path: Optional[Path] = None):
+    def __init__(
+        self,
+        refs_dir: Path,
+        resistance_db_path: Optional[Path] = None,
+        enable_ml: bool = True,
+        ml_models_dir: Optional[Path] = None,
+        antibiotic: str = "Ciprofloxacin"
+    ):
         """
         Initialize VariantCaller.
 
@@ -57,6 +68,9 @@ class VariantCaller:
                      Format: {GeneName}_WT.faa (e.g., gyrA_WT.faa)
             resistance_db_path: Path to resistance_db.json (optional)
                               If None, defaults to data/refs/resistance_db.json
+            enable_ml: If True, use Module 6 ML predictor for unknown mutations
+            ml_models_dir: Optional path to ML model directory
+            antibiotic: Antibiotic name passed to ML predictor (default: Ciprofloxacin)
 
         Raises:
             FileNotFoundError: If refs_dir doesn't exist
@@ -77,6 +91,13 @@ class VariantCaller:
         
         # Load resistance database
         self.resistance_db = self._load_resistance_db()
+
+        # ML predictor settings (Module 6)
+        self.enable_ml = enable_ml
+        self.ml_models_dir = Path(ml_models_dir) if ml_models_dir else None
+        self.antibiotic = antibiotic
+        self._ml_predictor = None
+        self._ml_predictor_error: Optional[Exception] = None
         
         # Initialize PairwiseAligner with BLOSUM62
         self.aligner = PairwiseAligner()
@@ -147,7 +168,9 @@ class VariantCaller:
             output_csv: Path to output CSV file
 
         Returns:
-            DataFrame with columns: Accession, Gene, Mutation, Status, Phenotype, Reference_PDB
+            DataFrame with columns:
+            Accession, Gene, Mutation, Status, Phenotype, Reference_PDB,
+            prediction_score, prediction_source
 
         Example:
             Input: data/proteins/GCF_001_gyrA.faa
@@ -167,7 +190,10 @@ class VariantCaller:
         if not faa_files:
             logger.warning(f"No .faa files found in {proteins_dir}")
             # Return empty DataFrame
-            df = pd.DataFrame(columns=['Accession', 'Gene', 'Mutation', 'Status', 'Phenotype', 'Reference_PDB'])
+            df = pd.DataFrame(columns=[
+                'Accession', 'Gene', 'Mutation', 'Status', 'Phenotype', 'Reference_PDB',
+                'prediction_score', 'prediction_source'
+            ])
             df.to_csv(output_csv, index=False)
             return df
         
@@ -202,7 +228,10 @@ class VariantCaller:
         
         # Ensure columns exist (even if empty)
         if df.empty:
-            df = pd.DataFrame(columns=['Accession', 'Gene', 'Mutation', 'Status', 'Phenotype', 'Reference_PDB'])
+            df = pd.DataFrame(columns=[
+                'Accession', 'Gene', 'Mutation', 'Status', 'Phenotype', 'Reference_PDB',
+                'prediction_score', 'prediction_source'
+            ])
         
         # Save to CSV
         output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -303,9 +332,11 @@ class VariantCaller:
             - Accession
             - Gene
             - Mutation (e.g., "S83L")
-            - Status ("Resistant" or "VUS")
+            - Status ("Resistant", or ML-predicted risk)
             - Phenotype (e.g., "Fluoroquinolone resistance" or "N/A")
             - Reference_PDB (e.g., "3NUU" or "N/A")
+            - prediction_score (0.0 - 1.0)
+            - prediction_source ("Clinical DB" or "AI Model")
         """
         try:
             # Perform global alignment
@@ -360,7 +391,10 @@ class VariantCaller:
                     mutation_str = f"{ref_aa}{reference_position}{query_aa}"
                     
                     # Interpret mutation
-                    status, phenotype, pdb = self._interpret_mutation(gene_name, mutation_str)
+                    status, phenotype, pdb, prediction_score, prediction_source = self._interpret_mutation(
+                        gene_name,
+                        mutation_str
+                    )
                     
                     mutations.append({
                         'Accession': accession,
@@ -368,7 +402,9 @@ class VariantCaller:
                         'Mutation': mutation_str,
                         'Status': status,
                         'Phenotype': phenotype,
-                        'Reference_PDB': pdb
+                        'Reference_PDB': pdb,
+                        'prediction_score': prediction_score,
+                        'prediction_source': prediction_source
                     })
                     
                     logger.debug(f"Found mutation: {mutation_str} ({status})")
@@ -385,7 +421,7 @@ class VariantCaller:
         self,
         gene_name: str,
         mutation: str
-    ) -> Tuple[str, str, str]:
+    ) -> Tuple[str, str, str, Optional[float], str]:
         """
         Interpret mutation using resistance_db.json.
 
@@ -394,14 +430,16 @@ class VariantCaller:
             mutation: Mutation string (e.g., "S83L")
 
         Returns:
-            Tuple of (status, phenotype, pdb_id)
-            - status: "Resistant" if in DB, else "VUS"
+            Tuple of (status, phenotype, pdb_id, prediction_score, prediction_source)
+            - status: "Resistant" if in DB, else ML prediction or "Unknown"
             - phenotype: Description from DB, else "N/A"
             - pdb_id: PDB ID from DB, else "N/A"
+            - prediction_score: 0.0-1.0 for ML predictions, 1.0 for DB hits
+            - prediction_source: "Clinical DB" or "AI Model"
         """
         # Check if gene exists in resistance DB
         if gene_name not in self.resistance_db:
-            return ("VUS", "N/A", "N/A")
+            return self._fallback_to_ml(mutation)
         
         # Check if mutation exists for this gene
         gene_mutations = self.resistance_db[gene_name]
@@ -411,11 +449,136 @@ class VariantCaller:
                 return (
                     "Resistant",
                     entry.get('phenotype', 'N/A'),
-                    entry.get('pdb', 'N/A')
+                    entry.get('pdb', 'N/A'),
+                    1.0,
+                    "Clinical DB"
                 )
         
         # Mutation not in database
-        return ("VUS", "N/A", "N/A")
+        return self._fallback_to_ml(mutation)
+
+    def _fallback_to_ml(self, mutation: str) -> Tuple[str, str, str, Optional[float], str]:
+        """
+        Fallback to ML predictor (Module 6) for unknown mutations.
+
+        Args:
+            mutation: Mutation string (e.g., "S83L")
+
+        Returns:
+            Tuple of (status, phenotype, pdb_id, prediction_score, prediction_source)
+        """
+        if not self.enable_ml:
+            return ("VUS", "N/A", "N/A", None, "Clinical DB")
+
+        prediction = self._predict_with_ml(mutation)
+
+        if prediction.get("success"):
+            risk_level = prediction.get("risk_level", "Unknown")
+            resistance_prob = prediction.get("resistance_prob")
+
+            return (
+                f"Predicted {risk_level} Risk",
+                f"Predicted resistance risk for {self.antibiotic}",
+                "N/A",
+                resistance_prob,
+                "AI Model"
+            )
+
+        return (
+            "Unknown (Parse Failed)",
+            "N/A",
+            "N/A",
+            None,
+            "AI Model"
+        )
+
+    def _get_ml_predictor(self):
+        """
+        Lazily import and initialize the ML predictor (Module 6).
+
+        Returns:
+            ResistancePredictor instance or None if unavailable
+        """
+        if not self.enable_ml:
+            return None
+
+        if self._ml_predictor is not None:
+            return self._ml_predictor
+
+        if self._ml_predictor_error is not None:
+            return None
+
+        try:
+            module = importlib.import_module("mutation_scan.ml_predictor.inference")
+            predictor_cls = getattr(module, "ResistancePredictor")
+        except Exception as e:
+            self._ml_predictor_error = e
+            logger.warning(f"ML predictor unavailable: {e}")
+            return None
+
+        try:
+            self._ml_predictor = self._init_ml_predictor(predictor_cls)
+            return self._ml_predictor
+        except Exception as e:
+            self._ml_predictor_error = e
+            logger.warning(f"Failed to initialize ML predictor: {e}")
+            return None
+
+    def _init_ml_predictor(self, predictor_cls):
+        """
+        Initialize ML predictor, attempting common constructor parameter names.
+        """
+        if self.ml_models_dir:
+            try:
+                sig = inspect.signature(predictor_cls)
+                if "model_dir" in sig.parameters:
+                    return predictor_cls(model_dir=self.ml_models_dir)
+                if "models_dir" in sig.parameters:
+                    return predictor_cls(models_dir=self.ml_models_dir)
+                if "model_path" in sig.parameters:
+                    return predictor_cls(model_path=self.ml_models_dir)
+            except (TypeError, ValueError):
+                pass
+
+        return predictor_cls()
+
+    def _predict_with_ml(self, mutation: str) -> Dict:
+        """
+        Run ML prediction for an unknown mutation.
+
+        Returns:
+            Dict with keys: success, resistance_prob, risk_level
+        """
+        predictor = self._get_ml_predictor()
+
+        if predictor is None:
+            return {"success": False, "error": "ML predictor unavailable"}
+
+        try:
+            try:
+                result = predictor.predict(mutation, antibiotic=self.antibiotic)
+            except TypeError:
+                result = predictor.predict(mutation)
+
+            if not isinstance(result, dict):
+                return {"success": False, "error": "Unexpected predictor output"}
+
+            success = result.get("success", True)
+            resistance_prob = result.get("resistance_prob")
+            risk_level = result.get("risk_level")
+
+            if success and resistance_prob is not None and risk_level:
+                return {
+                    "success": True,
+                    "resistance_prob": resistance_prob,
+                    "risk_level": risk_level
+                }
+
+            return {"success": False, "error": "Missing prediction fields"}
+
+        except Exception as e:
+            logger.warning(f"ML prediction failed for {mutation}: {e}")
+            return {"success": False, "error": str(e)}
 
     def _generate_dummy_references(self) -> None:
         """
