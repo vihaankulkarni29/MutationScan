@@ -72,12 +72,12 @@ class NCBIDatasetsGenomeDownloader:
         if self.api_key:
             Entrez.api_key = self.api_key
         
-        # Setup logging
-        self._setup_logging()
-        
-        # Create output directories
+        # Create output directories BEFORE logging setup
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Setup logging
+        self._setup_logging()
         
         logger.info(f"Initialized NCBIDatasetsGenomeDownloader for {email}")
         logger.info(f"Output directory: {self.output_dir}")

@@ -10,8 +10,10 @@ Tests:
 """
 
 import json
+import logging
 import tempfile
 import unittest
+import time
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -33,11 +35,26 @@ class TestGenomeDownloader(unittest.TestCase):
         """Set up test fixtures."""
         self.temp_dir = tempfile.TemporaryDirectory()
         self.output_dir = Path(self.temp_dir.name)
-        self.log_file = self.output_dir / "test.log"
+        self.log_file = self.output_dir / "logs" / "test.log"
 
     def tearDown(self):
         """Clean up temporary files."""
-        self.temp_dir.cleanup()
+        # Remove all handlers from logger to release file locks
+        logger = logging.getLogger("mutation_scan.genome_extractor.entrez_handler")
+        for handler in logger.handlers[:]:
+            handler.close()
+            logger.removeHandler(handler)
+        
+        # Small delay to ensure files are released
+        import time
+        time.sleep(0.1)
+        
+        # Now cleanup temp directory
+        try:
+            self.temp_dir.cleanup()
+        except Exception as e:
+            # If cleanup fails, just pass (Windows file lock issue)
+            pass
 
     def test_initialization(self):
         """Test downloader initialization."""
