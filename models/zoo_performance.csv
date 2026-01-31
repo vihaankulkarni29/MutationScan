@@ -1,0 +1,2 @@
+antibiotic,n_samples,n_mutations,accuracy_mean,accuracy_std,roc_auc_mean,roc_auc_std
+Ciprofloxacin,50,50,0.8200000000000001,0.11661903789690603,0.894047619047619,0.09094879698747747
