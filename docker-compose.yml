@@ -1,0 +1,57 @@
+version: '3.8'
+
+# MutationScan Docker Compose Configuration
+# One-click deployment for Windows users
+# 
+# Usage:
+#   docker-compose build           # Build image locally
+#   docker-compose up              # Run with default config
+#   docker-compose run --rm mutationscan --email user@example.com --query "E. coli" --limit 5
+#
+# Windows PowerShell:
+#   $env:NCBI_EMAIL = "your.email@example.com"
+#   docker-compose up
+
+services:
+  mutationscan:
+    # Build context: Use local Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    # Image name and tag
+    image: mutationscan:latest
+    container_name: mutationscan_runner
+    
+    # Volume mounts (data persistence)
+    # Maps local data folder to container /app/data
+    # Results will appear in ./data/results/ after container stops
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models:ro  # Read-only mount for pre-trained models
+    
+    # Environment variables (optional)
+    environment:
+      # User can pass NCBI_EMAIL via environment
+      # But CLI --email takes precedence
+      - NCBI_EMAIL=${NCBI_EMAIL:-user@example.com}
+    
+    # Command: Full pipeline on E. coli with visualization
+    # Override this to customize:
+    #   docker-compose run mutationscan --email X --query "Klebsiella pneumoniae" --limit 2
+    command: >
+      --email ${NCBI_EMAIL:-user@example.com}
+      --query "Escherichia coli"
+      --limit 5
+      --visualize
+    
+    # Security: Run as non-root user (set in Dockerfile)
+    # Ensures results have proper permissions
+    user: bioinfo
+    
+    # Resource limits (optional, uncomment if needed)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G

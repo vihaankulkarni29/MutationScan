@@ -1,0 +1,70 @@
+name: Build and Publish
+
+# Trigger on version tags (e.g., v1.0, v2.0.1)
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Checkout repository code
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      # Set up Docker Buildx for advanced build features
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      # Build Docker image locally (push disabled for now)
+      # To enable push: Set docker_username and docker_password secrets in GitHub
+      # Then set push: true and add appropriate image registry configuration
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          dockerfile: ./Dockerfile
+          push: false  # Set to true if you have Docker Hub credentials configured
+          tags: |
+            mutationscan:${{ github.ref_name }}
+            mutationscan:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      # Create GitHub Release (optional)
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            # MutationScan ${{ github.ref_name }}
+            
+            ## Build Information
+            - **Date**: ${{ github.event.head_commit.timestamp }}
+            - **Commit**: ${{ github.sha }}
+            - **Docker Image**: `mutationscan:${{ github.ref_name }}`
+            
+            ## Features
+            - End-to-end bacterial genome analysis pipeline
+            - NCBI genome ingestion with Datasets API v2
+            - Resistance gene detection with ABRicate
+            - Variant calling with biophysical ML predictions
+            - 3D structure visualization with PyMOL
+            
+            ## Quick Start
+            ```bash
+            docker build -t mutationscan:${{ github.ref_name }} .
+            docker run -v $(pwd)/data:/app/data mutationscan:${{ github.ref_name }} \
+              --email your.email@example.com \
+              --query "E. coli" \
+              --limit 5 \
+              --visualize
+            ```
+          draft: false
+          prerelease: false
