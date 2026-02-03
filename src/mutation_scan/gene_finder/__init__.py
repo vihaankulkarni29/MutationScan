@@ -6,7 +6,7 @@ Returns standardized DataFrames for downstream processing.
 """
 
 from .gene_finder import GeneFinder
+from .abricate_wrapper import AbricateWrapper
+from .blast_wrapper import BLASTWrapper
 
-__all__ = ["GeneFinder"]
-
-__all__ = ["AbricateWrapper", "BLASTWrapper"]
+__all__ = ["GeneFinder", "AbricateWrapper", "BLASTWrapper"]

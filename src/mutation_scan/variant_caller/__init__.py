@@ -6,5 +6,6 @@ between sequences.
 """
 
 from .variant_caller import VariantCaller
+from .variant_detector import VariantDetector
 
-__all__ = ['VariantCaller']
+__all__ = ['VariantCaller', 'VariantDetector']
