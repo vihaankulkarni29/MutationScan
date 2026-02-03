@@ -1020,9 +1020,48 @@ Antibiotic: Ciprofloxacin (gyrA and parC mutations)
 
 ---
 
+### Pipeline Orchestrator (src/main.py) - End-to-End Runner (February 3, 2026)
+
+**Status:** ✅ COMPLETE (Orchestrator Implemented and Validated)
+
+**What was done:**
+- Created production-ready pipeline orchestrator at `src/main.py`
+- Implemented 5-step coordinate handoff with strict ordering:
+  1. **Download Genomes**: `NCBIDatasetsGenomeDownloader.download_batch()`
+  2. **Find Genes**: `GeneFinder.find_resistance_genes()`
+  3. **Extract Sequences**: `SequenceExtractor.extract_sequences()`
+  4. **Call Variants**: `VariantCaller.call_variants()`
+  5. **Visualize (Optional)**: `PyMOLVisualizer.visualize_mutations()`
+- Enforced Windows-safe path handling using `pathlib.Path` for all file operations
+- Added dependency checks with `shutil.which()` for `abricate`, `blastn`, `pymol`
+- Implemented graceful failure if ABRicate missing: "ABRicate not found. Please run via Docker."
+- Added structured logging to console (INFO) and `data/logs/pipeline.log` (DEBUG)
+- Added CLI interface with `argparse` (required `--email`, optional `--query`, `--limit`, `--visualize`)
+- Wrapped each step with try/except to prevent cascade failures
+
+**CLI Usage:**
+```
+python src/main.py --email your.email@example.com
+python src/main.py --email your.email@example.com --query "E. coli" --limit 10
+python src/main.py --email your.email@example.com --visualize
+```
+
+**Outputs:**
+- Genomes: `data/genomes/*.fasta`
+- Gene coordinates: DataFrame (validated non-empty before proceeding)
+- Proteins: `data/proteins/*.faa`
+- Mutation report: `data/results/mutation_report.csv`
+- Visualizations (optional): `data/results/visualizations/*.png`
+
+**Validation:**
+- ✅ All imports resolved for all modules
+- ✅ Orchestrator functions present and callable
+- ✅ `--help` output verified
+- ✅ Windows constraint satisfied (no chmod, no hardcoded paths)
+
 **Status:** All core modules complete + ML integration fully trained and tested (6 of 6 modules).  
 **Pipeline Progress:** 100% complete with production models trained.  
 **Ready for:** Production deployment, end-to-end testing with real genomes.
 
-**Last Updated:** January 31, 2026  
+**Last Updated:** February 3, 2026  
 **Repository:** https://github.com/vihaankulkarni29/MutationScan
