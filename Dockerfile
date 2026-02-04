@@ -1,34 +1,13 @@
-# =============================================================================
-# MutationScan - Production Dockerfile (Final)
-# =============================================================================
-# Optimized for "Democratization": Low bandwidth, fast deployment, offline-ready
-# 
-# Architecture:
-# - Base: StaPH-B ABRicate image (proven bioinformatics base)
-# - Layer 1: System tools + Python 3 + PyMOL
-# - Layer 2: ABRicate database pre-download (offline strategy)
-# - Layer 3: ML libraries (scikit-learn, joblib, matplotlib)
-# - Layer 4: Python dependencies (pandas, biopython, NCBI Datasets)
-# - Layer 5: Source code + ML models + permissions
-#
-# Result: Container is 100% ready on first run with ML predictions enabled
-# Entry Point: src/main.py (Orchestrator)
-# =============================================================================
-
+# BASE IMAGE: State Public Health Bioinformatics (StaPH-B)
 FROM staphb/abricate:latest
 
 # METADATA
 LABEL maintainer="MutationScan Team"
-LABEL version="2.0"
-LABEL description="Clinical-Grade AMR Pipeline: NCBI -> ABRicate -> ML Prediction -> 3D Visualization"
+LABEL version="1.0"
+LABEL description="Democratized AMR Pipeline"
 
-# 1. SWITCH TO ROOT
-# The base image defaults to a non-root user, but we need root to install dependencies
+# 1. SWITCH TO ROOT & INSTALL SYSTEM TOOLS
 USER root
-
-# 2. INSTALL SYSTEM TOOLS & PYMOL
-# Added 'pymol' and 'libglew-dev' for the visualizer module
-# We clean apt lists immediately to keep the image small (democratization = low bandwidth)
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -40,42 +19,32 @@ RUN apt-get update && apt-get install -y \
     libglew-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. SETUP ABRICATE DATABASES (Offline Strategy)
-# We force the download of CARD and NCBI databases during the build.
-# This ensures the container works 100% offline once pulled (democratization principle).
+# 2. SETUP OFFLINE DATABASES
 RUN abricate --setupdb
 
-# 4. INSTALL PYTHON DEPENDENCIES
-# Copy requirements first to leverage Docker caching.
-# Includes: pandas, biopython, scikit-learn, joblib, matplotlib (ML stack)
+# 3. INSTALL PYTHON DEPENDENCIES
 WORKDIR /app
 COPY requirements.txt .
+# We explicitly install the package in editable mode so 'src' layout works
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# 5. COPY APPLICATION CODE, CONFIGURATION & ML MODELS
-# Copy source code, configuration files, and pre-trained models into container
+# 4. COPY APPLICATION ARCHITECTURE
+# We must copy the specific folders to match the new structure
 COPY src /app/src
 COPY config /app/config
 COPY models /app/models
+COPY pyproject.toml /app/
 
-# 6. CREATE DATA DIRECTORIES
-# Pre-create standard folders to prevent runtime "DirectoryNotFound" errors
-RUN mkdir -p /app/data/genomes \
-    /app/data/raw \
-    /app/data/proteins \
-    /app/data/refs \
-    /app/data/results \
-    /app/data/results/visualizations \
-    /app/data/logs
+# 5. CONFIGURE ENVIRONMENT
+# This line is CRITICAL: It tells Python to look inside /app/src for modules
+ENV PYTHONPATH="${PYTHONPATH}:/app/src"
 
-# 7. PERMISSIONS (Security Best Practice)
-# Create a dedicated non-root user for execution
+# 6. PERMISSIONS
 RUN useradd -m bioinfo && \
     chown -R bioinfo:bioinfo /app
 USER bioinfo
 
-# 8. ENTRYPOINT (The Orchestrator)
-# Default: Show help menu
-# User can override: docker run mutationscan:v1 --email user@example.com --query "E. coli"
+# 7. ENTRYPOINT (Updated for Module Execution)
+# We now run it as a module (-m) instead of a script file
 ENTRYPOINT ["python3", "-m", "mutation_scan.main"]
 CMD ["--help"]
