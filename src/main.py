@@ -18,7 +18,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import pandas as pd
 
@@ -238,12 +238,13 @@ def step1_download_genomes(
         raise
 
 
-def step2_find_genes(genomes_dir: Path) -> pd.DataFrame:
+def step2_find_genes(genomes_dir: Path, target_genes: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Step 2: Find resistance genes using ABRicate.
     
     Args:
         genomes_dir: Directory containing genome FASTA files
+        target_genes: Optional list of gene names to filter results
         
     Returns:
         DataFrame with gene coordinates
@@ -257,7 +258,7 @@ def step2_find_genes(genomes_dir: Path) -> pd.DataFrame:
     logging.info("="*70)
     
     try:
-        gene_finder = GeneFinder(abricate_db="card")
+        gene_finder = GeneFinder(abricate_db="card", target_genes=target_genes)
         
         # Find all genome FASTA files
         genome_files = list(genomes_dir.glob("*.fasta")) + list(genomes_dir.glob("*.fna"))
@@ -365,7 +366,8 @@ def step4_call_variants(
     output_csv: Path,
     enable_ml: bool = True,
     ml_models_dir: Optional[Path] = None,
-    antibiotic: str = "Ciprofloxacin"
+    antibiotic: str = "Ciprofloxacin",
+    drug_mapping_path: Optional[Path] = None
 ) -> pd.DataFrame:
     """
     Step 4: Call variants and predict resistance.
@@ -377,6 +379,7 @@ def step4_call_variants(
         enable_ml: Whether to enable ML predictions
         ml_models_dir: Path to ML models directory
         antibiotic: Antibiotic name for ML predictions
+        drug_mapping_path: Path to drug mapping JSON file (optional)
         
     Returns:
         DataFrame with mutation report
@@ -394,7 +397,8 @@ def step4_call_variants(
             refs_dir=refs_dir,
             enable_ml=enable_ml,
             ml_models_dir=ml_models_dir,
-            antibiotic=antibiotic
+            antibiotic=antibiotic,
+            drug_mapping_path=drug_mapping_path
         )
         
         # Check if ML models exist
@@ -551,6 +555,20 @@ Examples:
         help='Antibiotic name for ML predictions (default: Ciprofloxacin)'
     )
     
+    parser.add_argument(
+        '--config-dir',
+        type=Path,
+        default=Path('data/config'),
+        help='Path to configuration directory containing drug_mapping.json (default: data/config)'
+    )
+    
+    parser.add_argument(
+        '--targets',
+        type=Path,
+        default=None,
+        help='Path to target genes file (one gene per line, optional). If not provided, all detected genes are analyzed.'
+    )
+    
     args = parser.parse_args()
     
     # Show startup banner with platform-specific instructions
@@ -567,6 +585,28 @@ Examples:
     logging.info(f"  Visualize: {args.visualize}")
     logging.info(f"  ML Enabled: {not args.no_ml}")
     logging.info(f"  Antibiotic: {args.antibiotic}")
+    logging.info(f"  Config Directory: {args.config_dir}")
+    logging.info(f"  Target Genes File: {args.targets if args.targets else '(all genes)'}")
+    
+    # Load target genes if provided
+    target_genes = None
+    if args.targets:
+        try:
+            target_genes = GeneFinder.load_target_genes(args.targets)
+            logging.info(f"Loaded {len(target_genes)} target genes from {args.targets.name}")
+        except FileNotFoundError as e:
+            logging.error(f"Failed to load target genes: {e}")
+            sys.exit(1)
+    
+    # Verify configuration directory exists
+    config_dir = Path(args.config_dir)
+    drug_mapping_path = config_dir / 'drug_mapping.json'
+    if not config_dir.exists():
+        logging.warning(f"Configuration directory not found: {config_dir}")
+        logging.info("Using default configuration paths")
+    elif not drug_mapping_path.exists():
+        logging.warning(f"Drug mapping file not found: {drug_mapping_path}")
+        logging.info("VariantCaller will use default drug mappings")
     
     # Check dependencies
     try:
@@ -598,8 +638,8 @@ Examples:
             output_dir=genomes_dir
         )
         
-        # STEP 2: Find genes
-        genes_df = step2_find_genes(genomes_dir=genomes_dir)
+        # STEP 2: Find genes (with optional target gene filtering)
+        genes_df = step2_find_genes(genomes_dir=genomes_dir, target_genes=target_genes)
         
         # STEP 3: Extract sequences
         seq_count = step3_extract_sequences(
@@ -608,14 +648,15 @@ Examples:
             output_dir=proteins_dir
         )
         
-        # STEP 4: Call variants
+        # STEP 4: Call variants (with configuration)
         mutations_df = step4_call_variants(
             proteins_dir=proteins_dir,
             refs_dir=refs_dir,
             output_csv=mutation_csv,
             enable_ml=not args.no_ml,
             ml_models_dir=ml_models_dir if (not args.no_ml) else None,
-            antibiotic=args.antibiotic
+            antibiotic=args.antibiotic,
+            drug_mapping_path=drug_mapping_path
         )
         
         # STEP 5: Visualize (optional)

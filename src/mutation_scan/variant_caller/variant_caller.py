@@ -56,6 +56,7 @@ class VariantCaller:
         self,
         refs_dir: Path,
         resistance_db_path: Optional[Path] = None,
+        drug_mapping_path: Optional[Path] = None,
         enable_ml: bool = True,
         ml_models_dir: Optional[Path] = None,
         antibiotic: str = "Ciprofloxacin"
@@ -65,9 +66,12 @@ class VariantCaller:
 
         Args:
             refs_dir: Path to directory containing wild-type reference FASTA files
-                     Format: {GeneName}_WT.faa (e.g., gyrA_WT.faa)
+                     Format: {GeneName}_WT.faa
             resistance_db_path: Path to resistance_db.json (optional)
                               If None, defaults to data/refs/resistance_db.json
+            drug_mapping_path: Path to drug_mapping.json (optional)
+                             If None, defaults to data/config/drug_mapping.json
+                             Maps gene names to drug names for phenotype interpretation
             enable_ml: If True, use Module 6 ML predictor for unknown mutations
             ml_models_dir: Optional path to ML model directory
             antibiotic: Antibiotic name passed to ML predictor (default: Ciprofloxacin)
@@ -89,8 +93,15 @@ class VariantCaller:
         else:
             self.resistance_db_path = Path(resistance_db_path)
         
-        # Load resistance database
+        # Set drug mapping path
+        if drug_mapping_path is None:
+            self.drug_mapping_path = Path("data/config/drug_mapping.json")
+        else:
+            self.drug_mapping_path = Path(drug_mapping_path)
+        
+        # Load resistance database and drug mapping
         self.resistance_db = self._load_resistance_db()
+        self.drug_mapping = self._load_drug_mapping()
 
         # ML predictor settings (Module 6)
         self.enable_ml = enable_ml
@@ -111,6 +122,7 @@ class VariantCaller:
         
         logger.info(f"Initialized VariantCaller with refs_dir: {self.refs_dir}")
         logger.info(f"Loaded {len(self.resistance_db)} genes in resistance database")
+        logger.info(f"Loaded {len(self.drug_mapping)} gene-drug mappings")
 
     def _get_blosum62(self):
         """
@@ -135,9 +147,9 @@ class VariantCaller:
         Returns:
             Dictionary mapping gene -> list of mutation dicts
             Format: {
-                "gyrA": [
-                    {"mutation": "S83L", "phenotype": "Fluoroquinolone resistance", "pdb": "3NUU"},
-                    {"mutation": "D87N", "phenotype": "Fluoroquinolone resistance", "pdb": "3NUU"}
+                "geneName": [
+                    {"mutation": "S83L", "phenotype": "Drug resistance", "pdb": "XXXX"},
+                    {"mutation": "D87N", "phenotype": "Drug resistance", "pdb": "XXXX"}
                 ]
             }
         """
@@ -152,6 +164,52 @@ class VariantCaller:
             return db
         except Exception as e:
             logger.error(f"Failed to load resistance DB: {e}")
+            return {}
+
+    def _load_drug_mapping(self) -> Dict[str, str]:
+        """
+        Load gene-to-drug mapping from JSON configuration file.
+        
+        This mapping is organism-agnostic and loaded from external config.
+        Maps gene names to antimicrobial drug names for phenotype interpretation.
+        
+        Returns:
+            Dictionary mapping gene -> drug name (case-insensitive)
+            Format: {
+                "geneName": "drugName",
+                "gyrA": "ciprofloxacin",
+                "rpoB": "rifampicin"
+            }
+            Returns empty dict if file not found (graceful degradation)
+        """
+        if not self.drug_mapping_path.exists():
+            logger.warning(
+                f"Drug mapping file not found: {self.drug_mapping_path}. "
+                "Phenotype interpretation will use 'Unknown' for all genes. "
+                "To fix: Create data/config/drug_mapping.json with gene-drug pairs."
+            )
+            return {}
+        
+        try:
+            with open(self.drug_mapping_path, 'r') as f:
+                mapping = json.load(f)
+            
+            # Filter out comment keys and convert to lowercase for case-insensitive lookup
+            filtered_mapping = {
+                k.lower(): v for k, v in mapping.items() 
+                if not k.startswith('_')
+            }
+            
+            logger.info(f"Loaded drug mapping: {self.drug_mapping_path} ({len(filtered_mapping)} genes)")
+            logger.debug(f"Drug mappings: {filtered_mapping}")
+            
+            return filtered_mapping
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in drug mapping file: {e}")
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to load drug mapping: {e}")
             return {}
 
     def call_variants(
@@ -423,54 +481,78 @@ class VariantCaller:
         mutation: str
     ) -> Tuple[str, str, str, Optional[float], str]:
         """
-        Interpret mutation using resistance_db.json.
+        Interpret mutation using resistance_db.json and drug_mapping.json.
+
+        Uses organism-agnostic configuration:
+        1. Check clinical resistance database for known mutations
+        2. If found, return phenotype from DB
+        3. If not found, use drug_mapping.json to determine drug association
+        4. Fall back to ML prediction for unknown mutations
 
         Args:
-            gene_name: Gene name (e.g., "gyrA")
+            gene_name: Gene name (case-insensitive, e.g., "gyrA" or "rpoB")
             mutation: Mutation string (e.g., "S83L")
 
         Returns:
             Tuple of (status, phenotype, pdb_id, prediction_score, prediction_source)
             - status: "Resistant" if in DB, else ML prediction or "Unknown"
-            - phenotype: Description from DB, else "N/A"
+            - phenotype: Dynamically generated from drug_mapping or DB
             - pdb_id: PDB ID from DB, else "N/A"
             - prediction_score: 0.0-1.0 for ML predictions, 1.0 for DB hits
             - prediction_source: "Clinical DB" or "AI Model"
         """
         # Check if gene exists in resistance DB
         if gene_name not in self.resistance_db:
-            return self._fallback_to_ml(mutation)
+            return self._fallback_to_ml(gene_name, mutation)
         
         # Check if mutation exists for this gene
         gene_mutations = self.resistance_db[gene_name]
         
         for entry in gene_mutations:
             if entry.get('mutation') == mutation:
+                # Use phenotype from DB if available, else construct from drug mapping
+                db_phenotype = entry.get('phenotype')
+                if db_phenotype:
+                    phenotype = db_phenotype
+                else:
+                    # Construct phenotype from drug mapping
+                    drug = self.drug_mapping.get(gene_name.lower(), "Unknown drug")
+                    phenotype = f"{drug} resistance"
+                
                 return (
                     "Resistant",
-                    entry.get('phenotype', 'N/A'),
+                    phenotype,
                     entry.get('pdb', 'N/A'),
                     1.0,
                     "Clinical DB"
                 )
         
-        # Mutation not in database
-        return self._fallback_to_ml(mutation)
+        # Mutation not in database, try ML
+        return self._fallback_to_ml(gene_name, mutation)
 
-    def _fallback_to_ml(self, mutation: str) -> Tuple[str, str, str, Optional[float], str]:
+    def _fallback_to_ml(self, gene_name: str, mutation: str) -> Tuple[str, str, str, Optional[float], str]:
         """
         Fallback to ML predictor (Module 6) for unknown mutations.
 
+        Uses drug_mapping.json to determine drug context for ML prediction.
+
         Args:
+            gene_name: Gene name for drug mapping lookup
             mutation: Mutation string (e.g., "S83L")
 
         Returns:
             Tuple of (status, phenotype, pdb_id, prediction_score, prediction_source)
         """
         if not self.enable_ml:
-            return ("VUS", "N/A", "N/A", None, "Clinical DB")
+            # No ML, return VUS with drug-specific phenotype if available
+            drug = self.drug_mapping.get(gene_name.lower())
+            phenotype = f"{drug} resistance (VUS)" if drug else "Variant of Unknown Significance"
+            return (phenotype, "N/A", "N/A", None, "Clinical DB")
 
-        prediction = self._predict_with_ml(mutation)
+        # Get drug from mapping for ML context
+        drug = self.drug_mapping.get(gene_name.lower(), self.antibiotic)
+        
+        prediction = self._predict_with_ml(mutation, drug)
 
         if prediction.get("success"):
             risk_level = prediction.get("risk_level", "Unknown")
@@ -478,15 +560,17 @@ class VariantCaller:
 
             return (
                 f"Predicted {risk_level} Risk",
-                f"Predicted resistance risk for {self.antibiotic}",
+                f"Predicted {drug} resistance risk",
                 "N/A",
                 resistance_prob,
                 "AI Model"
             )
 
+        # ML failed, return VUS with drug context
+        phenotype = f"{drug} resistance (Unknown)" if drug else "Unknown resistance mechanism"
         return (
-            "Unknown (Parse Failed)",
-            "N/A",
+            "Unknown (ML Parse Failed)",
+            phenotype,
             "N/A",
             None,
             "AI Model"
@@ -542,9 +626,13 @@ class VariantCaller:
 
         return predictor_cls()
 
-    def _predict_with_ml(self, mutation: str) -> Dict:
+    def _predict_with_ml(self, mutation: str, drug: str = None) -> Dict:
         """
         Run ML prediction for an unknown mutation.
+
+        Args:
+            mutation: Mutation string (e.g., "S83L")
+            drug: Antibiotic/drug name for prediction context (optional)
 
         Returns:
             Dict with keys: success, resistance_prob, risk_level
@@ -554,9 +642,12 @@ class VariantCaller:
         if predictor is None:
             return {"success": False, "error": "ML predictor unavailable"}
 
+        # Use provided drug or fallback to instance antibiotic
+        antibiotic = drug if drug else self.antibiotic
+
         try:
             try:
-                result = predictor.predict(mutation, antibiotic=self.antibiotic)
+                result = predictor.predict(mutation, antibiotic=antibiotic)
             except TypeError:
                 result = predictor.predict(mutation)
 
@@ -579,60 +670,6 @@ class VariantCaller:
         except Exception as e:
             logger.warning(f"ML prediction failed for {mutation}: {e}")
             return {"success": False, "error": str(e)}
-
-    def _generate_dummy_references(self) -> None:
-        """
-        Generate placeholder E. coli K12 wild-type references for testing.
-        
-        This helper creates a minimal gyrA_WT.faa file so users can test
-        the module immediately without needing real references.
-        
-        Creates:
-        - data/refs/gyrA_WT.faa (E. coli K12 GyrA wild-type)
-        
-        Note: This is for TESTING ONLY. Production use requires real references.
-        """
-        # E. coli K12 GyrA protein (NCBI Reference: NP_414550.1)
-        # First 100 amino acids (truncated for demo purposes)
-        gyrA_wt_seq = (
-            "MSDLAREITPVNIEEELKSSYLDYAMSVIVGRALPDVRDGLKPVHRRVLYAMNVLGND"
-            "WNKAYKKSARVVGDVIGKYHPHGDSA"
-        )
-        
-        gyrA_record = SeqRecord(
-            Seq(gyrA_wt_seq),
-            id="gyrA_WT_K12",
-            description="E. coli K12 GyrA wild-type (partial sequence for testing)"
-        )
-        
-        # Create refs directory if it doesn't exist
-        self.refs_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Write gyrA_WT.faa
-        gyrA_file = self.refs_dir / "gyrA_WT.faa"
-        SeqIO.write(gyrA_record, gyrA_file, "fasta")
-        
-        logger.info(f"Generated dummy reference: {gyrA_file}")
-        
-        # Also create a minimal resistance_db.json
-        dummy_db = {
-            "gyrA": [
-                {"mutation": "S83L", "phenotype": "Fluoroquinolone resistance", "pdb": "3NUU"},
-                {"mutation": "D87N", "phenotype": "Fluoroquinolone resistance", "pdb": "3NUU"},
-                {"mutation": "D87G", "phenotype": "Fluoroquinolone resistance", "pdb": "3NUU"}
-            ],
-            "parC": [
-                {"mutation": "S80I", "phenotype": "Fluoroquinolone resistance", "pdb": "N/A"},
-                {"mutation": "E84K", "phenotype": "Fluoroquinolone resistance", "pdb": "N/A"}
-            ]
-        }
-        
-        db_file = self.refs_dir / "resistance_db.json"
-        with open(db_file, 'w') as f:
-            json.dump(dummy_db, f, indent=2)
-        
-        logger.info(f"Generated dummy resistance DB: {db_file}")
-        logger.info("Dummy references ready for testing!")
 
     def get_available_references(self) -> List[str]:
         """

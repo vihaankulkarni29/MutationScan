@@ -31,17 +31,55 @@ class GeneFinder:
     - Source: 'ABRicate' or 'BLAST'
     """
 
-    def __init__(self, abricate_db: str = "card"):
+    @staticmethod
+    def load_target_genes(target_file: Path) -> List[str]:
+        """
+        Load target gene names from a text file.
+        
+        Args:
+            target_file: Path to target genes file (one gene per line, # for comments)
+        
+        Returns:
+            List of gene names (case-insensitive, lowercased)
+        
+        Raises:
+            FileNotFoundError: If target file doesn't exist
+        """
+        target_file = Path(target_file)
+        
+        if not target_file.exists():
+            logger.error(f"Target genes file not found: {target_file}")
+            raise FileNotFoundError(f"Target genes file not found: {target_file}")
+        
+        genes = []
+        with open(target_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith('#'):
+                    genes.append(line.lower())
+        
+        logger.info(f"Loaded {len(genes)} target genes from {target_file.name}")
+        return genes
+
+    def __init__(
+        self, 
+        abricate_db: str = "card",
+        target_genes: Optional[List[str]] = None
+    ):
         """
         Initialize GeneFinder.
 
         Args:
             abricate_db: ABRicate database to use (default: 'card')
+            target_genes: Optional list of gene names to filter results (case-insensitive)
+                         If None, all detected genes are returned.
 
         Raises:
             EnvironmentError: If ABRicate is not installed
         """
         self.abricate_db = abricate_db
+        self.target_genes = [g.lower() for g in target_genes] if target_genes else None
         self.abricate_path = self._find_abricate()
         
         if not self.abricate_path:
@@ -52,6 +90,8 @@ class GeneFinder:
         
         logger.info(f"Initialized GeneFinder with ABRicate: {self.abricate_path}")
         logger.info(f"Using database: {self.abricate_db}")
+        if self.target_genes:
+            logger.info(f"Filtering for {len(self.target_genes)} target genes: {', '.join(self.target_genes)}")
 
     def _find_abricate(self) -> Optional[str]:
         """
@@ -176,7 +216,14 @@ class GeneFinder:
             df['End'] = df['End'].astype(int)
             df['Identity'] = df['Identity'].astype(float)
             
-            logger.info(f"Found {len(df)} resistance genes")
+            # Filter by target genes if specified
+            if self.target_genes:
+                before_count = len(df)
+                df = df[df['Gene'].str.lower().isin(self.target_genes)]
+                logger.info(f"Filtered {before_count} genes to {len(df)} target genes")
+            else:
+                logger.info(f"Found {len(df)} resistance genes")
+            
             return df
             
         except Exception as e:
