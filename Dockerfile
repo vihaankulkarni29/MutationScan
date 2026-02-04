@@ -52,9 +52,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# 5. COPY APPLICATION CODE & ML MODELS
-# Copy source code and pre-trained models into container
+# 5. COPY APPLICATION CODE, CONFIGURATION & ML MODELS
+# Copy source code, configuration files, and pre-trained models into container
 COPY src /app/src
+COPY config /app/config
 COPY models /app/models
 
 # 6. CREATE DATA DIRECTORIES
@@ -76,5 +77,5 @@ USER bioinfo
 # 8. ENTRYPOINT (The Orchestrator)
 # Default: Show help menu
 # User can override: docker run mutationscan:v1 --email user@example.com --query "E. coli"
-ENTRYPOINT ["python3", "src/main.py"]
+ENTRYPOINT ["python3", "-m", "mutation_scan.main"]
 CMD ["--help"]

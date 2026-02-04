@@ -95,7 +95,7 @@ class VariantCaller:
         
         # Set drug mapping path
         if drug_mapping_path is None:
-            self.drug_mapping_path = Path("data/config/drug_mapping.json")
+            self.drug_mapping_path = Path("config/drug_mapping.json")
         else:
             self.drug_mapping_path = Path(drug_mapping_path)
         

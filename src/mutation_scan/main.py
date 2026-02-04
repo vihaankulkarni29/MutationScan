@@ -22,12 +22,12 @@ from typing import Optional, List
 
 import pandas as pd
 
-# Import MutationScan modules
-from mutation_scan.genome_extractor import NCBIDatasetsGenomeDownloader
-from mutation_scan.gene_finder import GeneFinder
-from mutation_scan.sequence_extractor import SequenceExtractor
-from mutation_scan.variant_caller import VariantCaller
-from mutation_scan.visualizer import PyMOLVisualizer
+# Import MutationScan modules (refactored structure)
+from mutation_scan.core.entrez_handler import NCBIDatasetsGenomeDownloader
+from mutation_scan.core.gene_finder import GeneFinder
+from mutation_scan.core.sequence_extractor import SequenceExtractor
+from mutation_scan.analysis.variant_caller import VariantCaller
+from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
 
 
 def print_startup_banner() -> None:
@@ -502,13 +502,13 @@ def main():
         epilog="""
 Simplified Research Run Examples:
   # Analyze local genome for specific genes
-  python main.py --email your@email.com --genome data/genomes/my_genome.fasta --targets data/config/my_genes.txt
+  python -m mutation_scan.main --email your@email.com --genome data/genomes/my_genome.fasta --targets config/my_genes.txt
   
   # Download organism and analyze specific genes
-  python main.py --email your@email.com --organism "Escherichia coli" --targets data/config/acrR_targets.txt --api-key YOUR_KEY
+  python -m mutation_scan.main --email your@email.com --organism "Escherichia coli" --targets config/acrR_targets.txt --api-key YOUR_KEY
   
   # Use pre-downloaded genome with default gene discovery
-  python main.py --email your@email.com --genome data/genomes/GCF_000005845.2.fasta
+  python -m mutation_scan.main --email your@email.com --genome data/genomes/GCF_000005845.2.fasta
         """
     )
     
@@ -559,8 +559,8 @@ Simplified Research Run Examples:
     parser.add_argument(
         '--config-dir',
         type=Path,
-        default=Path('data/config'),
-        help='Configuration directory (default: data/config)'
+        default=Path('config'),
+        help='Configuration directory (default: config)'
     )
     
     parser.add_argument(

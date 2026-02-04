@@ -1,0 +1,25 @@
+# Target genes for MutationScan analysis
+# One gene name per line. Comments (#) are ignored.
+# Leave empty to use default ABRicate broad screening.
+#
+# Example: E. coli efflux pump study
+# acrA
+# acrB
+# acrR
+# marR
+# soxR
+# rob
+# tolC
+#
+# Example: M. tuberculosis first-line drug resistance
+# rpoB
+# katG
+# inhA
+# embB
+# pncA
+#
+# Example: Fluoroquinolone resistance panel
+# gyrA
+# gyrB
+# parC
+# parE

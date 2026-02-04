@@ -7,26 +7,27 @@ This package provides automated analysis of bacterial genomes, including:
 - Protein sequence extraction
 - Pairwise sequence alignment
 - 3D mutation visualization
+
+Refactored v2.0: Modular src-layout architecture
+- core: Genome ingestion & gene detection
+- analysis: Variant calling & ML predictions
+- visualization: 3D structure visualization
+- utils: Shared utilities
 """
 
-__version__ = "0.1.0"
-__author__ = "Your Organization"
+__version__ = "2.0.0"
+__author__ = "MutationScan Team"
 __email__ = "contact@example.com"
 
-from . import genome_extractor
-from . import gene_finder
-from . import sequence_extractor
-from . import variant_caller
-from . import visualizer
-from . import ml_predictor
+# Import subpackages
+from . import core
+from . import analysis
+from . import visualization
 from . import utils
 
 __all__ = [
-    "genome_extractor",
-    "gene_finder",
-    "sequence_extractor",
-    "variant_caller",
-    "visualizer",
-    "ml_predictor",
+    "core",
+    "analysis",
+    "visualization",
     "utils",
 ]

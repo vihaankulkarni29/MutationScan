@@ -1,0 +1,34 @@
+{
+  "_comment": "Gene-to-Drug mapping for resistance phenotype interpretation",
+  "_description": "Maps gene names to their associated antimicrobial drugs. Used by VariantCaller to determine resistance phenotypes.",
+  "_usage": "When a mutation is detected in a gene, this mapping determines which drug resistance to report.",
+  
+  "gyrA": "ciprofloxacin",
+  "gyrB": "ciprofloxacin",
+  "parC": "ciprofloxacin",
+  "parE": "ciprofloxacin",
+  
+  "rpoB": "rifampicin",
+  "rpoC": "rifampicin",
+  
+  "katG": "isoniazid",
+  "inhA": "isoniazid",
+  
+  "embB": "ethambutol",
+  "embA": "ethambutol",
+  
+  "pncA": "pyrazinamide",
+  
+  "rpsL": "streptomycin",
+  "rrs": "streptomycin",
+  
+  "eis": "kanamycin",
+  
+  "folP": "sulfonamides",
+  "folA": "trimethoprim",
+  
+  "acrR": "fluoroquinolones",
+  "marR": "multiple_antibiotics",
+  "soxR": "fluoroquinolones",
+  "rob": "multiple_antibiotics"
+}
