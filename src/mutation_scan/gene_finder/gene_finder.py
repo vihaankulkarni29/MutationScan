@@ -185,8 +185,10 @@ class GeneFinder:
             return self._empty_dataframe()
         
         try:
-            # Parse tab-delimited output
-            df = pd.read_csv(StringIO(output), sep='\t', comment='#')
+            # Parse tab-delimited output (preserve header starting with #FILE)
+            df = pd.read_csv(StringIO(output), sep='\t')
+            # Strip leading '#' from header columns (e.g., #FILE -> FILE)
+            df = df.rename(columns={col: col.lstrip('#') for col in df.columns})
             
             if df.empty:
                 return self._empty_dataframe()

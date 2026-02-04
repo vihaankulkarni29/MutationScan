@@ -26,6 +26,16 @@ MutationScan streamlines the complex process of genomic analysis by automating:
 - **Variant Analysis**: Pairwise alignment and mutation calling
 - **3D Visualization**: PyMOL-based mutation mapping and structure visualization
 
+## Research Runs (User-Provided Inputs)
+
+For scientific runs, MutationScan expects the user to provide the following inputs up front:
+
+- Genome data: either a local genome FASTA file or an organism query you want analyzed.
+- Target genes: a focused list of genes to analyze (for example, acrR).
+- NCBI credentials: email required by NCBI policy and an optional API key for higher throughput.
+
+The preferred execution path is a single Docker (or WSL) command. See the setup guide at [docs/SETUP_COMPLETE.md](docs/SETUP_COMPLETE.md) for the exact one-line run instructions.
+
 ## Key Features
 
 ✨ **Modular Architecture**: Six independent, well-documented modules for maximum flexibility

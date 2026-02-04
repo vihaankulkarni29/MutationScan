@@ -4,6 +4,16 @@
 
 A production-ready, modular bioinformatics pipeline for automated detection and analysis of antimicrobial resistance (AMR) genes in bacterial genomes has been successfully generated. The repository follows industry best practices with professional-grade structure, comprehensive testing, containerization, and CI/CD integration.
 
+## Research Run Requirements (Scientist-Facing)
+
+For proper scientific runs, users should supply their own analysis inputs instead of relying on internal test workflows:
+
+- Genome source: a local genome FASTA file or a specific organism query to download.
+- Target genes: a focused list of genes to analyze (for example, acrR).
+- NCBI credentials: email is required; API key is recommended for reliable throughput.
+
+Execution should be a single Docker or WSL command to avoid manual tooling steps. Refer to the README for the simplified run instructions.
+
 ---
 
 ## Project Deliverables

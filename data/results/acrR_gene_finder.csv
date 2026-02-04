@@ -1,0 +1,2 @@
+Gene,Contig,Start,End,Strand,Identity,Source
+acrR,NC_000913.3,485761,486405,+,100.0,TBLASTN

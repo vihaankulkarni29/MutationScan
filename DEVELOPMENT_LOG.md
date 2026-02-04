@@ -9,6 +9,13 @@
 
 This is the **single source of truth** for all development progress, errors encountered, and iterations on MutationScan tools. All tool-specific documentation consolidated here to keep the repo clean.
 
+### 2026-02-04 Update
+
+- User feedback: Current run flow produces too many errors and requires manual intervention.
+- Action: Shift to a scientist-first workflow where users provide genomes (or organism query), target genes, and NCBI credentials (email + API key recommended).
+- Requirement: Single-command execution via Docker or WSL; avoid multi-step AI/manual commands.
+- Documentation updated to emphasize research run inputs and simplified execution path.
+
 ---
 
 ## 🔧 Tool Implementation Log
@@ -1156,3 +1163,30 @@ git push origin v1.0
 
 **Last Updated:** February 3, 2026  
 **Repository:** https://github.com/vihaankulkarni29/MutationScan
+
+---
+
+## 🧪 Research Run: E. coli acrR Resistance (Feb 4, 2026)
+
+**Objective:** Focused scientific run on *Escherichia coli* for antibiotic resistance via **acrR** mutations using provided reference sequence.
+
+**Execution Mode:** Docker (local genome; no fresh NCBI download)
+
+**Reference Used:** [data/refs/acrR_WT.faa](data/refs/acrR_WT.faa)
+
+**Method Summary:**
+- Located acrR via `tblastn` against the local genome FASTA.
+- Extracted and translated the gene region using SequenceExtractor (Table 11).
+- Compared against acrR wild-type reference using VariantCaller.
+
+**Key Outputs:**
+- Gene localization: [data/results/acrR_gene_finder.csv](data/results/acrR_gene_finder.csv)
+- Mutation report: [data/results/acrR_mutation_report.csv](data/results/acrR_mutation_report.csv)
+
+**Result:**
+- **No amino-acid substitutions detected** in acrR for the analyzed genome.
+- Mutation report is empty (wild-type match to reference).
+
+**Notes:**
+- ABRicate (CARD) does not report acrR directly; `tblastn` was used to locate acrR.
+- Reference sequence matched the genome with 100% identity over the detected locus.

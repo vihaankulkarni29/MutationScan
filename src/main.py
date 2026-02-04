@@ -497,76 +497,82 @@ def main():
     """
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description="MutationScan: End-to-end bacterial genome analysis pipeline",
+        description="MutationScan: Simplified AMR mutation analysis pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Basic usage (download 10 E. coli genomes)
-  python main.py --email your.email@example.com
+Simplified Research Run Examples:
+  # Analyze local genome for specific genes
+  python main.py --email your@email.com --genome data/genomes/my_genome.fasta --targets data/config/my_genes.txt
   
-  # Custom query with visualization
-  python main.py --email your.email@example.com --query "Klebsiella pneumoniae" --limit 5 --visualize
+  # Download organism and analyze specific genes
+  python main.py --email your@email.com --organism "Escherichia coli" --targets data/config/acrR_targets.txt --api-key YOUR_KEY
   
-  # With NCBI API key for faster downloads
-  python main.py --email your.email@example.com --api-key YOUR_API_KEY --limit 20
+  # Use pre-downloaded genome with default gene discovery
+  python main.py --email your@email.com --genome data/genomes/GCF_000005845.2.fasta
         """
     )
     
+    # Core required inputs
     parser.add_argument(
         '--email',
         required=True,
         help='Email address (required by NCBI policy)'
     )
     
+    # Genome source (mutually exclusive: local file OR organism query)
+    genome_group = parser.add_mutually_exclusive_group(required=True)
+    genome_group.add_argument(
+        '--genome',
+        type=Path,
+        help='Path to local genome FASTA file (use this if you already have a genome)'
+    )
+    genome_group.add_argument(
+        '--organism',
+        type=str,
+        help='Organism name to download from NCBI (e.g., "Escherichia coli")'
+    )
+    
+    # Optional API key
     parser.add_argument(
         '--api-key',
         default=None,
-        help='NCBI API key (optional, for faster downloads)'
+        help='NCBI API key (recommended for reliable downloads)'
     )
     
-    parser.add_argument(
-        '--query',
-        default='Escherichia coli',
-        help='NCBI search query (default: "Escherichia coli")'
-    )
-    
+    # Download limit (only used with --organism)
     parser.add_argument(
         '--limit',
         type=int,
-        default=10,
-        help='Maximum number of genomes to download (default: 10)'
+        default=1,
+        help='Number of genomes to download when using --organism (default: 1)'
+    )
+    
+    # Target genes (optional but recommended)
+    parser.add_argument(
+        '--targets',
+        type=Path,
+        default=None,
+        help='Path to target genes file (one gene per line). If not provided, analyzes all detected resistance genes.'
+    )
+    
+    # Optional flags
+    parser.add_argument(
+        '--config-dir',
+        type=Path,
+        default=Path('data/config'),
+        help='Configuration directory (default: data/config)'
     )
     
     parser.add_argument(
         '--visualize',
         action='store_true',
-        help='Generate 3D structure visualizations (requires PyMOL)'
+        help='Generate 3D visualizations (requires PyMOL)'
     )
     
     parser.add_argument(
         '--no-ml',
         action='store_true',
-        help='Disable ML predictions for unknown mutations'
-    )
-    
-    parser.add_argument(
-        '--antibiotic',
-        default='Ciprofloxacin',
-        help='Antibiotic name for ML predictions (default: Ciprofloxacin)'
-    )
-    
-    parser.add_argument(
-        '--config-dir',
-        type=Path,
-        default=Path('data/config'),
-        help='Path to configuration directory containing drug_mapping.json (default: data/config)'
-    )
-    
-    parser.add_argument(
-        '--targets',
-        type=Path,
-        default=None,
-        help='Path to target genes file (one gene per line, optional). If not provided, all detected genes are analyzed.'
+        help='Disable ML predictions'
     )
     
     args = parser.parse_args()
@@ -580,13 +586,14 @@ Examples:
     # Log configuration
     logging.info(f"Configuration:")
     logging.info(f"  Email: {args.email}")
-    logging.info(f"  Query: {args.query}")
-    logging.info(f"  Limit: {args.limit}")
+    if args.genome:
+        logging.info(f"  Genome: {args.genome} (local file)")
+    else:
+        logging.info(f"  Organism: {args.organism} (download from NCBI)")
+        logging.info(f"  Download Limit: {args.limit}")
+    logging.info(f"  Target Genes: {args.targets if args.targets else '(all resistance genes)'}")
     logging.info(f"  Visualize: {args.visualize}")
     logging.info(f"  ML Enabled: {not args.no_ml}")
-    logging.info(f"  Antibiotic: {args.antibiotic}")
-    logging.info(f"  Config Directory: {args.config_dir}")
-    logging.info(f"  Target Genes File: {args.targets if args.targets else '(all genes)'}")
     
     # Load target genes if provided
     target_genes = None
@@ -629,14 +636,22 @@ Examples:
         directory.mkdir(parents=True, exist_ok=True)
     
     try:
-        # STEP 1: Download genomes
-        genome_count = step1_download_genomes(
-            email=args.email,
-            api_key=args.api_key,
-            query=args.query,
-            limit=args.limit,
-            output_dir=genomes_dir
-        )
+        # STEP 1: Prepare genome(s)
+        if args.genome:
+            # Use local genome file
+            logging.info(f"Using local genome: {args.genome}")
+            if not args.genome.exists():
+                raise FileNotFoundError(f"Genome file not found: {args.genome}")
+            genome_count = 1
+        else:
+            # Download from NCBI
+            genome_count = step1_download_genomes(
+                email=args.email,
+                api_key=args.api_key,
+                query=args.organism,
+                limit=args.limit,
+                output_dir=genomes_dir
+            )
         
         # STEP 2: Find genes (with optional target gene filtering)
         genes_df = step2_find_genes(genomes_dir=genomes_dir, target_genes=target_genes)
@@ -655,7 +670,7 @@ Examples:
             output_csv=mutation_csv,
             enable_ml=not args.no_ml,
             ml_models_dir=ml_models_dir if (not args.no_ml) else None,
-            antibiotic=args.antibiotic,
+            antibiotic="Ciprofloxacin",  # Default antibiotic for ML
             drug_mapping_path=drug_mapping_path
         )
         
