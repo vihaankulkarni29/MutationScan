@@ -11,6 +11,7 @@ import json
 import logging
 import time
 import zipfile
+import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -117,12 +118,11 @@ class NCBIDatasetsGenomeDownloader:
         
         while retry_count < max_retries:
             try:
-                # Step 1: esearch to get Assembly UIDs
+                # Step 1: esearch to get Assembly UIDs (returns XML)
                 search_params = {
                     "db": "assembly",
                     "term": query,
                     "retmax": max_results,
-                    "rettype": "json",
                     "tool": "mutation_scan",
                     "email": self.email,
                 }
@@ -132,8 +132,10 @@ class NCBIDatasetsGenomeDownloader:
                 response = requests.get(self.NCBI_ESEARCH_URL, params=search_params)
                 response.raise_for_status()
                 
-                search_data = response.json()
-                uids = search_data.get("esearchresult", {}).get("idlist", [])
+                # Parse XML response
+                root = ET.fromstring(response.text)
+                id_list = root.find('.//IdList')
+                uids = [id_elem.text for id_elem in id_list.findall('Id')] if id_list is not None else []
                 
                 if not uids:
                     logger.warning(f"No results found for query: {query}")
@@ -141,11 +143,10 @@ class NCBIDatasetsGenomeDownloader:
                 
                 logger.info(f"Found {len(uids)} Assembly UIDs. Resolving to accessions...")
                 
-                # Step 2: esummary to get Assembly Accessions
+                # Step 2: esummary to get Assembly Accessions (returns XML)
                 summary_params = {
                     "db": "assembly",
                     "id": ",".join(uids[:max_results]),
-                    "rettype": "json",
                     "tool": "mutation_scan",
                     "email": self.email,
                 }
@@ -155,14 +156,15 @@ class NCBIDatasetsGenomeDownloader:
                 response = requests.get(self.NCBI_ESUMMARY_URL, params=summary_params)
                 response.raise_for_status()
                 
-                summary_data = response.json()
-                assemblies = summary_data.get("result", {}).get("assembly", [])
-                
-                for asm in assemblies:
-                    # Extract GCF_/GCA_ accession
-                    asm_accession = asm.get("assemblyaccession")
-                    if asm_accession and (asm_accession.startswith("GCF_") or asm_accession.startswith("GCA_")):
-                        accessions.append(asm_accession)
+                # Parse XML for assembly accessions
+                root = ET.fromstring(response.text)
+                for doc_sum in root.findall('.//DocumentSummary'):
+                    # Find AssemblyAccession field
+                    asm_acc_elem = doc_sum.find(".//AssemblyAccession")
+                    if asm_acc_elem is not None:
+                        asm_accession = asm_acc_elem.text
+                        if asm_accession and (asm_accession.startswith("GCF_") or asm_accession.startswith("GCA_")):
+                            accessions.append(asm_accession)
                 
                 logger.info(f"Resolved {len(accessions)} valid Assembly Accessions")
                 return accessions
@@ -281,8 +283,11 @@ class NCBIDatasetsGenomeDownloader:
         params = {
             "include_annotation_type": "FULL_GENOME",  # Include chromosome + plasmids
             "file_formats": "FASTA",
-            "api_key": self.api_key if self.api_key else "",
         }
+        
+        # Only add api_key if it exists (empty string causes 400 errors)
+        if self.api_key:
+            params["api_key"] = self.api_key
         
         retry_count = 0
         max_retries = 3

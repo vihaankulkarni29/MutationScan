@@ -30,6 +30,52 @@ from mutation_scan.variant_caller import VariantCaller
 from mutation_scan.visualizer import PyMOLVisualizer
 
 
+def print_startup_banner() -> None:
+    """
+    Display platform-specific startup banner with deployment instructions.
+    
+    Guides users to use Docker on Windows before attempting native execution.
+    """
+    import platform
+    
+    os_name = platform.system()
+    is_windows = (os_name == "Windows")
+    
+    print("\n" + "="*70)
+    print("         MUTATIONSCAN v1.0 - Clinical AMR Pipeline")
+    print("="*70)
+    print(f"Platform Detected: {os_name}\n")
+    
+    if is_windows:
+        print("[WINDOWS DEPLOYMENT GUIDE]")
+        print("━"*70)
+        print("⚠️  Native Windows execution requires WSL or Docker.\n")
+        print("RECOMMENDED: Use Docker for one-click deployment:\n")
+        print("  Option 1 - Docker Compose (Easiest):")
+        print("    $env:NCBI_EMAIL = 'your.email@example.com'")
+        print("    docker-compose up\n")
+        print("  Option 2 - Docker Run (Custom Parameters):")
+        print("    docker run -v ${PWD}/data:/app/data mutationscan:v1 \\")
+        print("      --email your@email.com --query 'E. coli' --limit 10\n")
+        print("ALTERNATIVE: Install dependencies via WSL:")
+        print("    wsl --install")
+        print("    wsl -e sudo apt update")
+        print("    wsl -e sudo apt install abricate ncbi-blast+")
+        print("━"*70 + "\n")
+    else:
+        print("[UNIX/LINUX DEPLOYMENT]")
+        print("━"*70)
+        print("✓ Platform supported for native execution.\n")
+        print("Required Dependencies:")
+        print("  • ABRicate (resistance gene database)")
+        print("  • NCBI BLAST+ (sequence alignment)")
+        print("  • PyMOL (optional - 3D visualization)\n")
+        print("Install via package manager:")
+        print("  Ubuntu/Debian: sudo apt install abricate ncbi-blast+ pymol")
+        print("  macOS:         brew install brewsci/bio/abricate blast pymol")
+        print("━"*70 + "\n")
+
+
 def setup_logging(log_file: Path = Path("data/logs/pipeline.log")) -> None:
     """
     Configure logging for the pipeline.
@@ -506,6 +552,9 @@ Examples:
     )
     
     args = parser.parse_args()
+    
+    # Show startup banner with platform-specific instructions
+    print_startup_banner()
     
     # Setup logging
     setup_logging()
