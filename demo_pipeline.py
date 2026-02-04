@@ -10,10 +10,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, '/app/src')
 
-from mutation_scan.gene_finder import GeneFinder
-from mutation_scan.sequence_extractor import SequenceExtractor
-from mutation_scan.variant_caller import VariantCaller
-from mutation_scan.visualizer import PyMOLVisualizer
+from mutation_scan.core import GeneFinder, SequenceExtractor
+from mutation_scan.analysis import VariantCaller
+from mutation_scan.visualization import PyMOLVisualizer
 
 print("\n" + "="*70)
 print("  MUTATIONSCAN DEMO - E. COLI K-12 EFFLUX PUMP RESISTANCE")

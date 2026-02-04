@@ -97,9 +97,9 @@ Handles NCBI Entrez API interactions for automated genome downloading and basic 
 
 **Usage:**
 ```python
-from mutation_scan.genome_extractor import EntrezGenomeDownloader
+from mutation_scan.core import NCBIDatasetsGenomeDownloader
 
-downloader = EntrezGenomeDownloader(email="your.email@example.com")
+downloader = NCBIDatasetsGenomeDownloader(email="your.email@example.com")
 genomes = downloader.search_genomes("Escherichia coli", max_results=10)
 ```
 
@@ -112,7 +112,7 @@ Wrapper modules for AMR gene detection using industry-standard tools.
 
 **Usage:**
 ```python
-from mutation_scan.gene_finder import AbricateWrapper
+from mutation_scan.core import AbricateWrapper
 
 abricate = AbricateWrapper(database="card")
 results = abricate.screen_genome("genome.fasta", "results.tsv")
@@ -127,7 +127,7 @@ Coordinate-based sequence extraction and DNA-to-protein translation.
 
 **Usage:**
 ```python
-from mutation_scan.sequence_extractor import SequenceTranslator
+from mutation_scan.core import SequenceTranslator
 
 translator = SequenceTranslator()
 protein = translator.translate("ATGAAAGCG...", frame=0)
@@ -142,7 +142,7 @@ Pairwise sequence alignment and mutation detection.
 
 **Usage:**
 ```python
-from mutation_scan.variant_caller import SequenceAligner, VariantDetector
+from mutation_scan.analysis import SequenceAligner, VariantDetector
 
 aligner = SequenceAligner()
 result = aligner.global_alignment(seq1, seq2)
@@ -160,7 +160,7 @@ PyMOL automation for 3D protein structure visualization.
 
 **Usage:**
 ```python
-from mutation_scan.visualizer import PyMOLAutomator
+from mutation_scan.visualization import PyMOLAutomator
 
 pymol = PyMOLAutomator(headless=True)
 pymol.load_structure("protein.pdb")
@@ -249,15 +249,13 @@ output:
 ### 1. Basic Pipeline Execution
 
 ```python
-from mutation_scan.utils import setup_logger, ConfigParser
-from mutation_scan.genome_extractor import EntrezGenomeDownloader
-from mutation_scan.gene_finder import AbricateWrapper
+from mutation_scan.utils import setup_logging
+from mutation_scan.core import NCBIDatasetsGenomeDownloader
+from mutation_scan.core import AbricateWrapper
 
 # Setup logging
-logger = setup_logger("mutation_scan")
-
-# Load configuration
-config = ConfigParser("config/config.yaml")
+from mutation_scan.utils import get_logger
+logger = get_logger("mutation_scan")
 
 # Step 1: Download genome
 downloader = EntrezGenomeDownloader(config.get("ncbi.email"))
@@ -311,14 +309,14 @@ See `requirements.txt` for the complete list. Main dependencies:
 ### Example 1: Download and Screen a Single Genome
 
 ```python
-from mutation_scan.genome_extractor import EntrezGenomeDownloader
-from mutation_scan.gene_finder import AbricateWrapper
-from mutation_scan.utils import setup_logger
+from mutation_scan.core import NCBIDatasetsGenomeDownloader
+from mutation_scan.core import AbricateWrapper
+from mutation_scan.utils import get_logger
 
-logger = setup_logger("example1")
+logger = get_logger("example1")
 
 # Initialize downloader
-downloader = EntrezGenomeDownloader(email="user@example.com")
+downloader = NCBIDatasetsGenomeDownloader(email="user@example.com")
 
 # Search for E. coli genomes
 genomes = downloader.search_genomes("Escherichia coli[organism]", max_results=5)
@@ -342,8 +340,8 @@ if genomes:
 ### Example 2: Sequence Alignment and Mutation Detection
 
 ```python
-from mutation_scan.sequence_extractor import SequenceTranslator
-from mutation_scan.variant_caller import SequenceAligner, VariantDetector
+from mutation_scan.core import SequenceTranslator
+from mutation_scan.analysis import SequenceAligner, VariantDetector
 
 # Translate sequences
 translator = SequenceTranslator()
@@ -370,7 +368,7 @@ print(f"Found {stats['total_variants']} variants")
 ### Example 3: 3D Visualization
 
 ```python
-from mutation_scan.visualizer import PyMOLAutomator, StructureMapper
+from mutation_scan.visualization import PyMOLAutomator, StructureMapper
 
 # Initialize visualizer
 pymol = PyMOLAutomator(headless=True)

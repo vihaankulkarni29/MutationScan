@@ -9,13 +9,13 @@ from pathlib import Path
 import logging
 
 # Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
 
-from src.mutation_scan.variant_caller.variant_caller import VariantCaller
+from mutation_scan.analysis.variant_caller import VariantCaller
 
 # Configure logging
 logging.basicConfig(

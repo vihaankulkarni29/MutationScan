@@ -22,7 +22,7 @@ from unittest.mock import patch, MagicMock
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from mutation_scan.genome_extractor import (
+from mutation_scan.core import (
     NCBIDatasetsGenomeDownloader,
     GenomeProcessor,
 )

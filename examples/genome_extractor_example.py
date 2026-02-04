@@ -14,7 +14,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from mutation_scan.genome_extractor import NCBIDatasetsGenomeDownloader, GenomeProcessor
+from mutation_scan.core import NCBIDatasetsGenomeDownloader, GenomeProcessor
 
 
 def example_search_mode():

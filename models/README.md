@@ -48,7 +48,7 @@ The predictor automatically detects available models by scanning this directory 
 
 To check available models at runtime:
 ```python
-from mutation_scan.ml_predictor import ResistancePredictor
+from mutation_scan.analysis.ml import ResistancePredictor
 
 predictor = ResistancePredictor(model_dir="models")
 print(predictor.get_available_models())

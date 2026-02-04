@@ -10,9 +10,9 @@ import logging
 import pandas as pd
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from src.mutation_scan.visualizer.visualizer import PyMOLVisualizer
+from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
 
 # Configure logging
 logging.basicConfig(

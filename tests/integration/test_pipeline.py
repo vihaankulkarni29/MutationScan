@@ -1,8 +1,8 @@
 """Integration tests for pipeline workflows."""
 
 import pytest
-from mutation_scan.sequence_extractor import SequenceTranslator
-from mutation_scan.variant_caller import SequenceAligner, VariantDetector
+from mutation_scan.core import SequenceTranslator
+from mutation_scan.analysis import SequenceAligner, VariantDetector
 
 class TestSequenceToVariantPipeline:
     """Test complete sequence analysis pipeline."""

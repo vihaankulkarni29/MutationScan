@@ -1,7 +1,7 @@
 """Unit tests for sequence extractor module."""
 
 import pytest
-from mutation_scan.sequence_extractor import SequenceTranslator
+from mutation_scan.core import SequenceTranslator
 
 class TestSequenceTranslator:
     """Test suite for SequenceTranslator class."""

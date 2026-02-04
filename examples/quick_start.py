@@ -5,7 +5,7 @@ Copy this file and modify it for your specific use case.
 """
 
 from pathlib import Path
-from mutation_scan.genome_extractor import NCBIDatasetsGenomeDownloader, GenomeProcessor
+from mutation_scan.core import NCBIDatasetsGenomeDownloader, GenomeProcessor
 
 # ============================================================================
 # CONFIGURATION
