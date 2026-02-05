@@ -12,32 +12,34 @@ README_PATH = Path(__file__).parent / "README.md"
 long_description = README_PATH.read_text(encoding="utf-8") if README_PATH.exists() else ""
 
 setup(
-    name="mutation-scan",
-    version="0.1.0",
-    author="Your Organization",
+    name="mutation_scan",
+    version="1.0.0",
+    author="Vihaan Kulkarni",
     author_email="contact@example.com",
-    description="A Python-based bioinformatics pipeline for AMR gene detection and analysis",
+    description="Democratized Bioinformatics Pipeline for AMR Detection",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/MutationScan",
+    url="https://github.com/vihaankulkarni29/MutationScan",
     project_urls={
-        "Bug Tracker": "https://github.com/yourusername/MutationScan/issues",
-        "Documentation": "https://github.com/yourusername/MutationScan/docs",
-        "Source Code": "https://github.com/yourusername/MutationScan",
+        "Bug Tracker": "https://github.com/vihaankulkarni29/MutationScan/issues",
+        "Documentation": "https://github.com/vihaankulkarni29/MutationScan/docs",
+        "Source Code": "https://github.com/vihaankulkarni29/MutationScan",
     },
     license="MIT",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
-    python_requires=">=3.8,<4",
+    python_requires=">=3.9,<4",
     install_requires=[
         "biopython>=1.79",
-        "PyYAML>=5.4",
         "pyyaml>=5.4",
         "requests>=2.26.0",
         "pandas>=1.3.0",
         "numpy>=1.21.0",
         "matplotlib>=3.4.0",
         "scipy>=1.7.0",
+        "scikit-learn>=1.0.0",
+        "joblib>=1.1.0",
+        "ncbi-datasets-pylib>=16.0.0",
     ],
     extras_require={
         "dev": [
@@ -58,7 +60,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "mutation-scan=mutation_scan.cli:main",
+            "mutation-scan=mutation_scan.main:main",
         ],
     },
     classifiers=[
