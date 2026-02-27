@@ -1,4 +1,4 @@
-# MutationScan
+# MutationScan-BMC
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)
