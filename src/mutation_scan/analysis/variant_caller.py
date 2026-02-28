@@ -265,7 +265,7 @@ class VariantCaller:
             
             try:
                 # Expected format: ACCESSION_GeneName
-                parts = filename.split('_', 1)  # Split on first underscore only
+                parts = filename.rsplit('_', 1)  # Split on last underscore to handle GCF_ accessions
                 
                 if len(parts) != 2:
                     logger.warning(f"Skipping invalid filename format: {faa_file.name} (expected ACCESSION_GeneName.faa)")
