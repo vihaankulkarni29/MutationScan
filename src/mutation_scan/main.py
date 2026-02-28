@@ -419,7 +419,7 @@ def step4_call_variants(
         
         # Call variants
         mutations_df = caller.call_variants(
-            query_dir=proteins_dir,
+            proteins_dir=proteins_dir,
             output_csv=output_csv
         )
         
