@@ -15,6 +15,7 @@ from .blast_wrapper import BLASTWrapper
 from .sequence_extractor import SequenceExtractor
 from .coordinate_parser import CoordinateParser
 from .translator import SequenceTranslator
+from .reference_builder import ReferenceBuilder
 
 __all__ = [
     "NCBIDatasetsGenomeDownloader",
@@ -26,4 +27,5 @@ __all__ = [
     "SequenceExtractor",
     "CoordinateParser",
     "SequenceTranslator",
+    "ReferenceBuilder",
 ]

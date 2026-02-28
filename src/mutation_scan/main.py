@@ -26,6 +26,7 @@ import pandas as pd
 from mutation_scan.core.entrez_handler import NCBIDatasetsGenomeDownloader
 from mutation_scan.core.gene_finder import GeneFinder
 from mutation_scan.core.sequence_extractor import SequenceExtractor
+from mutation_scan.core.reference_builder import ReferenceBuilder
 from mutation_scan.analysis.variant_caller import VariantCaller
 from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
 
@@ -575,6 +576,12 @@ Simplified Research Run Examples:
         help='Disable ML predictions'
     )
     
+    parser.add_argument(
+        '--auto-fetch-refs',
+        action='store_true',
+        help='Optionally attempt to download missing wild-type reference proteins from NCBI'
+    )
+    
     args = parser.parse_args()
     
     # Show startup banner with platform-specific instructions
@@ -662,6 +669,71 @@ Simplified Research Run Examples:
             genomes_dir=genomes_dir,
             output_dir=proteins_dir
         )
+        
+        # STEP 3.5: Validate references (optional auto-fetch if --auto-fetch-refs enabled)
+        logging.info("")
+        logging.info("="*70)
+        logging.info("STEP 3.5: Validate Wild-Type References")
+        logging.info("="*70)
+        
+        # Get unique genes from extracted protein files
+        protein_files = list(proteins_dir.glob("*.faa"))
+        unique_genes = set()
+        for pf in protein_files:
+            # Parse gene name from filename: GCF_XXXXXXX.X_geneName.faa -> geneName
+            parts = pf.stem.rsplit('_', 1)
+            if len(parts) == 2:
+                gene_name = parts[1]
+                unique_genes.add(gene_name)
+        
+        if unique_genes:
+            logging.info(f"Found {len(unique_genes)} unique genes in extracted proteins: {', '.join(sorted(unique_genes))}")
+            
+            missing_refs = []
+            for gene in unique_genes:
+                ref_file = refs_dir / f"{gene}_WT.faa"
+                if ref_file.exists():
+                    logging.info(f"  ✓ Reference found for {gene}: {ref_file.name}")
+                else:
+                    missing_refs.append(gene)
+                    logging.warning(f"  ✗ Reference missing for {gene}: {ref_file.name}")
+            
+            # Handle missing references
+            if missing_refs:
+                if args.auto_fetch_refs:
+                    logging.info(f"Auto-fetch enabled: Attempting to download {len(missing_refs)} missing reference(s) from NCBI...")
+                    
+                    # Initialize ReferenceBuilder
+                    try:
+                        ref_builder = ReferenceBuilder(email=args.email, api_key=args.api_key)
+                        
+                        # Attempt to fetch each missing reference
+                        # Default organism based on common use case (can be made configurable)
+                        default_organism = "Klebsiella pneumoniae"
+                        
+                        for gene in missing_refs:
+                            logging.info(f"  Fetching {gene} reference from NCBI...")
+                            try:
+                                success = ref_builder.fetch_reference(
+                                    gene_name=gene,
+                                    organism=default_organism,
+                                    output_dir=refs_dir
+                                )
+                                if success:
+                                    logging.info(f"    ✓ Successfully fetched {gene}_WT.faa")
+                                else:
+                                    logging.warning(f"    ✗ Could not fetch {gene} reference from NCBI")
+                            except Exception as e:
+                                logging.error(f"    ✗ Error fetching {gene}: {e}")
+                    
+                    except Exception as e:
+                        logging.error(f"Failed to initialize ReferenceBuilder: {e}")
+                        logging.info("Continuing with available references...")
+                else:
+                    logging.warning(f"{len(missing_refs)} reference(s) missing. Use --auto-fetch-refs to download from NCBI.")
+                    logging.info("VariantCaller will skip genes without references.")
+        else:
+            logging.warning("No protein files found. Skipping reference validation.")
         
         # STEP 4: Call variants (with configuration)
         mutations_df = step4_call_variants(
