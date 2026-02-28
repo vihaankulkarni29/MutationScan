@@ -8,13 +8,21 @@ A professional, modular bioinformatics pipeline for automated detection, analysi
 
 ## 📚 Documentation
 
-All documentation is organized in the [docs/](docs/) folder:
-
+**Main Documentation:**
+- **[Documentation Index](docs/INDEX.md)** - Complete documentation guide
+- **[Setup Details](docs/SETUP_COMPLETE.md)** - Installation and setup verification
 - **[Contributing Guide](docs/CONTRIBUTING.md)** - How to contribute to the project
 - **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Detailed directory architecture
 - **[Quick Reference](docs/QUICK_REFERENCE.md)** - Quick lookup guide
-- **[Documentation Index](docs/INDEX.md)** - Complete documentation index
-- **[Setup Details](docs/SETUP_COMPLETE.md)** - Installation and setup verification
+- **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment instructions
+- **[Docker Structure](docs/Docker_Structure.md)** - Docker setup and configuration
+
+**Quick Start Resources:**
+- **[Scripts](scripts/)** - Utility scripts (Docker runners, helpers)
+- **[Examples](examples/)** - Demo scripts and example workflows
+- **[Docker Files](docker/)** - Additional Dockerfile configurations
+- **[Simplified Run Guide](docs/SIMPLIFIED_RUN_GUIDE.md)** - One-command execution
 
 ## Overview
 
