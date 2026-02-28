@@ -2,14 +2,18 @@
 NCBI Datasets API v2 handler for genome downloads.
 
 This module provides functionality to query and download bacterial genomes
-from NCBI using the modern Datasets API with batch processing capabilities.
+from NCBI using the modern Datasets API and CLI-based bulk downloading.
 
 Uses Bio.Entrez for text searching and ncbi.datasets.GenomeApi for actual data transfer.
 """
 
 import json
 import logging
+import re
+import shutil
+import subprocess
 import time
+import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 from io import BytesIO
@@ -21,6 +25,202 @@ import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+class BulkGenomeDownloader:
+    """
+    Enterprise-scale downloader using official ncbi-datasets-cli.
+
+    Workflow:
+    - Phase A: Dehydrate genome package from taxon + geo-location
+    - Phase B: Unpack dehydrated bundle
+    - Phase C: Rehydrate concurrently with datasets CLI
+    - Phase D: Organize .fna files into data/genomes as accession-named FASTA files
+    """
+
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        log_file: Optional[Path] = None,
+        datasets_binary: str = "datasets",
+    ):
+        self.output_dir = Path(output_dir or "data/genomes")
+        self.log_file = Path(log_file or "data/logs/genome_extractor.log")
+        self.datasets_binary = datasets_binary
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        self._setup_logging()
+
+        if not shutil.which(self.datasets_binary):
+            raise FileNotFoundError(
+                f"'{self.datasets_binary}' was not found in PATH. "
+                "Install ncbi-datasets-cli in the runtime environment."
+            )
+
+        logger.info("Initialized BulkGenomeDownloader with datasets CLI")
+        logger.info(f"Output directory: {self.output_dir}")
+
+    def _setup_logging(self):
+        """Configure file-based logging for subprocess progress tracking."""
+        existing_file_handlers = [
+            handler for handler in logger.handlers if isinstance(handler, logging.FileHandler)
+        ]
+        if any(getattr(handler, "baseFilename", "") == str(self.log_file.resolve()) for handler in existing_file_handlers):
+            return
+
+        file_handler = logging.FileHandler(self.log_file)
+        file_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    def _run_command(
+        self,
+        command: List[str],
+        phase_name: str,
+        cwd: Optional[Path] = None,
+        timeout: int = 0,
+    ) -> None:
+        """
+        Execute a CLI command and route stdout/stderr to logger.
+
+        Raises:
+            RuntimeError: If subprocess exits with non-zero status
+        """
+        command_display = " ".join(command)
+        logger.info(f"{phase_name}: Running command: {command_display}")
+
+        completed = subprocess.run(
+            command,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=None if timeout <= 0 else timeout,
+            check=False,
+        )
+
+        if completed.stdout:
+            for line in completed.stdout.splitlines():
+                logger.info(f"{phase_name} stdout: {line}")
+
+        if completed.stderr:
+            for line in completed.stderr.splitlines():
+                logger.warning(f"{phase_name} stderr: {line}")
+
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"{phase_name} failed with exit code {completed.returncode}: {command_display}"
+            )
+
+    @staticmethod
+    def _extract_accession(path_obj: Path) -> Optional[str]:
+        """Extract accession ID (GCF_/GCA_) from file path or filename."""
+        accession_pattern = re.compile(r"(GC[AF]_\d+\.\d+)")
+        path_text = str(path_obj)
+        match = accession_pattern.search(path_text)
+        if match:
+            return match.group(1)
+
+        return None
+
+    def bulk_download_by_geolocation(
+        self,
+        organism: str,
+        location: str,
+        archive_name: str = "data.zip",
+    ) -> Tuple[int, int]:
+        """
+        Download large genome cohorts via datasets CLI dehydrated + rehydrate flow.
+
+        Args:
+            organism: Taxon string for datasets CLI taxon query
+            location: Geographic filter (e.g., "India")
+            archive_name: Filename for dehydrated zip package
+
+        Returns:
+            Tuple of (successful_downloads, failed_downloads)
+        """
+        logger.info(
+            f"Starting bulk genome download via datasets CLI: organism='{organism}', location='{location}'"
+        )
+
+        successful = 0
+        failed = 0
+
+        with tempfile.TemporaryDirectory(prefix="mutation_scan_bulk_") as tmp_dir:
+            temp_root = Path(tmp_dir)
+            dehydrated_zip = temp_root / archive_name
+            unpack_dir = temp_root / "dehydrated"
+
+            try:
+                # Phase A: Dehydrate
+                dehydrate_command = [
+                    self.datasets_binary,
+                    "download",
+                    "genome",
+                    "taxon",
+                    organism,
+                    "--geo-location",
+                    location,
+                    "--include",
+                    "genome",
+                    "--dehydrated",
+                    "--filename",
+                    str(dehydrated_zip),
+                ]
+                self._run_command(dehydrate_command, "Phase A (Dehydrate)", cwd=temp_root)
+
+                if not dehydrated_zip.exists():
+                    raise FileNotFoundError(f"Dehydrated archive not found: {dehydrated_zip}")
+
+                # Phase B: Unpack
+                unpack_dir.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(dehydrated_zip, "r") as zip_ref:
+                    zip_ref.extractall(unpack_dir)
+                logger.info(f"Phase B (Unpack): Extracted dehydrated archive to {unpack_dir}")
+
+                # Phase C: Rehydrate
+                rehydrate_command = [
+                    self.datasets_binary,
+                    "rehydrate",
+                    "--directory",
+                    str(unpack_dir),
+                ]
+                self._run_command(rehydrate_command, "Phase C (Rehydrate)", cwd=temp_root)
+
+                # Phase D: Organize
+                fna_files = list(unpack_dir.rglob("*.fna"))
+                if not fna_files:
+                    logger.warning("Phase D (Organize): No .fna files found after rehydration")
+                    return 0, 0
+
+                logger.info(f"Phase D (Organize): Found {len(fna_files)} .fna files")
+
+                for fna_file in fna_files:
+                    accession = self._extract_accession(fna_file)
+                    if not accession:
+                        logger.warning(f"Could not infer accession from path: {fna_file}")
+                        failed += 1
+                        continue
+
+                    destination = self.output_dir / f"{accession}.fasta"
+                    if destination.exists():
+                        logger.info(f"Overwriting existing genome file: {destination}")
+
+                    shutil.move(str(fna_file), str(destination))
+                    successful += 1
+
+                logger.info(
+                    f"Bulk download complete via datasets CLI: {successful} successful, {failed} failed"
+                )
+                return successful, failed
+
+            except Exception as exc:
+                logger.error(f"Bulk download failed: {type(exc).__name__}: {exc}")
+                raise
 
 
 class NCBIDatasetsGenomeDownloader:
@@ -211,6 +411,23 @@ class NCBIDatasetsGenomeDownloader:
         
         logger.info(f"Loaded {len(accessions)} accessions from file")
         return accessions
+
+    def download_bulk_by_geolocation(self, organism: str, location: str) -> Tuple[int, int]:
+        """
+        Compatibility wrapper to execute enterprise-scale CLI bulk download flow.
+
+        Args:
+            organism: Taxon string for datasets CLI taxon query
+            location: Geographic filter (e.g., "India")
+
+        Returns:
+            Tuple of (successful_downloads, failed_downloads)
+        """
+        bulk_downloader = BulkGenomeDownloader(
+            output_dir=self.output_dir,
+            log_file=self.log_file,
+        )
+        return bulk_downloader.bulk_download_by_geolocation(organism=organism, location=location)
 
     def download_batch(self, accessions: List[str]) -> Tuple[int, int]:
         """

@@ -7,7 +7,7 @@ Contains modules for:
 - sequence_extractor: Coordinate parsing and sequence extraction
 """
 
-from .entrez_handler import NCBIDatasetsGenomeDownloader
+from .entrez_handler import NCBIDatasetsGenomeDownloader, BulkGenomeDownloader
 from .genome_processor import GenomeProcessor
 from .gene_finder import GeneFinder
 from .abricate_wrapper import AbricateWrapper
@@ -18,6 +18,7 @@ from .translator import SequenceTranslator
 
 __all__ = [
     "NCBIDatasetsGenomeDownloader",
+    "BulkGenomeDownloader",
     "GenomeProcessor",
     "GeneFinder",
     "AbricateWrapper",

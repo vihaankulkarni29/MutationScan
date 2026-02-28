@@ -19,6 +19,11 @@ RUN apt-get update && apt-get install -y \
     libglew-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# 1b. INSTALL NCBI DATASETS CLI (for enterprise-scale bulk downloads)
+RUN curl -L -o /usr/local/bin/datasets \
+    "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" && \
+    chmod +x /usr/local/bin/datasets
+
 # 2. SETUP OFFLINE DATABASES
 RUN abricate --setupdb
 
