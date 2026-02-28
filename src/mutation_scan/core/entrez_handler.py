@@ -281,8 +281,7 @@ class NCBIDatasetsGenomeDownloader:
         url = f"{self.DATASETS_API_URL}/genome/accession/{accession}/download"
         
         params = {
-            "include_annotation_type": "FULL_GENOME",  # Include chromosome + plasmids
-            "file_formats": "FASTA",
+            "include_annotation_type": "GENOME_FASTA",  # Include chromosome + plasmids
         }
         
         # Only add api_key if it exists (empty string causes 400 errors)
