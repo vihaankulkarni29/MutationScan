@@ -211,10 +211,8 @@ def phase1_genomic_ingestion(
     if args.api_key:
         docker_command.extend(["--api-key", args.api_key])
     
-    # Add target genes if provided
-    if target_genes:
-        logger.warning("Target genes filters are not automatically passed to Docker container")
-        logger.info("Please configure target genes within the Docker container environment")
+    # Add targets file path
+    docker_command.extend(["--targets", args.targets])
     
     try:
         logger.info(f"Executing Docker command: {' '.join(docker_command[:6])}...")
@@ -795,6 +793,13 @@ Examples:
         type=str,
         default='C1=CC2=C(C(=C1)F)N(C=C(C2=O)C(=O)O)C3CC3',
         help='SMILES string for the target antibiotic (default: Ciprofloxacin).'
+    )
+    
+    parser.add_argument(
+        '--targets',
+        type=str,
+        default='config/target_genes.txt',
+        help='Path to the target genes text file'
     )
     
     parser.add_argument(
