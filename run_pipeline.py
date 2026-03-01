@@ -576,6 +576,13 @@ def run_master_pipeline(args) -> int:
         # Setup directories
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Default values for checkpointed execution
+        mutations_df = pd.DataFrame()
+        expression_scores = {}
+        epistasis_networks = {}
+        docking_results = {}
+        sample_id = args.organism.split()[0] + "_" + args.organism.split()[1] if args.organism and " " in args.organism else (args.organism or "Unknown")
         
         logger.info("")
         logger.info("+" + "="*68 + "+")
@@ -585,74 +592,91 @@ def run_master_pipeline(args) -> int:
         logger.info(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # PHASE 1: Genomic Ingestion
-        mutations_df, proteins_dir, refs_dir, genomes_dir = phase1_genomic_ingestion(
-            args=args,
-            target_genes=None,  # Can be extended from args
-            output_dir=output_dir
-        )
-        
-        # Convert mutations DataFrame to epistasis input format for Phase 3
-        logger.info("Converting mutation data to epistasis analysis format...")
-        epistasis_input_dict = {}
-        
-        if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
-            # Convert flat mutation list to genome-mapped dictionary
-            if 'Accession' in mutations_df.columns and 'Mutation' in mutations_df.columns:
-                epistasis_input_dict = mutations_df.groupby('Accession')['Mutation'].apply(list).to_dict()
-                logger.info(f"Mapped mutations for {len(epistasis_input_dict)} genomes")
-            else:
-                logger.warning("Mutation DataFrame missing expected columns (Accession, Mutation)")
-        else:
-            logger.warning("No mutation data available for epistasis analysis")
-        
-        # Save epistasis input for Phase 3
-        epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
-        epistasis_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(epistasis_file, 'w') as f:
-            json.dump({"genomes": epistasis_input_dict}, f, indent=2)
-        logger.info(f"Saved epistasis input to {epistasis_file}")
-        
-        # PHASE 2: Expression Analysis
-        expression_scores = phase2_expression_analysis(
-            expression_file=Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
-        )
-        
-        # PHASE 3: Epistasis Detection
-        epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
-        if not epistasis_file.exists():
-            logger.warning(f"Epistasis file not found: {epistasis_file}")
-            epistasis_data_dict = {"genomes": {}}
-        else:
-            with open(epistasis_file, "r") as f:
-                epistasis_data_dict = json.load(f)
+        if args.start_phase <= 1:
+            mutations_df, proteins_dir, refs_dir, genomes_dir = phase1_genomic_ingestion(
+                args=args,
+                target_genes=None,  # Can be extended from args
+                output_dir=output_dir
+            )
 
-        epistasis_networks = phase3_epistasis_detection(
-            epistasis_data=epistasis_data_dict
-        )
-        
+            # Convert mutations DataFrame to epistasis input format for Phase 3
+            logger.info("Converting mutation data to epistasis analysis format...")
+            epistasis_input_dict = {}
+
+            if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
+                # Convert flat mutation list to genome-mapped dictionary
+                if 'Accession' in mutations_df.columns and 'Mutation' in mutations_df.columns:
+                    epistasis_input_dict = mutations_df.groupby('Accession')['Mutation'].apply(list).to_dict()
+                    logger.info(f"Mapped mutations for {len(epistasis_input_dict)} genomes")
+                else:
+                    logger.warning("Mutation DataFrame missing expected columns (Accession, Mutation)")
+            else:
+                logger.warning("No mutation data available for epistasis analysis")
+
+            # Save epistasis input for Phase 3
+            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+            epistasis_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(epistasis_file, 'w') as f:
+                json.dump({"genomes": epistasis_input_dict}, f, indent=2)
+            logger.info(f"Saved epistasis input to {epistasis_file}")
+
+            if args.genome:
+                sample_id = Path(args.genome).stem
+        else:
+            logger.info("Skipping Phase 1 (Genomics). Relying on cached data.")
+
+        # PHASE 2: Expression Analysis
+        if args.start_phase <= 2:
+            expression_scores = phase2_expression_analysis(
+                expression_file=Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
+            )
+        else:
+            logger.info("Skipping Phase 2 (Expression). Relying on cached data.")
+
+        # PHASE 3: Epistasis Detection
+        if args.start_phase <= 3:
+            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+            if not epistasis_file.exists():
+                logger.warning(f"Epistasis file not found: {epistasis_file}")
+                epistasis_data_dict = {"genomes": {}}
+            else:
+                with open(epistasis_file, "r") as f:
+                    epistasis_data_dict = json.load(f)
+
+            epistasis_networks = phase3_epistasis_detection(
+                epistasis_data=epistasis_data_dict
+            )
+        else:
+            logger.info("Skipping Phase 3 (Epistasis). Relying on cached data.")
+
         # PHASE 4: Biophysics Docking
-        pdb_mapping = args.pdb_mapping or {
-            "oqxA": ("7cz9", "A"),
-            "oqxB": ("7cz9", "A"),
-        }
-        docking_results = phase4_biophysics_docking(
-            epistasis_networks=epistasis_networks,
-            pdb_mapping=pdb_mapping,
-            ligand_smiles=args.ligand_smiles,
-            output_dir=output_dir / "biophysics"
-        )
-        
+        if args.start_phase <= 4:
+            pdb_mapping = args.pdb_mapping or {
+                "oqxA": ("7cz9", "A"),
+                "oqxB": ("7cz9", "A"),
+            }
+            docking_results = phase4_biophysics_docking(
+                epistasis_networks=epistasis_networks,
+                pdb_mapping=pdb_mapping,
+                ligand_smiles=args.ligand_smiles,
+                output_dir=output_dir / "biophysics"
+            )
+        else:
+            logger.info("Skipping Phase 4 (Biophysics). Relying on cached data.")
+
         # PHASE 5: Feature Aggregation (NO MACHINE LEARNING)
-        sample_id = Path(args.genome).stem if args.genome else args.organism.replace(" ", "_")
-        features_df = phase5_feature_aggregation(
-            sample_id=sample_id,
-            species=args.organism or "Unknown",
-            mutations_df=mutations_df,
-            expression_scores=expression_scores,
-            epistasis_networks=epistasis_networks,
-            docking_results=docking_results,
-            output_file=Path("data/results/final_engineered_features.csv")
-        )
+        if args.start_phase <= 5:
+            features_df = phase5_feature_aggregation(
+                sample_id=sample_id,
+                species=args.organism or "Unknown",
+                mutations_df=mutations_df,
+                expression_scores=expression_scores,
+                epistasis_networks=epistasis_networks,
+                docking_results=docking_results,
+                output_file=Path("data/results/final_engineered_features.csv")
+            )
+        else:
+            logger.info("Skipping Phase 5 (Feature Aggregation). Relying on cached data.")
         
         # SUCCESS
         logger.info("")
@@ -768,6 +792,14 @@ Examples:
         '--skip-download',
         action='store_true',
         help='Skip the NCBI downloading phase and use existing local genomes.'
+    )
+
+    parser.add_argument(
+        '--start-phase',
+        type=int,
+        default=1,
+        choices=[1, 2, 3, 4, 5],
+        help='Which phase to start execution from. Use 3 to skip Genomics and go straight to Epistasis.'
     )
     
     args = parser.parse_args()
