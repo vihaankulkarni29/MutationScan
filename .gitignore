@@ -60,6 +60,7 @@ dmypy.json
 data/genomes/*
 data/output/*
 data/databases/*
+data/interim/
 !data/genomes/.gitkeep
 !data/output/.gitkeep
 !data/databases/.gitkeep

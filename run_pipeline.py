@@ -611,7 +611,7 @@ def run_master_pipeline(args) -> int:
                 logger.warning("No mutation data available for epistasis analysis")
 
             # Save epistasis input for Phase 3
-            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
             epistasis_file.parent.mkdir(parents=True, exist_ok=True)
             with open(epistasis_file, 'w') as f:
                 json.dump({"genomes": epistasis_input_dict}, f, indent=2)
@@ -632,7 +632,7 @@ def run_master_pipeline(args) -> int:
 
         # PHASE 3: Epistasis Detection
         if args.start_phase <= 3:
-            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
             if not epistasis_file.exists():
                 logger.warning(f"Epistasis file not found: {epistasis_file}")
                 epistasis_data_dict = {"genomes": {}}
@@ -763,7 +763,7 @@ Examples:
     parser.add_argument(
         '--epistasis-file',
         type=str,
-        default='temp/epistasis_input.json',
+        default='data/interim/epistasis_input.json',
         help='Path to epistasis network data'
     )
     
