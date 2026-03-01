@@ -39,6 +39,7 @@ Version: 2.1.0
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime
@@ -203,6 +204,7 @@ def phase1_genomic_ingestion(
         "--no-ml",
         "--email", args.email,
         "--organism", args.organism if args.organism else "unknown",
+        "--threads", str(args.threads),
     ]
     
     # Add optional API key if provided
@@ -807,6 +809,13 @@ Examples:
         default=1,
         choices=[1, 2, 3, 4, 5],
         help='Which phase to start execution from. Use 3 to skip Genomics and go straight to Epistasis.'
+    )
+    
+    parser.add_argument(
+        '--threads',
+        type=int,
+        default=max(1, (os.cpu_count() or 4) - 2),
+        help='Number of concurrent threads for parallel genome processing (default: CPU count - 2)'
     )
     
     args = parser.parse_args()

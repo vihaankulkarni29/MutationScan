@@ -15,8 +15,10 @@ Platform: Windows-safe (uses pathlib.Path, shutil.which for dependency checks)
 
 import argparse
 import logging
+import os
 import shutil
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, List
 
@@ -239,13 +241,46 @@ def step1_download_genomes(
         raise
 
 
-def step2_find_genes(genomes_dir: Path, target_genes: Optional[List[str]] = None) -> pd.DataFrame:
+def process_single_genome(genome_file: Path, abricate_db: str, target_genes: Optional[List[str]]) -> pd.DataFrame:
     """
-    Step 2: Find resistance genes using ABRicate.
+    Process a single genome file to find resistance genes.
+    
+    This function is designed for parallel execution via ProcessPoolExecutor.
+    
+    Args:
+        genome_file: Path to genome FASTA file
+        abricate_db: ABRicate database to use (e.g., 'card')
+        target_genes: Optional list of target gene names
+        
+    Returns:
+        DataFrame with gene coordinates and an Accession column
+    """
+    # Create gene finder instance (must be done in each process)
+    gene_finder = GeneFinder(abricate_db=abricate_db, target_genes=target_genes)
+    
+    # Find resistance genes
+    genes_df = gene_finder.find_resistance_genes(genome_file)
+    
+    # Add accession column
+    if not genes_df.empty:
+        accession = genome_file.stem
+        genes_df['Accession'] = accession
+    
+    return genes_df
+
+
+def step2_find_genes(
+    genomes_dir: Path,
+    target_genes: Optional[List[str]] = None,
+    threads: int = 1
+) -> pd.DataFrame:
+    """
+    Step 2: Find resistance genes using ABRicate with parallel processing.
     
     Args:
         genomes_dir: Directory containing genome FASTA files
         target_genes: Optional list of gene names to filter results
+        threads: Number of concurrent threads for parallel processing
         
     Returns:
         DataFrame with gene coordinates
@@ -259,37 +294,54 @@ def step2_find_genes(genomes_dir: Path, target_genes: Optional[List[str]] = None
     logging.info("="*70)
     
     try:
-        gene_finder = GeneFinder(abricate_db="card", target_genes=target_genes)
-        
         # Find all genome FASTA files
         genome_files = list(genomes_dir.glob("*.fasta")) + list(genomes_dir.glob("*.fna"))
         
         if not genome_files:
             raise FileNotFoundError(f"No genome FASTA files found in {genomes_dir}")
         
+        logging.info(f"[HPC] Initiating parallel processing pool with {threads} concurrent threads...")
         logging.info(f"Scanning {len(genome_files)} genome files for resistance genes...")
         
-        # Concatenate results from all genomes
+        # Process genomes in parallel
         all_genes = []
-        for genome_file in genome_files:
-            logging.info(f"  Scanning: {genome_file.name}")
-            genes_df = gene_finder.find_resistance_genes(genome_file)
+        
+        with ProcessPoolExecutor(max_workers=threads) as executor:
+            # Submit all genome processing tasks
+            future_to_genome = {
+                executor.submit(process_single_genome, genome_file, "card", target_genes): genome_file
+                for genome_file in genome_files
+            }
             
-            if not genes_df.empty:
-                # Add accession column
-                accession = genome_file.stem
-                genes_df['Accession'] = accession
-                all_genes.append(genes_df)
-                logging.info(f"    Found {len(genes_df)} genes")
-            else:
-                logging.warning(f"    No genes found in {genome_file.name}")
+            # Collect results as they complete
+            for future in as_completed(future_to_genome):
+                genome_file = future_to_genome[future]
+                try:
+                    genes_df = future.result()
+                    
+                    if not genes_df.empty:
+                        all_genes.append(genes_df)
+                        logging.info(f"  [Thread] Completed: {genome_file.name} - Found {len(genes_df)} genes")
+                    else:
+                        logging.warning(f"  [Thread] Completed: {genome_file.name} - No genes found")
+                        
+                except Exception as exc:
+                    logging.error(f"  [Thread] Failed: {genome_file.name} generated exception: {exc}")
         
         # Combine all results
         if not all_genes:
             raise ValueError("No resistance genes found in any genome. Pipeline cannot continue.")
         
         combined_df = pd.concat(all_genes, ignore_index=True)
-        logging.info(f"Total genes found: {len(combined_df)}")
+        logging.info(f"[HPC] Parallel processing complete. Total genes found: {len(combined_df)}")
+        
+        # Validate DataFrame has required columns
+        required_cols = ['Gene', 'Contig', 'Start', 'End', 'Strand', 'Accession']
+        missing_cols = [col for col in required_cols if col not in combined_df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+        
+        return combined_df
         
         # Validate DataFrame has required columns
         required_cols = ['Gene', 'Contig', 'Start', 'End', 'Strand', 'Accession']
@@ -588,6 +640,13 @@ Simplified Research Run Examples:
         help='Skip genome downloading (process existing FASTA files in data/genomes/)'
     )
     
+    parser.add_argument(
+        '--threads',
+        type=int,
+        default=max(1, (os.cpu_count() or 4) - 2),
+        help='Number of concurrent threads for parallel genome processing (default: CPU count - 2)'
+    )
+    
     args = parser.parse_args()
     
     # Show startup banner with platform-specific instructions
@@ -675,7 +734,11 @@ Simplified Research Run Examples:
             )
         
         # STEP 2: Find genes (with optional target gene filtering)
-        genes_df = step2_find_genes(genomes_dir=genomes_dir, target_genes=target_genes)
+        genes_df = step2_find_genes(
+            genomes_dir=genomes_dir,
+            target_genes=target_genes,
+            threads=args.threads
+        )
         
         # STEP 3: Extract sequences
         seq_count = step3_extract_sequences(
