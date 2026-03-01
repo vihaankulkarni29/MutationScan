@@ -310,14 +310,14 @@ def phase2_expression_analysis(expression_file: Path) -> Dict[str, float]:
     return expression_scores
 
 
-def phase3_epistasis_detection(epistasis_file: Path) -> Dict[str, List[int]]:
+def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[int]]:
     """
     Phase 3: Epistasis Network Detection
     
     Load pre-computed epistatic mutation networks.
     
     Args:
-        epistasis_file: Path to epistasis input JSON
+        epistasis_data: Loaded epistasis input dictionary
         
     Returns:
         Dictionary mapping gene_name -> list of residue numbers
@@ -331,17 +331,23 @@ def phase3_epistasis_detection(epistasis_file: Path) -> Dict[str, List[int]]:
     
     epistasis_networks = {}
     
-    if not epistasis_file.exists():
-        logger.warning(f"Epistasis file not found: {epistasis_file}")
-        logger.info("No epistatic networks to analyze")
-        return epistasis_networks
-    
     try:
-        with open(epistasis_file, 'r') as f:
-            data = json.load(f)
+        data = epistasis_data
+        genomes_data = data.get("genomes", {})
+
+        if isinstance(genomes_data, dict):
+            genome_iterable = [genomes_data]
+        elif isinstance(genomes_data, list):
+            genome_iterable = genomes_data
+        else:
+            logger.warning("Unexpected epistasis input format for 'genomes'; expected dict or list")
+            logger.info("No epistatic networks to analyze")
+            return epistasis_networks
         
         # Parse epistasis data (expected format from MutationScan)
-        for genome in data.get("genomes", []):
+        for genome in genome_iterable:
+            if not isinstance(genome, dict):
+                continue
             for gene, mutations in genome.items():
                 if gene not in epistasis_networks:
                     import re
@@ -613,8 +619,15 @@ def run_master_pipeline(args) -> int:
         
         # PHASE 3: Epistasis Detection
         epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+        if not epistasis_file.exists():
+            logger.warning(f"Epistasis file not found: {epistasis_file}")
+            epistasis_data_dict = {"genomes": {}}
+        else:
+            with open(epistasis_file, "r") as f:
+                epistasis_data_dict = json.load(f)
+
         epistasis_networks = phase3_epistasis_detection(
-            epistasis_file=epistasis_file
+            epistasis_data=epistasis_data_dict
         )
         
         # PHASE 4: Biophysics Docking
