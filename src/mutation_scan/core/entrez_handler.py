@@ -12,6 +12,7 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 import time
 import tempfile
 import zipfile
@@ -85,7 +86,16 @@ class BulkGenomeDownloader:
         timeout: int = 0,
     ) -> None:
         """
-        Execute a CLI command and route stdout/stderr to logger.
+        Execute a CLI command and stream stdout/stderr directly to console.
+        
+        Streams subprocess output in real-time to allow NCBI datasets CLI to render
+        its native interactive progress bar while also logging output.
+
+        Args:
+            command: Command and arguments to execute
+            phase_name: Label for logging (e.g., "Phase A (Dehydrate)")
+            cwd: Working directory for subprocess
+            timeout: Timeout in seconds (0 = no timeout)
 
         Raises:
             RuntimeError: If subprocess exits with non-zero status
@@ -93,27 +103,41 @@ class BulkGenomeDownloader:
         command_display = " ".join(command)
         logger.info(f"{phase_name}: Running command: {command_display}")
 
-        completed = subprocess.run(
-            command,
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-            timeout=None if timeout <= 0 else timeout,
-            check=False,
-        )
-
-        if completed.stdout:
-            for line in completed.stdout.splitlines():
-                logger.info(f"{phase_name} stdout: {line}")
-
-        if completed.stderr:
-            for line in completed.stderr.splitlines():
-                logger.warning(f"{phase_name} stderr: {line}")
-
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"{phase_name} failed with exit code {completed.returncode}: {command_display}"
+        try:
+            # Use Popen to stream output directly to console for real-time progress bar
+            process = subprocess.Popen(
+                command,
+                cwd=str(cwd) if cwd else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,  # Line-buffered
             )
+
+            # Stream output line-by-line to console and logger
+            for line in iter(process.stdout.readline, ""):
+                if line:
+                    # Print directly to console for real-time visibility
+                    print(line, end="", flush=True)
+                    # Also log for persistent record
+                    logger.info(f"{phase_name}: {line.rstrip()}")
+
+            # Wait for process to complete
+            returncode = process.wait(timeout=None if timeout <= 0 else timeout)
+
+            if returncode != 0:
+                raise RuntimeError(
+                    f"{phase_name} failed with exit code {returncode}: {command_display}"
+                )
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise RuntimeError(
+                f"{phase_name} timed out after {timeout} seconds: {command_display}"
+            )
+        except Exception as exc:
+            logger.error(f"{phase_name} execution failed: {exc}")
+            raise
 
     @staticmethod
     def _extract_accession(path_obj: Path) -> Optional[str]:
