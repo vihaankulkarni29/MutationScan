@@ -321,20 +321,21 @@ class NCBIDatasetsGenomeDownloader:
             Exception: If search fails after retries
         """
         logger.info(f"Searching for {organism}" + (f" from {location}" if location else ""))
-        
+
         accessions = []
         retry_count = 0
         max_retries = 3
-        
+        chunk_size = 50
+
         while retry_count < max_retries:
             try:
                 assembly_uids = []
-                
+
                 # Phase 1 & 2: BioSample-to-Assembly cross-linking (if location provided)
                 if location:
                     logger.info(f"Phase 1: Searching BioSample for {organism} from {location}...")
                     biosample_query = f'"{organism}"[Organism] AND "{location}"[geo_loc_name]'
-                    
+
                     # Phase 1: esearch on biosample database
                     search_params = {
                         "db": "biosample",
@@ -345,50 +346,52 @@ class NCBIDatasetsGenomeDownloader:
                     }
                     if self.api_key:
                         search_params["api_key"] = self.api_key
-                    
+
                     response = requests.get(self.NCBI_ESEARCH_URL, params=search_params)
                     response.raise_for_status()
-                    
+
                     root = ET.fromstring(response.text)
                     id_list = root.find('.//IdList')
                     biosample_ids = [id_elem.text for id_elem in id_list.findall('Id')] if id_list is not None else []
-                    
+
                     if biosample_ids:
                         logger.info(f"Found {len(biosample_ids)} BioSample IDs. Cross-linking to Assembly...")
-                        
-                        # Phase 2: elink to map biosample -> assembly
-                        elink_params = {
-                            "dbfrom": "biosample",
-                            "db": "assembly",
-                            "id": ",".join(biosample_ids),
-                            "tool": "mutation_scan",
-                            "email": self.email,
-                        }
-                        if self.api_key:
-                            elink_params["api_key"] = self.api_key
-                        
-                        elink_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
-                        response = requests.get(elink_url, params=elink_params)
-                        response.raise_for_status()
-                        
-                        # Parse elink XML to extract Assembly UIDs
-                        root = ET.fromstring(response.text)
-                        for link_set_db in root.findall('.//LinkSetDb'):
-                            db_to = link_set_db.find('DbTo')
-                            if db_to is not None and db_to.text == "assembly":
-                                for link in link_set_db.findall('Link/Id'):
-                                    if link.text:
-                                        assembly_uids.append(link.text)
-                        
-                        logger.info(f"Resolved to {len(assembly_uids)} Assembly UIDs via elink")
+                        logger.info(f"Cross-linking {len(biosample_ids)} BioSample IDs in batches of {chunk_size}...")
+
+                        # Phase 2: chunked elink to map biosample -> assembly
+                        for i in range(0, len(biosample_ids), chunk_size):
+                            chunk = biosample_ids[i:i + chunk_size]
+                            try:
+                                link_handle = Entrez.elink(
+                                    dbfrom="biosample",
+                                    db="assembly",
+                                    id=",".join(chunk)
+                                )
+                                link_record = Entrez.read(link_handle)
+                                link_handle.close()
+
+                                for record in link_record:
+                                    for linkset in record.get("LinkSetDb", []):
+                                        if linkset.get("DbTo") == "assembly":
+                                            for link in linkset.get("Link", []):
+                                                assembly_uid = link.get("Id")
+                                                if assembly_uid:
+                                                    assembly_uids.append(assembly_uid)
+
+                                time.sleep(0.15)
+                            except Exception as e:
+                                logger.warning(f"Failed to cross-link chunk {i // chunk_size + 1}: {e}")
+
+                        assembly_uids = list(dict.fromkeys(assembly_uids))
+                        logger.info(f"Resolved to {len(assembly_uids)} Assembly UIDs via chunked elink")
                     else:
                         logger.warning(f"No BioSample results for: {biosample_query}")
-                
+
                 # Phase 3: Fallback to direct Assembly search (if no location or no results)
                 if not assembly_uids:
                     logger.info("Phase 3: Falling back to direct Assembly database search...")
                     assembly_query = f'"{organism}"[Organism]'
-                    
+
                     search_params = {
                         "db": "assembly",
                         "term": assembly_query,
@@ -398,46 +401,54 @@ class NCBIDatasetsGenomeDownloader:
                     }
                     if self.api_key:
                         search_params["api_key"] = self.api_key
-                    
+
                     response = requests.get(self.NCBI_ESEARCH_URL, params=search_params)
                     response.raise_for_status()
-                    
+
                     root = ET.fromstring(response.text)
                     id_list = root.find('.//IdList')
                     assembly_uids = [id_elem.text for id_elem in id_list.findall('Id')] if id_list is not None else []
-                    
+
                     if assembly_uids:
                         logger.info(f"Found {len(assembly_uids)} Assembly UIDs via direct search")
                     else:
                         logger.warning(f"No Assembly results found for organism: {organism}")
                         return []
-                
-                # Phase 4: esummary to get Assembly Accessions
-                logger.info(f"Phase 4: Resolving {len(assembly_uids)} Assembly UIDs to Accessions...")
-                summary_params = {
-                    "db": "assembly",
-                    "id": ",".join(assembly_uids[:max_results]),
-                    "tool": "mutation_scan",
-                    "email": self.email,
-                }
-                if self.api_key:
-                    summary_params["api_key"] = self.api_key
-                
-                response = requests.get(self.NCBI_ESUMMARY_URL, params=summary_params)
-                response.raise_for_status()
-                
-                # Parse XML for assembly accessions
-                root = ET.fromstring(response.text)
-                for doc_sum in root.findall('.//DocumentSummary'):
-                    asm_acc_elem = doc_sum.find(".//AssemblyAccession")
-                    if asm_acc_elem is not None:
-                        asm_accession = asm_acc_elem.text
-                        if asm_accession and (asm_accession.startswith("GCF_") or asm_accession.startswith("GCA_")):
-                            accessions.append(asm_accession)
-                
+
+                # Phase 4: chunked esummary to get Assembly Accessions
+                assembly_uids = list(dict.fromkeys(assembly_uids))[:max_results]
+                logger.info(f"Phase 4: Resolving {len(assembly_uids)} Assembly UIDs to Accessions in batches of {chunk_size}...")
+
+                for i in range(0, len(assembly_uids), chunk_size):
+                    uid_chunk = assembly_uids[i:i + chunk_size]
+
+                    summary_params = {
+                        "db": "assembly",
+                        "id": ",".join(uid_chunk),
+                        "tool": "mutation_scan",
+                        "email": self.email,
+                    }
+                    if self.api_key:
+                        summary_params["api_key"] = self.api_key
+
+                    response = requests.get(self.NCBI_ESUMMARY_URL, params=summary_params)
+                    response.raise_for_status()
+
+                    # Parse XML for assembly accessions
+                    root = ET.fromstring(response.text)
+                    for doc_sum in root.findall('.//DocumentSummary'):
+                        asm_acc_elem = doc_sum.find(".//AssemblyAccession")
+                        if asm_acc_elem is not None:
+                            asm_accession = asm_acc_elem.text
+                            if asm_accession and (asm_accession.startswith("GCF_") or asm_accession.startswith("GCA_")):
+                                accessions.append(asm_accession)
+
+                    time.sleep(0.15)
+
+                accessions = list(dict.fromkeys(accessions))[:max_results]
                 logger.info(f"Successfully resolved {len(accessions)} valid Assembly Accessions")
                 return accessions
-                
+
             except requests.exceptions.RequestException as e:
                 retry_count += 1
                 logger.error(f"Search attempt {retry_count} failed: {e}")
