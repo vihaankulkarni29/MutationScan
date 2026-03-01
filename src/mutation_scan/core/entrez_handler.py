@@ -84,6 +84,7 @@ class BulkGenomeDownloader:
         phase_name: str,
         cwd: Optional[Path] = None,
         timeout: int = 0,
+        ignore_errors: bool = False,
     ) -> None:
         """
         Execute a CLI command and stream stdout/stderr directly to console.
@@ -96,9 +97,10 @@ class BulkGenomeDownloader:
             phase_name: Label for logging (e.g., "Phase A (Dehydrate)")
             cwd: Working directory for subprocess
             timeout: Timeout in seconds (0 = no timeout)
+            ignore_errors: If True, log warnings on non-zero exit instead of raising exceptions
 
         Raises:
-            RuntimeError: If subprocess exits with non-zero status
+            RuntimeError: If subprocess exits with non-zero status and ignore_errors=False
         """
         command_display = " ".join(command)
         logger.info(f"{phase_name}: Running command: {command_display}")
@@ -126,9 +128,14 @@ class BulkGenomeDownloader:
             returncode = process.wait(timeout=None if timeout <= 0 else timeout)
 
             if returncode != 0:
-                raise RuntimeError(
-                    f"{phase_name} failed with exit code {returncode}: {command_display}"
-                )
+                if ignore_errors:
+                    logger.warning(
+                        f"{phase_name} completed with exit code {returncode}, but ignore_errors=True. Proceeding..."
+                    )
+                else:
+                    raise RuntimeError(
+                        f"{phase_name} failed with exit code {returncode}: {command_display}"
+                    )
 
         except subprocess.TimeoutExpired:
             process.kill()
@@ -217,7 +224,7 @@ class BulkGenomeDownloader:
                     "--directory",
                     str(unpack_dir),
                 ]
-                self._run_command(rehydrate_command, "Phase C (Rehydrate)", cwd=temp_root)
+                self._run_command(rehydrate_command, "Phase C (Rehydrate)", cwd=temp_root, ignore_errors=True)
 
                 # Phase D: Organize
                 fna_files = list(unpack_dir.rglob("*.fna"))
