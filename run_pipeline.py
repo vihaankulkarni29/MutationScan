@@ -206,6 +206,7 @@ def phase1_genomic_ingestion(
         "--skip-download",
         "--no-ml",
         "--email", email,
+        "--organism", organism,
     ]
     
     # Add optional API key if provided
