@@ -94,11 +94,7 @@ def setup_logging(log_file: Path = Path("data/logs/pipeline.log")) -> None:
 
 
 def phase1_genomic_ingestion(
-    email: str,
-    api_key: Optional[str],
-    genome_file: Optional[Path],
-    organism: Optional[str],
-    limit: int,
+    args,
     target_genes: Optional[List[str]],
     output_dir: Path
 ) -> Tuple[pd.DataFrame, Path, Path, Path]:
@@ -108,11 +104,7 @@ def phase1_genomic_ingestion(
     Download genomes, identify resistance genes, and call variants.
     
     Args:
-        email: NCBI email required by NCBI policy
-        api_key: Optional NCBI API key
-        genome_file: Path to local genome FASTA (if provided)
-        organism: Organism name to download (if genome_file not provided)
-        limit: Number of genomes to download
+        args: Parsed command-line arguments namespace
         target_genes: Optional list of target genes to analyze
         output_dir: Output directory for results
         
@@ -137,54 +129,58 @@ def phase1_genomic_ingestion(
     # Step 1: Download/Prepare genomes
     logger.info("Step 1.1: Downloading/preparing genomes...")
     
-    if genome_file:
-        logger.info(f"Using local genome: {genome_file}")
-        # Copy local genome
-        import shutil
-        local_dest = genomes_dir / genome_file.name
-        shutil.copy(genome_file, local_dest)
-        num_genomes = 1
-    else:
-        if not organism:
-            raise ValueError("Organism name required for NCBI download")
-        
-        logger.info(f"Downloading {limit} genome(s) from NCBI: {organism}")
-        downloader = NCBIDatasetsGenomeDownloader(
-            email=email,
-            api_key=api_key,
-            output_dir=genomes_dir
-        )
-        
-        # Handle geolocation-based search (e.g., "Klebsiella pneumoniae AND India")
-        if " AND " in organism:
-            parts = organism.split(" AND ")
-            taxon = parts[0].strip()
-            location = parts[1].strip()
-            logger.info(f"Using geolocation-based search: {taxon} from {location}")
-            success, failed = downloader.download_bulk_by_geolocation(
-                organism=taxon,
-                location=location,
-                limit=limit
-            )
-            num_genomes = success
-            logger.info(f"Downloaded {success} genomes, {failed} failed")
+    if not args.skip_download:
+        if args.genome:
+            genome_file = Path(args.genome)
+            logger.info(f"Using local genome: {genome_file}")
+            # Copy local genome
+            import shutil
+            local_dest = genomes_dir / genome_file.name
+            shutil.copy(genome_file, local_dest)
+            num_genomes = 1
         else:
-            # Fallback: Standard batch downloader via search + batch
-            logger.info(f"Using standard organism search")
-            accessions = downloader.search_accessions(
-                organism=organism,
-                max_results=limit
+            if not args.organism:
+                raise ValueError("Organism name required for NCBI download")
+            
+            logger.info(f"Downloading {args.limit} genome(s) from NCBI: {args.organism}")
+            downloader = NCBIDatasetsGenomeDownloader(
+                email=args.email,
+                api_key=args.api_key,
+                output_dir=genomes_dir
             )
-            if accessions:
-                logger.info(f"Found {len(accessions)} accessions, downloading...")
-                success, failed = downloader.download_batch(
-                    accessions=accessions
+            
+            # Handle geolocation-based search (e.g., "Klebsiella pneumoniae AND India")
+            if " AND " in args.organism:
+                parts = args.organism.split(" AND ")
+                taxon = parts[0].strip()
+                location = parts[1].strip()
+                logger.info(f"Using geolocation-based search: {taxon} from {location}")
+                success, failed = downloader.download_bulk_by_geolocation(
+                    organism=taxon,
+                    location=location,
+                    limit=args.limit
                 )
                 num_genomes = success
                 logger.info(f"Downloaded {success} genomes, {failed} failed")
             else:
-                logger.error(f"No genomes found for organism: {organism}")
-                raise ValueError(f"No genomes found for organism: {organism}")
+                # Fallback: Standard batch downloader via search + batch
+                logger.info(f"Using standard organism search")
+                accessions = downloader.search_accessions(
+                    organism=args.organism,
+                    max_results=args.limit
+                )
+                if accessions:
+                    logger.info(f"Found {len(accessions)} accessions, downloading...")
+                    success, failed = downloader.download_batch(
+                        accessions=accessions
+                    )
+                    num_genomes = success
+                    logger.info(f"Downloaded {success} genomes, {failed} failed")
+                else:
+                    logger.error(f"No genomes found for organism: {args.organism}")
+                    raise ValueError(f"No genomes found for organism: {args.organism}")
+    else:
+        logger.info("Skipping NCBI download phase. Proceeding with existing local genomes in data/genomes.")
     
     # Step 2: Hand off to Docker for gene finding and variant calling
     logger.info("Step 1.2: Handing off to Docker container for gene finding and variant calling...")
@@ -205,13 +201,13 @@ def phase1_genomic_ingestion(
         "mutation-scan:latest",
         "--skip-download",
         "--no-ml",
-        "--email", email,
-        "--organism", organism,
+        "--email", args.email,
+        "--organism", args.organism if args.organism else "unknown",
     ]
     
     # Add optional API key if provided
-    if api_key:
-        docker_command.extend(["--api-key", api_key])
+    if args.api_key:
+        docker_command.extend(["--api-key", args.api_key])
     
     # Add target genes if provided
     if target_genes:
@@ -584,11 +580,7 @@ def run_master_pipeline(args) -> int:
         
         # PHASE 1: Genomic Ingestion
         mutations_df, proteins_dir, refs_dir, genomes_dir = phase1_genomic_ingestion(
-            email=args.email,
-            api_key=args.api_key,
-            genome_file=Path(args.genome) if args.genome else None,
-            organism=args.organism,
-            limit=args.limit,
+            args=args,
             target_genes=None,  # Can be extended from args
             output_dir=output_dir
         )
@@ -735,6 +727,12 @@ Examples:
         nargs='+',
         default=None,
         help='PDB mapping as "gene:pdb_id:chain" (e.g., "oqxA:7cz9:A")'
+    )
+    
+    parser.add_argument(
+        '--skip-download',
+        action='store_true',
+        help='Skip the NCBI downloading phase and use existing local genomes.'
     )
     
     args = parser.parse_args()
