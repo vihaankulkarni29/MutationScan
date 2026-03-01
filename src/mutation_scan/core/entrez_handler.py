@@ -126,26 +126,28 @@ class BulkGenomeDownloader:
 
         return None
 
-    def bulk_download_by_geolocation(
+    def bulk_download_by_accessions(
         self,
-        organism: str,
-        location: str,
+        accessions: List[str],
         archive_name: str = "data.zip",
     ) -> Tuple[int, int]:
         """
         Download large genome cohorts via datasets CLI dehydrated + rehydrate flow.
 
         Args:
-            organism: Taxon string for datasets CLI taxon query
-            location: Geographic filter (e.g., "India")
+            accessions: Explicit list of assembly accessions (GCF_/GCA_)
             archive_name: Filename for dehydrated zip package
 
         Returns:
             Tuple of (successful_downloads, failed_downloads)
         """
         logger.info(
-            f"Starting bulk genome download via datasets CLI: organism='{organism}', location='{location}'"
+            f"Starting bulk genome download via datasets CLI using accession input list ({len(accessions)} accessions)"
         )
+
+        if not accessions:
+            logger.warning("No accessions provided for bulk download")
+            return 0, 0
 
         successful = 0
         failed = 0
@@ -154,6 +156,9 @@ class BulkGenomeDownloader:
             temp_root = Path(tmp_dir)
             dehydrated_zip = temp_root / archive_name
             unpack_dir = temp_root / "dehydrated"
+            accessions_file = temp_root / "accessions.txt"
+
+            accessions_file.write_text("\n".join(accessions), encoding="utf-8")
 
             try:
                 # Phase A: Dehydrate
@@ -161,10 +166,9 @@ class BulkGenomeDownloader:
                     self.datasets_binary,
                     "download",
                     "genome",
-                    "taxon",
-                    organism,
-                    "--geo-location",
-                    location,
+                    "accession",
+                    "--inputfile",
+                    str(accessions_file),
                     "--include",
                     "genome",
                     "--dehydrated",
@@ -412,22 +416,33 @@ class NCBIDatasetsGenomeDownloader:
         logger.info(f"Loaded {len(accessions)} accessions from file")
         return accessions
 
-    def download_bulk_by_geolocation(self, organism: str, location: str) -> Tuple[int, int]:
+    def download_bulk_by_geolocation(self, organism: str, location: str, limit: int = 5000) -> Tuple[int, int]:
         """
-        Compatibility wrapper to execute enterprise-scale CLI bulk download flow.
+        Hybrid geolocation downloader:
+        1) Query Entrez for assembly accessions using organism + location
+        2) Feed explicit accession list into datasets CLI bulk downloader
 
         Args:
-            organism: Taxon string for datasets CLI taxon query
-            location: Geographic filter (e.g., "India")
+            organism: Taxon string for Entrez query
+            location: Geographic filter token for Entrez text search
+            limit: Maximum number of accessions to retrieve from Entrez
 
         Returns:
             Tuple of (successful_downloads, failed_downloads)
         """
+        query = f'"{organism}"[Organism] AND "{location}"[Text Word]'
+        logger.info(f"Querying Entrez for Accessions: {query}")
+
+        accessions = self.search_accessions(query, max_results=limit)
+        if not accessions:
+            logger.warning("No accessions found for hybrid geolocation query")
+            return 0, 0
+
         bulk_downloader = BulkGenomeDownloader(
             output_dir=self.output_dir,
             log_file=self.log_file,
         )
-        return bulk_downloader.bulk_download_by_geolocation(organism=organism, location=location)
+        return bulk_downloader.bulk_download_by_accessions(accessions)
 
     def download_batch(self, accessions: List[str]) -> Tuple[int, int]:
         """

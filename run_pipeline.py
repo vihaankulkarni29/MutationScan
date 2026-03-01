@@ -49,10 +49,6 @@ import pandas as pd
 
 # Import MutationScan modules
 from mutation_scan.core.entrez_handler import NCBIDatasetsGenomeDownloader
-from mutation_scan.core.gene_finder import GeneFinder
-from mutation_scan.core.sequence_extractor import SequenceExtractor
-from mutation_scan.core.reference_builder import ReferenceBuilder
-from mutation_scan.analysis.variant_caller import VariantCaller
 from mutation_scan.biophysics.autoscan_bridge import AutoScanBridge
 from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
 
@@ -167,7 +163,8 @@ def phase1_genomic_ingestion(
             logger.info(f"Using geolocation-based search: {taxon} from {location}")
             success, failed = downloader.download_bulk_by_geolocation(
                 organism=taxon,
-                location=location
+                location=location,
+                limit=limit
             )
             num_genomes = success
             logger.info(f"Downloaded {success} genomes, {failed} failed")
@@ -189,73 +186,77 @@ def phase1_genomic_ingestion(
                 logger.error(f"No genomes found for organism: {organism}")
                 raise ValueError(f"No genomes found for organism: {organism}")
     
-    # Step 2: Find genes and extract sequences
-    logger.info("Step 1.2: Finding genes and extracting sequences...")
+    # Step 2: Hand off to Docker for gene finding and variant calling
+    logger.info("Step 1.2: Handing off to Docker container for gene finding and variant calling...")
+    logger.info("(GeneFinder, SequenceExtractor, and VariantCaller require Linux binaries: ABRicate, BLAST+)")
     
-    gene_finder = GeneFinder(target_genes=target_genes)
-    seq_extractor = SequenceExtractor(genomes_dir=genomes_dir)
+    import os
+    import subprocess
     
-    all_genes_df = []
-    total_seq_count = 0
+    # Get absolute path to project root
+    project_root = Path(__file__).parent.absolute()
     
-    # Process each genome
-    for genome_fasta in genomes_dir.glob("*.fasta"):
-        logger.info(f"Processing {genome_fasta.name}...")
-        
-        try:
-            # Find genes in this genome
-            genes_df = gene_finder.find_all_genes(genome_fasta)
-            
-            if not genes_df.empty:
-                # Extract accession from filename
-                accession = genome_fasta.stem
-                
-                # Add accession column for batch processing
-                genes_df['Accession'] = accession
-                all_genes_df.append(genes_df)
-                
-                logger.info(f"  Found {len(genes_df)} genes")
-        except Exception as e:
-            logger.warning(f"Failed to process {genome_fasta.name}: {e}")
-            continue
+    # Prepare Docker command
+    docker_command = [
+        "docker", "run", "--rm",
+        "-v", f"{project_root / 'data'}:/app/data",
+        "-v", f"{project_root / 'config'}:/app/config",
+        "-v", f"{project_root / 'models'}:/app/models",
+        "mutation-scan:latest",
+        "--skip-download",
+        "--no-ml",
+        "--email", email,
+    ]
     
-    if not all_genes_df:
-        logger.warning("No genes found in any genomes")
-        mutations_df = pd.DataFrame()
-    else:
-        # Combine all genes
-        combined_genes_df = pd.concat(all_genes_df, ignore_index=True)
-        logger.info(f"Total genes found: {len(combined_genes_df)}")
-        
-        # Extract sequences
-        logger.info("Step 1.3: Extracting protein sequences...")
-        try:
-            seq_results = seq_extractor.extract_all_genomes(
-                genes_df=combined_genes_df,
-                output_dir=proteins_dir,
-                translate=True
-            )
-            total_seq_count = sum(s[0] for s in seq_results.values())
-            logger.info(f"Extracted {total_seq_count} protein sequences")
-        except Exception as e:
-            logger.error(f"Sequence extraction failed: {e}")
-            raise
+    # Add optional API key if provided
+    if api_key:
+        docker_command.extend(["--api-key", api_key])
     
-    # Step 3: Call variants
-    logger.info("Step 1.4: Calling variants and identifying mutations...")
-    
-    caller = VariantCaller(refs_dir=refs_dir)
-    mutations_csv = output_dir / "mutation_report.csv"
+    # Add target genes if provided
+    if target_genes:
+        logger.warning("Target genes filters are not automatically passed to Docker container")
+        logger.info("Please configure target genes within the Docker container environment")
     
     try:
-        mutations_df = caller.call_variants(
-            proteins_dir=proteins_dir,
-            output_csv=mutations_csv
+        logger.info(f"Executing Docker command: {' '.join(docker_command[:6])}...")
+        result = subprocess.run(
+            docker_command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3600  # 1 hour timeout
         )
-        logger.info(f"Detected {len(mutations_df)} mutations")
+        logger.info("Docker container completed successfully")
+        if result.stdout:
+            logger.debug(f"Docker stdout: {result.stdout[:500]}")
+    except subprocess.TimeoutExpired:
+        logger.error("Docker container execution timed out (1 hour limit exceeded)")
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Docker container failed with exit code {e.returncode}")
+        logger.error(f"Docker stderr: {e.stderr}")
+        raise
+    except FileNotFoundError:
+        logger.error("Docker not found. Please install Docker and ensure it is in your PATH")
+        logger.error("Alternatively, run this script inside the Docker container with --skip-download")
+        raise
+    
+    # Step 3: Read results from Docker
+    logger.info("Step 1.3: Reading results from Docker container...")
+    
+    mutations_csv = output_dir / "mutation_report.csv"
+    mutations_df = pd.DataFrame()
+    
+    try:
+        if mutations_csv.exists():
+            mutations_df = pd.read_csv(mutations_csv)
+            logger.info(f"Read mutation report: {len(mutations_df)} mutations detected")
+        else:
+            logger.warning(f"Mutation report not found: {mutations_csv}")
+            logger.info("Docker container may not have completed gene finding/variant calling")
     except Exception as e:
-        logger.warning(f"Variant calling failed: {e}")
-        mutations_df = pd.DataFrame()
+        logger.warning(f"Failed to read mutation report: {e}")
+
     
     logger.info("[PHASE 1 COMPLETE] Genomic data ingestion finished")
     

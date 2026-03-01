@@ -582,6 +582,12 @@ Simplified Research Run Examples:
         help='Optionally attempt to download missing wild-type reference proteins from NCBI'
     )
     
+    parser.add_argument(
+        '--skip-download',
+        action='store_true',
+        help='Skip genome downloading (process existing FASTA files in data/genomes/)'
+    )
+    
     args = parser.parse_args()
     
     # Show startup banner with platform-specific instructions
@@ -644,7 +650,15 @@ Simplified Research Run Examples:
     
     try:
         # STEP 1: Prepare genome(s)
-        if args.genome:
+        if args.skip_download:
+            # Skip download and use existing files
+            logging.info("Skipping genome download (--skip-download mode)")
+            logging.info(f"Will use existing FASTA files in {genomes_dir}")
+            genome_count = len(list(genomes_dir.glob("*.fasta"))) + len(list(genomes_dir.glob("*.fna")))
+            if genome_count == 0:
+                logging.warning(f"No FASTA files found in {genomes_dir}")
+                genome_count = 1  # Assume at least one file exists
+        elif args.genome:
             # Use local genome file
             logging.info(f"Using local genome: {args.genome}")
             if not args.genome.exists():
