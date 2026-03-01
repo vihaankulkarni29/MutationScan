@@ -105,7 +105,7 @@ def phase1_genomic_ingestion(
     limit: int,
     target_genes: Optional[List[str]],
     output_dir: Path
-) -> Tuple[pd.DataFrame, Path]:
+) -> Tuple[pd.DataFrame, Path, Path, Path]:
     """
     Phase 1: Genomic Data Ingestion
     
@@ -121,7 +121,7 @@ def phase1_genomic_ingestion(
         output_dir: Output directory for results
         
     Returns:
-        Tuple of (mutations_df, proteins_dir)
+        Tuple of (mutations_df, proteins_dir, refs_dir, genomes_dir)
     """
     logger = logging.getLogger(__name__)
     
@@ -147,65 +147,115 @@ def phase1_genomic_ingestion(
         import shutil
         local_dest = genomes_dir / genome_file.name
         shutil.copy(genome_file, local_dest)
+        num_genomes = 1
     else:
+        if not organism:
+            raise ValueError("Organism name required for NCBI download")
+        
         logger.info(f"Downloading {limit} genome(s) from NCBI: {organism}")
         downloader = NCBIDatasetsGenomeDownloader(
             email=email,
-            api_key=api_key
-        )
-        downloader.download_by_organism(
-            query=organism,
-            limit=limit,
+            api_key=api_key,
             output_dir=genomes_dir
         )
-    
-    # Step 2: Find genes
-    logger.info("Step 1.2: Finding resistance genes...")
-    gene_finder = GeneFinder()
-    genes_df = gene_finder.find_genes(
-        genomes_dir=genomes_dir,
-        target_genes=target_genes
-    )
-    logger.info(f"Found {len(genes_df)} genes across genomes")
-    
-    # Step 3: Extract sequences
-    logger.info("Step 1.3: Extracting and translating sequences...")
-    seq_extractor = SequenceExtractor()
-    seq_count = seq_extractor.extract_sequences(
-        genes_df=genes_df,
-        genomes_dir=genomes_dir,
-        output_dir=proteins_dir
-    )
-    logger.info(f"Extracted {seq_count} protein sequences")
-    
-    # Step 4: Reference validation with optional auto-fetch
-    logger.info("Step 1.4: Validating wild-type references...")
-    
-    protein_files = list(proteins_dir.glob("*.faa"))
-    unique_genes = set()
-    for pf in protein_files:
-        parts = pf.stem.rsplit('_', 1)
-        if len(parts) == 2:
-            unique_genes.add(parts[1])
-    
-    if unique_genes:
-        logger.info(f"Found {len(unique_genes)} unique genes: {', '.join(sorted(unique_genes))}")
-        for gene in sorted(unique_genes):
-            ref_file = refs_dir / f"{gene}_WT.faa"
-            if ref_file.exists():
-                logger.info(f"  ✓ Reference found for {gene}")
+        
+        # Handle geolocation-based search (e.g., "Klebsiella pneumoniae AND India")
+        if " AND " in organism:
+            parts = organism.split(" AND ")
+            taxon = parts[0].strip()
+            location = parts[1].strip()
+            logger.info(f"Using geolocation-based search: {taxon} from {location}")
+            success, failed = downloader.download_bulk_by_geolocation(
+                organism=taxon,
+                location=location
+            )
+            num_genomes = success
+            logger.info(f"Downloaded {success} genomes, {failed} failed")
+        else:
+            # Fallback: Standard batch downloader via search + batch
+            logger.info(f"Using standard organism search")
+            accessions = downloader.search_accessions(
+                query=organism,
+                max_results=limit
+            )
+            if accessions:
+                logger.info(f"Found {len(accessions)} accessions, downloading...")
+                success, failed = downloader.download_batch(
+                    accessions=accessions
+                )
+                num_genomes = success
+                logger.info(f"Downloaded {success} genomes, {failed} failed")
             else:
-                logger.warning(f"  ✗ Reference missing for {gene}")
+                logger.error(f"No genomes found for organism: {organism}")
+                raise ValueError(f"No genomes found for organism: {organism}")
     
-    # Step 5: Call variants
-    logger.info("Step 1.5: Calling variants and identifying mutations...")
+    # Step 2: Find genes and extract sequences
+    logger.info("Step 1.2: Finding genes and extracting sequences...")
+    
+    gene_finder = GeneFinder(target_genes=target_genes)
+    seq_extractor = SequenceExtractor(genomes_dir=genomes_dir)
+    
+    all_genes_df = []
+    total_seq_count = 0
+    
+    # Process each genome
+    for genome_fasta in genomes_dir.glob("*.fasta"):
+        logger.info(f"Processing {genome_fasta.name}...")
+        
+        try:
+            # Find genes in this genome
+            genes_df = gene_finder.find_all_genes(genome_fasta)
+            
+            if not genes_df.empty:
+                # Extract accession from filename
+                accession = genome_fasta.stem
+                
+                # Add accession column for batch processing
+                genes_df['Accession'] = accession
+                all_genes_df.append(genes_df)
+                
+                logger.info(f"  Found {len(genes_df)} genes")
+        except Exception as e:
+            logger.warning(f"Failed to process {genome_fasta.name}: {e}")
+            continue
+    
+    if not all_genes_df:
+        logger.warning("No genes found in any genomes")
+        mutations_df = pd.DataFrame()
+    else:
+        # Combine all genes
+        combined_genes_df = pd.concat(all_genes_df, ignore_index=True)
+        logger.info(f"Total genes found: {len(combined_genes_df)}")
+        
+        # Extract sequences
+        logger.info("Step 1.3: Extracting protein sequences...")
+        try:
+            seq_results = seq_extractor.extract_all_genomes(
+                genes_df=combined_genes_df,
+                output_dir=proteins_dir,
+                translate=True
+            )
+            total_seq_count = sum(s[0] for s in seq_results.values())
+            logger.info(f"Extracted {total_seq_count} protein sequences")
+        except Exception as e:
+            logger.error(f"Sequence extraction failed: {e}")
+            raise
+    
+    # Step 3: Call variants
+    logger.info("Step 1.4: Calling variants and identifying mutations...")
+    
     caller = VariantCaller(refs_dir=refs_dir)
     mutations_csv = output_dir / "mutation_report.csv"
-    mutations_df = caller.call_variants(
-        proteins_dir=proteins_dir,
-        output_csv=mutations_csv
-    )
-    logger.info(f"Detected {len(mutations_df)} mutations")
+    
+    try:
+        mutations_df = caller.call_variants(
+            proteins_dir=proteins_dir,
+            output_csv=mutations_csv
+        )
+        logger.info(f"Detected {len(mutations_df)} mutations")
+    except Exception as e:
+        logger.warning(f"Variant calling failed: {e}")
+        mutations_df = pd.DataFrame()
     
     logger.info("[PHASE 1 COMPLETE] Genomic data ingestion finished")
     
@@ -525,10 +575,10 @@ def run_master_pipeline(args) -> int:
         output_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info("")
-        logger.info("╔" + "="*68 + "╗")
-        logger.info("║" + " "*15 + "MUTATIONSCAN MASTER PIPELINE v2.1" + " "*20 + "║")
-        logger.info("║" + " "*10 + "Deterministic Genotype-to-Phenotype-to-Biophysics Engine" + " "*2 + "║")
-        logger.info("╚" + "="*68 + "╝")
+        logger.info("+" + "="*68 + "+")
+        logger.info("|" + " "*15 + "MUTATIONSCAN MASTER PIPELINE v2.1" + " "*20 + "|")
+        logger.info("|" + " "*10 + "Deterministic Genotype-to-Phenotype-to-Biophysics Engine" + " "*2 + "|")
+        logger.info("+" + "="*68 + "+")
         logger.info(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # PHASE 1: Genomic Ingestion
@@ -578,14 +628,14 @@ def run_master_pipeline(args) -> int:
         
         # SUCCESS
         logger.info("")
-        logger.info("╔" + "="*68 + "╗")
-        logger.info("║" + " "*20 + "[SUCCESS] PIPELINE COMPLETE" + " "*21 + "║")
-        logger.info("║" + " "*68 + "║")
-        logger.info("║  Final biophysical and genomic features saved to:" + " "*16 + "║")
-        logger.info("║  data/results/final_engineered_features.csv" + " "*24 + "║")
-        logger.info("║" + " "*68 + "║")
-        logger.info("║  Ready for downstream statistical modeling." + " "*24 + "║")
-        logger.info("╚" + "="*68 + "╝")
+        logger.info("+" + "="*68 + "+")
+        logger.info("|" + " "*20 + "[SUCCESS] PIPELINE COMPLETE" + " "*21 + "|")
+        logger.info("|" + " "*68 + "|")
+        logger.info("|  Final biophysical and genomic features saved to:" + " "*16 + "|")
+        logger.info("|  data/results/final_engineered_features.csv" + " "*24 + "|")
+        logger.info("|" + " "*68 + "|")
+        logger.info("|  Ready for downstream statistical modeling." + " "*24 + "|")
+        logger.info("+" + "="*68 + "+")
         logger.info(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         return 0
