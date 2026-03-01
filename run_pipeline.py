@@ -374,7 +374,7 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[int]]:
 
 def phase4_biophysics_docking(
     epistasis_networks: Dict[str, List[int]],
-    pdb_mapping: Dict[str, Tuple[str, str]],
+    default_pdb: str,
     ligand_smiles: str,
     output_dir: Path
 ) -> Dict[str, Dict[str, float]]:
@@ -385,7 +385,7 @@ def phase4_biophysics_docking(
     
     Args:
         epistasis_networks: Dictionary mapping gene -> residue list
-        pdb_mapping: Dictionary mapping gene -> (pdb_id, chain)
+        default_pdb: Universal wild-type reference PDB ID
         ligand_smiles: SMILES string for the ligand
         output_dir: Output directory for docking results
         
@@ -409,11 +409,8 @@ def phase4_biophysics_docking(
         bridge = AutoScanBridge()
         
         for gene, residues in epistasis_networks.items():
-            if gene not in pdb_mapping:
-                logger.warning(f"No PDB mapping for {gene}, skipping")
-                continue
-            
-            pdb_id, chain = pdb_mapping[gene]
+            pdb_id = default_pdb
+            chain = "A"
             
             logger.info(f"Docking {gene} ({pdb_id} chain {chain}) with residues {residues}...")
             
@@ -651,14 +648,10 @@ def run_master_pipeline(args) -> int:
 
         # PHASE 4: Biophysics Docking
         if args.start_phase <= 4:
-            pdb_mapping = args.pdb_mapping or {
-                "oqxA": ("7cz9", "A"),
-                "oqxB": ("7cz9", "A"),
-            }
             docking_results = phase4_biophysics_docking(
                 epistasis_networks=epistasis_networks,
-                pdb_mapping=pdb_mapping,
-                ligand_smiles=args.ligand_smiles,
+                default_pdb=args.default_pdb,
+                ligand_smiles=args.drug_smiles,
                 output_dir=output_dir / "biophysics"
             )
         else:
@@ -786,6 +779,20 @@ Examples:
         nargs='+',
         default=None,
         help='PDB mapping as "gene:pdb_id:chain" (e.g., "oqxA:7cz9:A")'
+    )
+
+    parser.add_argument(
+        '--default-pdb',
+        type=str,
+        default='7cz9',
+        help='Universal Wild-Type reference PDB ID for AutoScan docking (e.g., 7cz9).'
+    )
+
+    parser.add_argument(
+        '--drug-smiles',
+        type=str,
+        default='C1=CC2=C(C(=C1)F)N(C=C(C2=O)C(=O)O)C3CC3',
+        help='SMILES string for the target antibiotic (default: Ciprofloxacin).'
     )
     
     parser.add_argument(
