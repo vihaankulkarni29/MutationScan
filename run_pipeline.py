@@ -541,13 +541,13 @@ def phase5_feature_aggregation(
     logger.info(f"Saved {len(records)} feature rows to {output_file}")
     
     # Log summary statistics
-    if "Delta_Delta_G_kcalmol" in features_df.columns:
-        ddg_stats = features_df["Delta_Delta_G_kcalmol"].describe()
-        logger.info("ΔΔG Statistics:")
-        logger.info(f"  Mean: {ddg_stats['mean']:.2f} kcal/mol")
-        logger.info(f"  Std Dev: {ddg_stats['std']:.2f} kcal/mol")
-        logger.info(f"  Min: {ddg_stats['min']:.2f} kcal/mol (best binding)")
-        logger.info(f"  Max: {ddg_stats['max']:.2f} kcal/mol")
+    logger.info("DDG Statistics:")
+    if 'Delta_Delta_G_kcalmol' in features_df.columns and not features_df['Delta_Delta_G_kcalmol'].dropna().empty:
+        ddg_stats = features_df['Delta_Delta_G_kcalmol'].describe()
+        mean_val = ddg_stats.get('mean', 0.0)
+        logger.info(f"  Mean: {mean_val:.2f} kcal/mol")
+    else:
+        logger.info("  No DDG data available to calculate statistics.")
     
     logger.info("[PHASE 5 COMPLETE] Feature aggregation finished")
     
@@ -585,14 +585,36 @@ def run_master_pipeline(args) -> int:
             output_dir=output_dir
         )
         
+        # Convert mutations DataFrame to epistasis input format for Phase 3
+        logger.info("Converting mutation data to epistasis analysis format...")
+        epistasis_input_dict = {}
+        
+        if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
+            # Convert flat mutation list to genome-mapped dictionary
+            if 'Accession' in mutations_df.columns and 'Mutation' in mutations_df.columns:
+                epistasis_input_dict = mutations_df.groupby('Accession')['Mutation'].apply(list).to_dict()
+                logger.info(f"Mapped mutations for {len(epistasis_input_dict)} genomes")
+            else:
+                logger.warning("Mutation DataFrame missing expected columns (Accession, Mutation)")
+        else:
+            logger.warning("No mutation data available for epistasis analysis")
+        
+        # Save epistasis input for Phase 3
+        epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+        epistasis_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(epistasis_file, 'w') as f:
+            json.dump({"genomes": epistasis_input_dict}, f, indent=2)
+        logger.info(f"Saved epistasis input to {epistasis_file}")
+        
         # PHASE 2: Expression Analysis
         expression_scores = phase2_expression_analysis(
             expression_file=Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
         )
         
         # PHASE 3: Epistasis Detection
+        epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
         epistasis_networks = phase3_epistasis_detection(
-            epistasis_file=Path(args.epistasis_file) if args.epistasis_file else Path("temp/epistasis_input.json")
+            epistasis_file=epistasis_file
         )
         
         # PHASE 4: Biophysics Docking
