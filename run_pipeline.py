@@ -172,7 +172,7 @@ def phase1_genomic_ingestion(
             # Fallback: Standard batch downloader via search + batch
             logger.info(f"Using standard organism search")
             accessions = downloader.search_accessions(
-                query=organism,
+                organism=organism,
                 max_results=limit
             )
             if accessions:
@@ -223,19 +223,18 @@ def phase1_genomic_ingestion(
         result = subprocess.run(
             docker_command,
             check=True,
-            capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=3600  # 1 hour timeout
         )
         logger.info("Docker container completed successfully")
-        if result.stdout:
-            logger.debug(f"Docker stdout: {result.stdout[:500]}")
     except subprocess.TimeoutExpired:
         logger.error("Docker container execution timed out (1 hour limit exceeded)")
         raise
     except subprocess.CalledProcessError as e:
         logger.error(f"Docker container failed with exit code {e.returncode}")
-        logger.error(f"Docker stderr: {e.stderr}")
+        logger.error("Docker output was streamed to console above. Check output for details.")
         raise
     except FileNotFoundError:
         logger.error("Docker not found. Please install Docker and ensure it is in your PATH")
