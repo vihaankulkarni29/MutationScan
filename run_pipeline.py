@@ -424,9 +424,9 @@ def phase4_biophysics_docking(
             
             if result:
                 docking_results[gene] = result
-                logger.info(f"  ✓ ΔΔG = {result['delta_delta_g']:.2f} kcal/mol")
+                logger.info(f"  [SUCCESS] DDG = {result['delta_delta_g']:.2f} kcal/mol")
             else:
-                logger.warning(f"  ✗ Docking failed for {gene}")
+                logger.warning(f"  [FAILED] Docking failed for {gene}")
     
     except Exception as e:
         logger.error(f"Biophysics docking phase failed: {e}", exc_info=True)

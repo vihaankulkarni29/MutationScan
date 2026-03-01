@@ -256,8 +256,7 @@ class AutoScanBridge:
             subprocess.CalledProcessError: If AutoScan execution fails
         """
         # Build command
-        cmd = [
-            self.autoscan_path,
+        cmd = self.autoscan_path.split() + [
             "--config", str(config_file),
             "--ligand", ligand_smiles,
             "--output-dir", str(output_dir),
