@@ -297,15 +297,21 @@ class NCBIDatasetsGenomeDownloader:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    def search_accessions(self, query: str, max_results: int = 100) -> List[str]:
+    def search_accessions(self, organism: str, location: str = None, max_results: int = 100) -> List[str]:
         """
-        Search NCBI Assembly database and resolve to Accession IDs.
+        Search NCBI for genomes with optional BioSample-to-Assembly cross-linking.
         
-        Uses Entrez.esearch -> Entrez.esummary for robust text searching.
-        Only returns Assembly Accessions (GCF_/GCA_), not Nucleotide UIDs.
+        Uses a 4-phase approach:
+        - Phase 1: If location provided, search BioSample with geo_loc_name
+        - Phase 2: Cross-link BioSample IDs to Assembly UIDs via Entrez.elink
+        - Phase 3: If no location, fall back to direct Assembly search
+        - Phase 4: Resolve Assembly UIDs to Accessions via esummary
+        
+        Only returns Assembly Accessions (GCF_/GCA_), not UIDs.
 
         Args:
-            query: Search query (e.g., "Escherichia coli AND Antibiotic Resistant")
+            organism: Taxon string (e.g., "Escherichia coli")
+            location: Optional geographic filter (e.g., "India")
             max_results: Maximum number of accessions to return
 
         Returns:
@@ -314,7 +320,7 @@ class NCBIDatasetsGenomeDownloader:
         Raises:
             Exception: If search fails after retries
         """
-        logger.info(f"Searching NCBI Assembly for: {query}")
+        logger.info(f"Searching for {organism}" + (f" from {location}" if location else ""))
         
         accessions = []
         retry_count = 0
@@ -322,35 +328,95 @@ class NCBIDatasetsGenomeDownloader:
         
         while retry_count < max_retries:
             try:
-                # Step 1: esearch to get Assembly UIDs (returns XML)
-                search_params = {
-                    "db": "assembly",
-                    "term": query,
-                    "retmax": max_results,
-                    "tool": "mutation_scan",
-                    "email": self.email,
-                }
-                if self.api_key:
-                    search_params["api_key"] = self.api_key
+                assembly_uids = []
                 
-                response = requests.get(self.NCBI_ESEARCH_URL, params=search_params)
-                response.raise_for_status()
+                # Phase 1 & 2: BioSample-to-Assembly cross-linking (if location provided)
+                if location:
+                    logger.info(f"Phase 1: Searching BioSample for {organism} from {location}...")
+                    biosample_query = f'"{organism}"[Organism] AND "{location}"[geo_loc_name]'
+                    
+                    # Phase 1: esearch on biosample database
+                    search_params = {
+                        "db": "biosample",
+                        "term": biosample_query,
+                        "retmax": max_results,
+                        "tool": "mutation_scan",
+                        "email": self.email,
+                    }
+                    if self.api_key:
+                        search_params["api_key"] = self.api_key
+                    
+                    response = requests.get(self.NCBI_ESEARCH_URL, params=search_params)
+                    response.raise_for_status()
+                    
+                    root = ET.fromstring(response.text)
+                    id_list = root.find('.//IdList')
+                    biosample_ids = [id_elem.text for id_elem in id_list.findall('Id')] if id_list is not None else []
+                    
+                    if biosample_ids:
+                        logger.info(f"Found {len(biosample_ids)} BioSample IDs. Cross-linking to Assembly...")
+                        
+                        # Phase 2: elink to map biosample -> assembly
+                        elink_params = {
+                            "dbfrom": "biosample",
+                            "db": "assembly",
+                            "id": ",".join(biosample_ids),
+                            "tool": "mutation_scan",
+                            "email": self.email,
+                        }
+                        if self.api_key:
+                            elink_params["api_key"] = self.api_key
+                        
+                        elink_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
+                        response = requests.get(elink_url, params=elink_params)
+                        response.raise_for_status()
+                        
+                        # Parse elink XML to extract Assembly UIDs
+                        root = ET.fromstring(response.text)
+                        for link_set_db in root.findall('.//LinkSetDb'):
+                            db_to = link_set_db.find('DbTo')
+                            if db_to is not None and db_to.text == "assembly":
+                                for link in link_set_db.findall('Link/Id'):
+                                    if link.text:
+                                        assembly_uids.append(link.text)
+                        
+                        logger.info(f"Resolved to {len(assembly_uids)} Assembly UIDs via elink")
+                    else:
+                        logger.warning(f"No BioSample results for: {biosample_query}")
                 
-                # Parse XML response
-                root = ET.fromstring(response.text)
-                id_list = root.find('.//IdList')
-                uids = [id_elem.text for id_elem in id_list.findall('Id')] if id_list is not None else []
+                # Phase 3: Fallback to direct Assembly search (if no location or no results)
+                if not assembly_uids:
+                    logger.info("Phase 3: Falling back to direct Assembly database search...")
+                    assembly_query = f'"{organism}"[Organism]'
+                    
+                    search_params = {
+                        "db": "assembly",
+                        "term": assembly_query,
+                        "retmax": max_results,
+                        "tool": "mutation_scan",
+                        "email": self.email,
+                    }
+                    if self.api_key:
+                        search_params["api_key"] = self.api_key
+                    
+                    response = requests.get(self.NCBI_ESEARCH_URL, params=search_params)
+                    response.raise_for_status()
+                    
+                    root = ET.fromstring(response.text)
+                    id_list = root.find('.//IdList')
+                    assembly_uids = [id_elem.text for id_elem in id_list.findall('Id')] if id_list is not None else []
+                    
+                    if assembly_uids:
+                        logger.info(f"Found {len(assembly_uids)} Assembly UIDs via direct search")
+                    else:
+                        logger.warning(f"No Assembly results found for organism: {organism}")
+                        return []
                 
-                if not uids:
-                    logger.warning(f"No results found for query: {query}")
-                    return []
-                
-                logger.info(f"Found {len(uids)} Assembly UIDs. Resolving to accessions...")
-                
-                # Step 2: esummary to get Assembly Accessions (returns XML)
+                # Phase 4: esummary to get Assembly Accessions
+                logger.info(f"Phase 4: Resolving {len(assembly_uids)} Assembly UIDs to Accessions...")
                 summary_params = {
                     "db": "assembly",
-                    "id": ",".join(uids[:max_results]),
+                    "id": ",".join(assembly_uids[:max_results]),
                     "tool": "mutation_scan",
                     "email": self.email,
                 }
@@ -363,14 +429,13 @@ class NCBIDatasetsGenomeDownloader:
                 # Parse XML for assembly accessions
                 root = ET.fromstring(response.text)
                 for doc_sum in root.findall('.//DocumentSummary'):
-                    # Find AssemblyAccession field
                     asm_acc_elem = doc_sum.find(".//AssemblyAccession")
                     if asm_acc_elem is not None:
                         asm_accession = asm_acc_elem.text
                         if asm_accession and (asm_accession.startswith("GCF_") or asm_accession.startswith("GCA_")):
                             accessions.append(asm_accession)
                 
-                logger.info(f"Resolved {len(accessions)} valid Assembly Accessions")
+                logger.info(f"Successfully resolved {len(accessions)} valid Assembly Accessions")
                 return accessions
                 
             except requests.exceptions.RequestException as e:
@@ -418,22 +483,22 @@ class NCBIDatasetsGenomeDownloader:
 
     def download_bulk_by_geolocation(self, organism: str, location: str, limit: int = 5000) -> Tuple[int, int]:
         """
-        Hybrid geolocation downloader:
-        1) Query Entrez for assembly accessions using organism + location
-        2) Feed explicit accession list into datasets CLI bulk downloader
+        Hybrid geolocation downloader using BioSample-to-Assembly cross-linking:
+        1) Query BioSample database with organism + geo_loc_name
+        2) Cross-link BioSample IDs to Assembly UIDs via Entrez.elink
+        3) Feed explicit assembly accessions into datasets CLI bulk downloader
 
         Args:
             organism: Taxon string for Entrez query
-            location: Geographic filter token for Entrez text search
+            location: Geographic filter for BioSample geo_loc_name field
             limit: Maximum number of accessions to retrieve from Entrez
 
         Returns:
             Tuple of (successful_downloads, failed_downloads)
         """
-        query = f'"{organism}"[Organism] AND "{location}"[Text Word]'
-        logger.info(f"Querying Entrez for Accessions: {query}")
+        logger.info(f"Starting hybrid geolocation download: {organism} from {location}")
 
-        accessions = self.search_accessions(query, max_results=limit)
+        accessions = self.search_accessions(organism=organism, location=location, max_results=limit)
         if not accessions:
             logger.warning("No accessions found for hybrid geolocation query")
             return 0, 0
