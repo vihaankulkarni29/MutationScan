@@ -36,8 +36,8 @@ RUN abricate --setupdb
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir setuptools wheel && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir "setuptools<70.0.0" wheel && \
+    pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 COPY src /app/src
 COPY config /app/config
