@@ -31,4 +31,4 @@ pyyaml>=5.4
 tqdm>=4.60.0
 
 # Structural Biophysics (Module 7 - AutoScan)
-git+https://github.com/vihaankulkarni29/AutoScan.git
+# NOTE: AutoScan is installed via Dockerfile with --no-deps to avoid openmm version conflicts
