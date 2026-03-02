@@ -480,7 +480,7 @@ def phase4_biophysics_docking(
         "dock",
         "--receptor", default_pdb,
         "--ligand", ligand_smiles,
-        "--output-dir", "/app/data/results/biophysics/biophysics/WT_baseline"
+        "--output", "/app/data/results/biophysics/WT_baseline"
     ]
 
     wt_affinity = -8.5  # Fallback
@@ -519,7 +519,7 @@ def phase4_biophysics_docking(
             "--ligand", ligand_smiles,
             "--mutation", autoscan_mut_string,
             "--minimize",
-            "--output-dir", f"/app/data/results/biophysics/biophysics/mutant_{index}"
+            "--output", f"/app/data/results/biophysics/mutant_{index}"
         ]
 
         try:
