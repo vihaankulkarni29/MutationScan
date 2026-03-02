@@ -50,6 +50,13 @@ from typing import Optional, Dict, List, Tuple
 
 import pandas as pd
 
+try:
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    RDKIT_AVAILABLE = True
+except ImportError:
+    RDKIT_AVAILABLE = False
+
 # Import MutationScan modules
 from mutation_scan.core.entrez_handler import NCBIDatasetsGenomeDownloader
 from mutation_scan.biophysics.autoscan_bridge import AutoScanBridge
@@ -430,6 +437,50 @@ def _format_for_autoscan(mut_list: List[str], chain: str = "A") -> str:
     return ",".join(formatted)
 
 
+def _smiles_to_sdf(smiles: str, output_path: Path) -> bool:
+    """
+    Convert SMILES string to SDF molecular file.
+    
+    Args:
+        smiles: SMILES string representation
+        output_path: Path to save SDF file
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+    
+    if not RDKIT_AVAILABLE:
+        logger.warning("RDKit not available. Cannot convert SMILES to SDF.")
+        logger.info("Install rdkit: pip install rdkit")
+        return False
+    
+    try:
+        # Parse SMILES
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            logger.error(f"Invalid SMILES string: {smiles}")
+            return False
+        
+        # Add hydrogens and 3D coordinates
+        mol = Chem.AddHs(mol)
+        AllChem.EmbedMolecule(mol, randomSeed=42)
+        AllChem.MMFFOptimizeMolecule(mol)
+        
+        # Write to SDF
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        writer = Chem.SDWriter(str(output_path))
+        writer.write(mol)
+        writer.close()
+        
+        logger.info(f"Created ligand SDF: {output_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to convert SMILES to SDF: {e}")
+        return False
+
+
 def phase4_biophysics_docking(
     epistasis_networks: Dict[str, List[str]],
     default_pdb: str,
@@ -458,6 +509,26 @@ def phase4_biophysics_docking(
     biophysics_dir = output_dir / "biophysics"
     biophysics_dir.mkdir(parents=True, exist_ok=True)
 
+    # ---------------------------------------------------------
+    # STEP 0: Convert SMILES to SDF Ligand File
+    # ---------------------------------------------------------
+    logger.info("Step 0: Preparing ligand molecule from SMILES...")
+    ligands_dir = project_root / "data" / "ligands"
+    ligands_dir.mkdir(parents=True, exist_ok=True)
+    
+    ligand_sdf_path = ligands_dir / "ligand.sdf"
+    ligand_container_path = "/app/data/ligands/ligand.sdf"  # Path inside Docker container
+    
+    if not ligand_sdf_path.exists():
+        if _smiles_to_sdf(ligand_smiles, ligand_sdf_path):
+            logger.info(f"  Ligand SDF created: {ligand_sdf_path}")
+        else:
+            logger.error("Failed to convert SMILES to SDF. RDKit may not be installed.")
+            logger.error("Install with: pip install rdkit")
+            return docking_results
+    else:
+        logger.info(f"  Using existing ligand SDF: {ligand_sdf_path}")
+
     # Translates ["K10R", "I174V"] -> "A:10:K:R,A:174:I:V"
     def _format_for_autoscan_local(mut_list, chain="A"):
         formatted = []
@@ -481,7 +552,7 @@ def phase4_biophysics_docking(
         "--entrypoint", "autoscan",
         "mutationscan:latest",
         "--receptor", default_pdb,
-        "--ligand", ligand_smiles,
+        "--ligand", ligand_container_path,
         "--center-x", str(center_x),
         "--center-y", str(center_y),
         "--center-z", str(center_z),
@@ -520,7 +591,7 @@ def phase4_biophysics_docking(
             "--entrypoint", "autoscan",
             "mutationscan:latest",
             "--receptor", default_pdb,
-            "--ligand", ligand_smiles,
+            "--ligand", ligand_container_path,
             "--mutation", autoscan_mut_string,
             "--center-x", str(center_x),
             "--center-y", str(center_y),
