@@ -3,19 +3,19 @@ AutoScan Bridge Module - Population Genomics to 3D Biophysics
 
 This module connects MutationScan's population-level mutation analysis to empirical
 thermodynamic predictions. It converts identified epistatic mutation networks into
-binding affinity change estimates (ΔΔG) using a network penalty model optimized
+binding affinity change estimates (DDG) using a network penalty model optimized
 for high-throughput population genomics.
 
 Workflow:
 1. Accept PDB ID, chain, and residue list from MutationScan
 2. Apply empirical thermodynamic penalty based on network complexity
-3. Calculate ΔΔG using: Base WT Affinity + Network Penalty
+3. Calculate DDG using: Base WT Affinity + Network Penalty
 
 Empirical Model:
 - Base WT Affinity: -8.5 kcal/mol (typical protein-ligand binding)
 - Network Penalty: +0.45 kcal/mol per mutated residue
 - Mutant Affinity = WT Affinity + (0.45 * residue_count)
-- ΔΔG = Mutant Affinity - WT Affinity
+- DDG = Mutant Affinity - WT Affinity
 
 Author: Senior Bioinformatics Software Architect
 """
@@ -35,7 +35,7 @@ class AutoScanBridge:
     an empirical thermodynamic penalty model calibrated for high-throughput analysis.
     
     This proxy bypasses physical docking to enable population-scale analysis while
-    maintaining reasonable ΔΔG predictions based on network complexity.
+    maintaining reasonable DDG predictions based on network complexity.
     
     Attributes:
         base_wt_affinity: Baseline WT binding affinity in kcal/mol (default: -8.5)
@@ -67,7 +67,7 @@ class AutoScanBridge:
         """
         Execute empirical thermodynamic analysis based on network complexity.
         
-        Calculates binding affinity changes (ΔΔG) using an empirical penalty model
+        Calculates binding affinity changes (DDG) using an empirical penalty model
         calibrated for high-throughput population genomics. Bypasses physical docking
         to enable analysis of thousands of genomes.
         
@@ -82,7 +82,7 @@ class AutoScanBridge:
             Dictionary with keys:
             - "wt_affinity": WT binding affinity (kcal/mol, negative = better binding)
             - "mutant_affinity": Mutant binding affinity (kcal/mol)
-            - "delta_delta_g": ΔΔG value (mutant - WT; positive = destabilized binding)
+            - "delta_delta_g": DDG value (mutant - WT; positive = destabilized binding)
             
         Raises:
             ValueError: If input parameters are invalid
@@ -121,7 +121,7 @@ class AutoScanBridge:
             logger.info(f"  Base WT Affinity: {wt_affinity:.2f} kcal/mol")
             logger.info(f"  Network Penalty: +{network_penalty:.2f} kcal/mol ({num_residues} residues × {self.network_penalty_per_residue})")
             logger.info(f"  Mutant Affinity: {mutant_affinity:.2f} kcal/mol")
-            logger.info(f"  ΔΔG: {delta_delta_g:.2f} kcal/mol")
+            logger.info(f"  DDG: {delta_delta_g:.2f} kcal/mol")
             logger.info("")
             
             # Return results in expected format for Phase 5 (Feature Aggregation)
