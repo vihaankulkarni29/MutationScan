@@ -437,10 +437,7 @@ def phase4_biophysics_docking(
     output_dir: Path,
     center_x: float = 0.0,
     center_y: float = 0.0,
-    center_z: float = 0.0,
-    size_x: float = 20.0,
-    size_y: float = 20.0,
-    size_z: float = 20.0
+    center_z: float = 0.0
 ) -> Dict[str, Dict[str, float]]:
     """
     Phase 4: Rigorous 3D Biophysics Docking via Dockerized AutoScan
@@ -489,9 +486,6 @@ def phase4_biophysics_docking(
         "--center-x", str(center_x),
         "--center-y", str(center_y),
         "--center-z", str(center_z),
-        "--size-x", str(size_x),
-        "--size-y", str(size_y),
-        "--size-z", str(size_z),
         "--output", "/app/data/results/biophysics/WT_baseline"
     ]
 
@@ -533,9 +527,6 @@ def phase4_biophysics_docking(
             "--center-x", str(center_x),
             "--center-y", str(center_y),
             "--center-z", str(center_z),
-            "--size-x", str(size_x),
-            "--size-y", str(size_y),
-            "--size-z", str(size_z),
             "--minimize",
             "--output", f"/app/data/results/biophysics/mutant_{index}"
         ]
@@ -847,10 +838,7 @@ def run_master_pipeline(args) -> int:
                 output_dir=output_dir,
                 center_x=args.center_x,
                 center_y=args.center_y,
-                center_z=args.center_z,
-                size_x=args.size_x,
-                size_y=args.size_y,
-                size_z=args.size_z
+                center_z=args.center_z
             )
         else:
             logger.info("Skipping Phase 4 (Biophysics). Relying on cached data.")
@@ -1019,27 +1007,6 @@ Examples:
         type=float,
         default=0.0,
         help='Docking box center Z coordinate (Angstroms). Required by AutoScan.'
-    )
-    
-    parser.add_argument(
-        '--size-x',
-        type=float,
-        default=20.0,
-        help='Docking box size in X dimension (Angstroms). Default: 20.0'
-    )
-    
-    parser.add_argument(
-        '--size-y',
-        type=float,
-        default=20.0,
-        help='Docking box size in Y dimension (Angstroms). Default: 20.0'
-    )
-    
-    parser.add_argument(
-        '--size-z',
-        type=float,
-        default=20.0,
-        help='Docking box size in Z dimension (Angstroms). Default: 20.0'
     )
     
     parser.add_argument(
