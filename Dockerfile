@@ -24,7 +24,7 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86
 ENV PATH=$CONDA_DIR/bin:$PATH
 
 # 3. INSTALL NATIVE BIOPHYSICS STACK (OpenMM, Vina, OpenBabel, PyMOL)
-RUN conda install -c conda-forge python=3.10 openbabel vina pymol-open-source openmm pdbfixer pandas -y
+RUN conda install --override-channels -c conda-forge python=3.10 openbabel vina pymol -y
 
 # 4. INSTALL NCBI DATASETS CLI
 RUN curl -L -o /usr/local/bin/datasets \
