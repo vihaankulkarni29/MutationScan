@@ -1,53 +1,62 @@
-# BASE IMAGE: State Public Health Bioinformatics (StaPH-B)
+# BASE IMAGE: StaPH-B ABRicate (includes NCBI tools)
 FROM staphb/abricate:latest
 
-# METADATA
 LABEL maintainer="MutationScan Team"
-LABEL version="1.0"
-LABEL description="Democratized AMR Pipeline"
+LABEL version="2.1"
+LABEL description="Grand Unified MutationScan: Genomic + Biophysics Pipeline with Native OpenMM/Vina"
 
-# 1. SWITCH TO ROOT & INSTALL SYSTEM TOOLS
+# 1. SWITCH TO ROOT & INSTALL SYSTEM DEPENDENCIES
 USER root
+
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
-    curl \
-    unzip \
-    zip \
-    pymol \
-    libglew-dev \
+    curl wget bzip2 unzip zip \
+    libgl1-mesa-glx libegl1-mesa libxrandr2 libxss1 libxcursor1 libxcomposite1 \
+    libasound2 libxi6 libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
-# 1b. INSTALL NCBI DATASETS CLI (for enterprise-scale bulk downloads)
+# 2. INSTALL MINICONDA (Python 3.10 with conda-forge packages)
+ENV CONDA_DIR=/opt/conda
+
+RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
+    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh
+
+ENV PATH=$CONDA_DIR/bin:$PATH
+
+# 3. INSTALL NATIVE BIOPHYSICS STACK (OpenMM, Vina, OpenBabel, PyMOL)
+RUN conda install -c conda-forge python=3.10 openbabel vina pymol-open-source openmm pdbfixer pandas -y
+
+# 4. INSTALL NCBI DATASETS CLI
 RUN curl -L -o /usr/local/bin/datasets \
     "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" && \
     chmod +x /usr/local/bin/datasets
 
-# 2. SETUP OFFLINE DATABASES
+# 5. SETUP ABRicate DATABASES
 RUN abricate --setupdb
 
-# 3. INSTALL PYTHON DEPENDENCIES
+# 6. APPLICATION SETUP
 WORKDIR /app
-COPY requirements.txt .
-# We explicitly install the package in editable mode so 'src' layout works
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
-# 4. COPY APPLICATION ARCHITECTURE
-# We must copy the specific folders to match the new structure
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY src /app/src
 COPY config /app/config
 COPY models /app/models
 COPY pyproject.toml /app/
 
-# 5. CONFIGURE ENVIRONMENT
-# This line is CRITICAL: It tells Python to look inside /app/src for modules
+# 7. CONFIGURE PYTHON PATH
 ENV PYTHONPATH="${PYTHONPATH}:/app/src"
 
-# 6. PERMISSIONS
+# 8. PERMISSIONS & USER
 RUN useradd -m bioinfo && \
     chown -R bioinfo:bioinfo /app
+
 USER bioinfo
+
+# 9. ENTRYPOINT
+ENTRYPOINT ["python", "-m", "mutation_scan.main"]
+CMD ["--help"]
 
 # 7. ENTRYPOINT (Updated for Module Execution)
 # We now run it as a module (-m) instead of a script file

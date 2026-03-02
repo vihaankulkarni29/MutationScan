@@ -8,6 +8,7 @@
 # - VariantCaller (Sequence alignment, resistance DB)
 # - PyMOLVisualizer (3D structure visualization)
 # - ML Predictor Module (Biophysical features, RandomForest)
+# - AutoScan Module (Rigorous molecular docking with OpenMM/Vina)
 # =============================================================================
 
 # Scientific Stack (Core)
@@ -28,3 +29,6 @@ requests>=2.25.0
 # System/Utility
 pyyaml>=5.4
 tqdm>=4.60.0
+
+# Structural Biophysics (Module 7 - AutoScan)
+git+https://github.com/vihaankulkarni29/AutoScan.git

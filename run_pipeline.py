@@ -40,6 +40,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -253,6 +255,27 @@ def phase1_genomic_ingestion(
     except Exception as e:
         logger.warning(f"Failed to read mutation report: {e}")
 
+    # Step 4: Data Quality Filtering
+    logger.info("Step 1.4: Applying data quality filters...")
+    if not mutations_df.empty:
+        original_count = len(mutations_df)
+        
+        # Keep only essential columns
+        cols_to_keep = ['Accession', 'Gene', 'Mutation']
+        mutations_df = mutations_df[[c for c in cols_to_keep if c in mutations_df.columns]]
+        logger.info(f"Retained {len(cols_to_keep)} core columns")
+        
+        # Remove garbage alignments: Drop genomes with >20 mutations per gene
+        if 'Accession' in mutations_df.columns and 'Gene' in mutations_df.columns:
+            mut_counts = mutations_df.groupby(['Accession', 'Gene']).size()
+            valid_groups = mut_counts[mut_counts <= 20].index
+            mutations_df = mutations_df[mutations_df.set_index(['Accession', 'Gene']).index.isin(valid_groups)].reset_index(drop=True)
+            filtered_count = len(mutations_df)
+            logger.info(f"Alignment quality filter: {filtered_count}/{original_count} mutations retained (removed {original_count - filtered_count} from poor alignments)")
+            
+            # Create composite key for proper mapping
+            mutations_df['Acc_Gene'] = mutations_df['Accession'] + "|" + mutations_df['Gene']
+            logger.info(f"Created composite Accession|Gene keys for epistasis analysis")
     
     logger.info("[PHASE 1 COMPLETE] Genomic data ingestion finished")
     
@@ -312,22 +335,23 @@ def phase2_expression_analysis(expression_file: Path) -> Dict[str, float]:
 
 def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
     """
-    Phase 3: Epistasis Network Detection
+    Phase 3: Epistasis Network Detection (Dynamic Top 5 Frequency-Based)
     
-    Load pre-computed epistatic mutation networks.
+    Load pre-computed epistatic mutation networks, rank by frequency,
+    and return only the Top 5 most prevalent networks.
     
     Args:
         epistasis_data: Loaded epistasis input dictionary with keys like "GCF_051448695.1|oqxB"
                        and values as mutation string lists (e.g., ["K10R", "I174V"])
         
     Returns:
-        Dictionary mapping acc_gene ("Accession|Gene") -> list of mutation strings
+        Dictionary mapping mutation_network_string (e.g., "K10R + I174V") -> mutation list
     """
     logger = logging.getLogger(__name__)
     
     logger.info("")
     logger.info("="*70)
-    logger.info("PHASE 3: Epistasis Network Detection")
+    logger.info("PHASE 3: Epistasis Network Detection (Dynamic Top 5)")
     logger.info("="*70)
     
     epistasis_networks = {}
@@ -341,17 +365,32 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
             logger.info("No epistatic networks to analyze")
             return epistasis_networks
         
+        # Count frequency of each mutation network
+        network_frequency = {}
+        
         # Parse epistasis data (keys are "Accession|Gene", values are mutation string lists)
         for acc_gene, mutations in genomes_data.items():
-            if not isinstance(mutations, list):
+            if not isinstance(mutations, list) or len(mutations) < 2:
                 continue
             
-            # Only add to network if there are at least 2 mutations (epistatic co-occurrence)
-            if len(mutations) >= 2:
-                epistasis_networks[acc_gene] = mutations
-                logger.info(f"Found epistatic network for {acc_gene}: {', '.join(mutations[:5])}{'...' if len(mutations) > 5 else ''}")
+            # Format network as string: "K10R + I174V"
+            network_key = " + ".join(sorted(mutations))
+            network_frequency[network_key] = network_frequency.get(network_key, 0) + 1
         
-        logger.info(f"Identified {len(epistasis_networks)} epistatic networks")
+        logger.info(f"Detected {len(network_frequency)} unique epistatic networks across dataset")
+        
+        # Sort by frequency (descending) and take Top 5
+        sorted_networks = sorted(network_frequency.items(), key=lambda x: x[1], reverse=True)
+        top5_networks = sorted_networks[:5]
+        
+        logger.info(f"Selecting Top 5 most frequent networks (threshold: ≥2 mutations)")
+        
+        for idx, (network_str, freq) in enumerate(top5_networks, 1):
+            mut_list = network_str.split(" + ")
+            epistasis_networks[network_str] = mut_list
+            logger.info(f"  {idx}. {network_str} (frequency: {freq} genomes)")
+        
+        logger.info(f"Identified Top {len(epistasis_networks)} epistatic networks for docking")
         
     except Exception as e:
         logger.error(f"Failed to load epistasis data: {e}")
@@ -362,31 +401,65 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
     return epistasis_networks
 
 
+def _format_for_autoscan(mut_list: List[str], chain: str = "A") -> str:
+    """
+    Convert mutation list to AutoScan CLI format.
+    
+    Example:
+        ["K10R", "I174V"] -> "A:10:K:R,A:174:I:V"
+    
+    Args:
+        mut_list: List of mutation strings (e.g., ["K10R", "I174V"])
+        chain: Chain identifier (default "A")
+        
+    Returns:
+        AutoScan format string
+    """
+    import re
+    formatted = []
+    
+    for mut in mut_list:
+        # Parse mutation: Extract residue number, original AA, new AA
+        match = re.match(r'([A-Z])*(\d+)([A-Z])', mut)
+        if match:
+            residue_num = match.group(2)
+            orig_aa = match.group(1) if match.group(1) else "X"
+            new_aa = match.group(3)
+            formatted.append(f"{chain}:{residue_num}:{orig_aa}:{new_aa}")
+    
+    return ",".join(formatted)
+
+
 def phase4_biophysics_docking(
     epistasis_networks: Dict[str, List[str]],
     default_pdb: str,
     ligand_smiles: str,
-    output_dir: Path
+    output_dir: Path,
+    project_root: Path = None
 ) -> Dict[str, Dict[str, float]]:
     """
-    Phase 4: 3D Biophysics Docking (AutoScan Integration)
+    Phase 4: 3D Biophysics Docking (Dockerized AutoScan)
     
-    Calculate binding affinity changes (ΔΔG) for epistatic networks.
+    Execute rigorous molecular docking using AutoScan container.
+    Performs baseline (WT) docking, then mutant docking.
+    Calculates binding affinity changes (ΔΔG).
     
     Args:
-        epistasis_networks: Dictionary mapping acc_gene ("Accession|Gene") -> mutation string list
-        default_pdb: Universal wild-type reference PDB ID
+        epistasis_networks: Dictionary mapping network_str -> mutation list
+                           Example: {"K10R + I174V": ["K10R", "I174V"]}
+        default_pdb: Universal wild-type reference PDB ID (e.g., "7cz9")
         ligand_smiles: SMILES string for the ligand
         output_dir: Output directory for docking results
+        project_root: Root directory of MutationScan project (for docker -v mounts)
         
     Returns:
-        Dictionary mapping acc_gene -> {"wt_affinity", "mutant_affinity", "delta_delta_g"}
+        Dictionary mapping network_str -> {"wt_affinity", "mutant_affinity", "delta_delta_g"}
     """
     logger = logging.getLogger(__name__)
     
     logger.info("")
     logger.info("="*70)
-    logger.info("PHASE 4: 3D Biophysics Docking (AutoScan)")
+    logger.info("PHASE 4: 3D Biophysics Docking (Dockerized AutoScan)")
     logger.info("="*70)
     
     docking_results = {}
@@ -395,41 +468,145 @@ def phase4_biophysics_docking(
         logger.warning("No epistatic networks to dock")
         return docking_results
     
+    if project_root is None:
+        project_root = Path(__file__).parent.absolute()
+    
     try:
-        import re
-        bridge = AutoScanBridge()
+        logger.info(f"Using reference PDB: {default_pdb}")
+        logger.info(f"Ligand SMILES: {ligand_smiles[:50]}...")
         
-        for acc_gene, mut_list in epistasis_networks.items():
-            pdb_id = default_pdb
-            chain = "A"
-            
-            # Dynamically extract residue numbers from mutation strings
-            residues = []
-            for m in mut_list:
-                match = re.search(r'\d+', m)
-                if match:
-                    residues.append(int(match.group()))
-            
-            logger.info(f"Docking {acc_gene} ({pdb_id} chain {chain}) with {len(residues)} residues...")
-            
-            result = bridge.run_comparative_docking(
-                pdb_id=pdb_id,
-                chain=chain,
-                residues=residues,
-                ligand_smiles=ligand_smiles,
-                output_dir=output_dir / f"autoscan_{acc_gene.replace('|', '_')}/"
-            )
-            
-            if result:
-                docking_results[acc_gene] = result
-                logger.info(f"  [SUCCESS] DDG = {result['delta_delta_g']:.2f} kcal/mol")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # STEP A: Baseline docking (Wild-Type)
+        logger.info("")
+        logger.info("STEP A: Baseline Docking (Wild-Type)")
+        logger.info("-" * 70)
+        
+        wt_docking_dir = output_dir / "baseline"
+        wt_docking_dir.mkdir(parents=True, exist_ok=True)
+        
+        wt_cmd = [
+            "docker", "run", "--rm",
+            "-v", f"{project_root / 'data'}:/app/data",
+            "mutation-scan:latest",
+            "python", "-m", "autoscan.main", "dock",
+            "--receptor-pdb", default_pdb,
+            "--ligand-smiles", ligand_smiles,
+            "--center-x", "15.2",
+            "--center-y", "22.8",
+            "--center-z", "18.5",
+            "--output", "/app/data/results/biophysics/wt_baseline.json"
+        ]
+        
+        logger.info(f"Executing: docker run ... autoscan dock --receptor-pdb {default_pdb} ...")
+        
+        result = subprocess.run(
+            wt_cmd,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 min
+        )
+        
+        wt_affinity = None
+        if result.returncode == 0:
+            wt_output_file = project_root / "data" / "results" / "biophysics" / "wt_baseline.json"
+            if wt_output_file.exists():
+                with open(wt_output_file, 'r') as f:
+                    wt_data = json.load(f)
+                
+                # Extract affinity from JSON
+                if "consensus_affinity_kcal_mol" in wt_data:
+                    wt_affinity = float(wt_data["consensus_affinity_kcal_mol"])
+                elif "binding_affinity_kcal_mol" in wt_data:
+                    wt_affinity = float(wt_data["binding_affinity_kcal_mol"])
+                
+                if wt_affinity is not None:
+                    logger.info(f"✓ WT Binding Affinity: {wt_affinity:.2f} kcal/mol")
+                else:
+                    logger.warning("Could not extract WT affinity from JSON output")
             else:
-                logger.warning(f"  [FAILED] Docking failed for {acc_gene}")
+                logger.warning(f"Output file not found: {wt_output_file}")
+        else:
+            logger.error(f"Baseline docking failed: {result.stderr}")
+        
+        if wt_affinity is None:
+            logger.error("Failed to obtain WT binding affinity. Skipping mutant docking.")
+            return docking_results
+        
+        # STEP B: Mutant Docking (Top 5 Networks)
+        logger.info("")
+        logger.info("STEP B: Mutant Docking (Top 5 Networks)")
+        logger.info("-" * 70)
+        
+        for net_idx, (network_str, mut_list) in enumerate(epistasis_networks.items(), 1):
+            logger.info(f"\nNetwork {net_idx}: {network_str}")
+            
+            # Format mutations for AutoScan
+            formatted_mut = _format_for_autoscan(mut_list, chain="A")
+            logger.info(f"  Formatted: {formatted_mut}")
+            
+            # Execute mutant docking
+            mut_cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{project_root / 'data'}:/app/data",
+                "mutation-scan:latest",
+                "python", "-m", "autoscan.main", "dock",
+                "--receptor-pdb", default_pdb,
+                "--ligand-smiles", ligand_smiles,
+                "--center-x", "15.2",
+                "--center-y", "22.8",
+                "--center-z", "18.5",
+                "--mutation", formatted_mut,
+                "--minimize",
+                "--output", f"/app/data/results/biophysics/network_{net_idx}_mutant.json"
+            ]
+            
+            try:
+                result = subprocess.run(
+                    mut_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 min per mutant
+                )
+                
+                if result.returncode == 0:
+                    mut_output_file = project_root / "data" / "results" / "biophysics" / f"network_{net_idx}_mutant.json"
+                    if mut_output_file.exists():
+                        with open(mut_output_file, 'r') as f:
+                            mut_data = json.load(f)
+                        
+                        mutant_affinity = None
+                        if "consensus_affinity_kcal_mol" in mut_data:
+                            mutant_affinity = float(mut_data["consensus_affinity_kcal_mol"])
+                        elif "binding_affinity_kcal_mol" in mut_data:
+                            mutant_affinity = float(mut_data["binding_affinity_kcal_mol"])
+                        
+                        if mutant_affinity is not None:
+                            delta_delta_g = mutant_affinity - wt_affinity
+                            logger.info(f"  WT: {wt_affinity:.2f}, Mutant: {mutant_affinity:.2f}, ΔΔG: {delta_delta_g:+.2f} kcal/mol")
+                            
+                            docking_results[network_str] = {
+                                "wt_affinity": round(wt_affinity, 3),
+                                "mutant_affinity": round(mutant_affinity, 3),
+                                "delta_delta_g": round(delta_delta_g, 3)
+                            }
+                        else:
+                            logger.warning(f"  Could not extract mutant affinity from JSON")
+                    else:
+                        logger.warning(f"  Output file not found: {mut_output_file}")
+                else:
+                    logger.warning(f"  Docking failed for network {net_idx}: {result.stderr[:100]}")
+            
+            except subprocess.TimeoutExpired:
+                logger.warning(f"  Docking timed out for network {net_idx}")
+            except Exception as e:
+                logger.warning(f"  Error docking network {net_idx}: {e}")
     
     except Exception as e:
         logger.error(f"Biophysics docking phase failed: {e}", exc_info=True)
     
-    logger.info(f"[PHASE 4 COMPLETE] Docking analysis finished ({len(docking_results)} successes)")
+    logger.info(f"")
+    logger.info(f"[PHASE 4 COMPLETE] Docking analysis finished ({len(docking_results)}/{len(epistasis_networks)} networks)")
     
     return docking_results
 
@@ -490,50 +667,33 @@ def phase5_feature_aggregation(
         genomics_df.to_csv(genomics_output, index=False)
         logger.info(f"  Saved {len(genomics_df)} mutation records to {genomics_output}")
         
-        # CSV 2: Epistasis Networks
+        # CSV 2: Epistasis Networks (Top 5)
         logger.info("Generating 2_epistasis_networks.csv...")
         epistasis_records = []
         
-        for acc_gene, mut_list in epistasis_networks.items():
-            # Split acc_gene by "|"
-            parts = acc_gene.split("|", 1)
-            if len(parts) == 2:
-                accession, gene = parts
-            else:
-                accession = acc_gene
-                gene = "Unknown"
-            
-            # Join mutations with " + "
-            co_occurring_mutations = " + ".join(mut_list)
-            
+        for network_idx, (network_str, mut_list) in enumerate(epistasis_networks.items(), 1):
+            # network_str is already formatted as "K10R + I174V"
             epistasis_records.append({
-                "Accession": accession,
-                "Gene": gene,
-                "Co_occurring_Mutations": co_occurring_mutations,
+                "Network_Rank": network_idx,
+                "Gene_Network": network_str,
+                "Co_occurring_Mutations": network_str,
                 "Mutation_Count": len(mut_list)
             })
         
         epistasis_df = pd.DataFrame(epistasis_records)
         epistasis_output = output_dir / "2_epistasis_networks.csv"
         epistasis_df.to_csv(epistasis_output, index=False)
-        logger.info(f"  Saved {len(epistasis_df)} epistatic networks to {epistasis_output}")
+        logger.info(f"  Saved {len(epistasis_df)} top epistatic networks to {epistasis_output}")
         
-        # CSV 3: Biophysics Docking
+        # CSV 3: Biophysics Docking (Top 5 Networks)
         logger.info("Generating 3_biophysics_docking.csv...")
         docking_records = []
         
-        for acc_gene, affinity_dict in docking_results.items():
-            # Split acc_gene by "|"
-            parts = acc_gene.split("|", 1)
-            if len(parts) == 2:
-                accession, gene = parts
-            else:
-                accession = acc_gene
-                gene = "Unknown"
-            
+        for network_idx, (network_str, affinity_dict) in enumerate(docking_results.items(), 1):
+            # network_str is formatted as "K10R + I174V"
             docking_records.append({
-                "Accession": accession,
-                "Gene": gene,
+                "Network_Rank": network_idx,
+                "Network": network_str,
                 "WT_Affinity_kcalmol": affinity_dict.get("wt_affinity"),
                 "Mutant_Affinity_kcalmol": affinity_dict.get("mutant_affinity"),
                 "Delta_Delta_G_kcalmol": affinity_dict.get("delta_delta_g")
@@ -610,29 +770,13 @@ def run_master_pipeline(args) -> int:
             epistasis_input_dict = {}
 
             if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
-                # Data Cleaning & Alignment Filter
-                logger.info("Applying data cleaning and alignment quality filter...")
-                
-                # Drop useless columns
-                cols_to_keep = ['Accession', 'Gene', 'Mutation']
-                mutations_df = mutations_df[[c for c in cols_to_keep if c in mutations_df.columns]]
-                logger.info(f"Retained {len(cols_to_keep)} core columns")
-                
-                # Alignment Filter: Drop garbage assemblies (>20 mutations per gene)
-                mut_counts = mutations_df.groupby(['Accession', 'Gene']).size()
-                valid_groups = mut_counts[mut_counts <= 20].index
-                original_size = len(mutations_df)
-                mutations_df = mutations_df[mutations_df.set_index(['Accession', 'Gene']).index.isin(valid_groups)].reset_index(drop=True)
-                filtered_size = len(mutations_df)
-                logger.info(f"Alignment quality filter: retained {filtered_size}/{original_size} mutations")
-                
-                # Fix Dictionary Bug: Map by BOTH Accession and Gene
-                if 'Accession' in mutations_df.columns and 'Gene' in mutations_df.columns and 'Mutation' in mutations_df.columns:
-                    mutations_df['Acc_Gene'] = mutations_df['Accession'] + "|" + mutations_df['Gene']
+                # Mutations are already filtered in phase1_genomic_ingestion
+                # Create epistasis input dict with Acc_Gene composite keys
+                if 'Acc_Gene' in mutations_df.columns and 'Mutation' in mutations_df.columns:
                     epistasis_input_dict = mutations_df.groupby('Acc_Gene')['Mutation'].apply(list).to_dict()
-                    logger.info(f"Mapped mutations for {len(epistasis_input_dict)} genome-gene pairs")
+                    logger.info(f"Prepared epistasis input for {len(epistasis_input_dict)} genome-gene pairs")
                 else:
-                    logger.warning("Mutation DataFrame missing expected columns (Accession, Gene, Mutation)")
+                    logger.warning("Mutation DataFrame missing expected columns (Acc_Gene, Mutation)")
             else:
                 logger.warning("No mutation data available for epistasis analysis")
 
@@ -709,11 +853,13 @@ def run_master_pipeline(args) -> int:
 
         # PHASE 4: Biophysics Docking
         if args.start_phase <= 4:
+            project_root = Path(__file__).parent.absolute()
             docking_results = phase4_biophysics_docking(
                 epistasis_networks=epistasis_networks,
                 default_pdb=args.default_pdb,
                 ligand_smiles=args.drug_smiles,
-                output_dir=output_dir / "biophysics"
+                output_dir=output_dir / "biophysics",
+                project_root=project_root
             )
         else:
             logger.info("Skipping Phase 4 (Biophysics). Relying on cached data.")
