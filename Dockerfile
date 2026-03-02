@@ -53,8 +53,9 @@ WORKDIR /app
 COPY requirements.txt .
 # Pip will now gracefully skip the heavy packages and only install AutoScan
 # Use --no-deps for AutoScan since openmm is pre-installed via conda
+# AutoScan pinned to @main for deterministic production builds
 RUN pip install --no-cache-dir setuptools==69.5.1 wheel pbr typer && \
-    pip install --no-cache-dir --no-deps git+https://github.com/vihaankulkarni29/AutoScan.git && \
+    pip install --no-cache-dir --no-deps git+https://github.com/vihaankulkarni29/AutoScan.git@main && \
     pip install --no-cache-dir -r requirements.txt
 
 # 8. COPY APPLICATION ARCHITECTURE
