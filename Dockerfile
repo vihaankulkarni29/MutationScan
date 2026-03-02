@@ -10,8 +10,8 @@ USER root
 
 RUN apt-get update && apt-get install -y \
     curl wget bzip2 unzip zip \
-    libgl1-mesa-glx libegl1-mesa libxrandr2 libxss1 libxcursor1 libxcomposite1 \
-    libasound2 libxi6 libxtst6 \
+    libgl1 libegl1 libxrandr2 libxss1 libxcursor1 libxcomposite1 \
+    libasound2t64 libxi6 libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. INSTALL MINICONDA (Python 3.10 with conda-forge packages)
