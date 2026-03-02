@@ -52,7 +52,9 @@ RUN abricate --setupdb
 WORKDIR /app
 COPY requirements.txt .
 # Pip will now gracefully skip the heavy packages and only install AutoScan
+# Use --no-deps for AutoScan since openmm is pre-installed via conda
 RUN pip install --no-cache-dir setuptools==69.5.1 wheel pbr && \
+    pip install --no-cache-dir --no-deps git+https://github.com/vihaankulkarni29/AutoScan.git && \
     pip install --no-cache-dir -r requirements.txt
 
 # 8. COPY APPLICATION ARCHITECTURE
