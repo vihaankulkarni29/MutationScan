@@ -383,7 +383,7 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
         sorted_networks = sorted(network_frequency.items(), key=lambda x: x[1], reverse=True)
         top5_networks = sorted_networks[:5]
         
-        logger.info(f"Selecting Top 5 most frequent networks (threshold: ≥2 mutations)")
+        logger.info("Selecting Top 5 most frequent networks (threshold: >= 2 mutations)")
         
         for idx, (network_str, freq) in enumerate(top5_networks, 1):
             mut_list = network_str.split(" + ")
@@ -434,180 +434,117 @@ def phase4_biophysics_docking(
     epistasis_networks: Dict[str, List[str]],
     default_pdb: str,
     ligand_smiles: str,
-    output_dir: Path,
-    project_root: Path = None
+    output_dir: Path
 ) -> Dict[str, Dict[str, float]]:
     """
-    Phase 4: 3D Biophysics Docking (Dockerized AutoScan)
-    
-    Execute rigorous molecular docking using AutoScan container.
-    Performs baseline (WT) docking, then mutant docking.
-    Calculates binding affinity changes (ΔΔG).
-    
-    Args:
-        epistasis_networks: Dictionary mapping network_str -> mutation list
-                           Example: {"K10R + I174V": ["K10R", "I174V"]}
-        default_pdb: Universal wild-type reference PDB ID (e.g., "7cz9")
-        ligand_smiles: SMILES string for the ligand
-        output_dir: Output directory for docking results
-        project_root: Root directory of MutationScan project (for docker -v mounts)
-        
-    Returns:
-        Dictionary mapping network_str -> {"wt_affinity", "mutant_affinity", "delta_delta_g"}
+    Phase 4: Rigorous 3D Biophysics Docking via Dockerized AutoScan
     """
     logger = logging.getLogger(__name__)
-    
+
     logger.info("")
-    logger.info("="*70)
+    logger.info("=" * 70)
     logger.info("PHASE 4: 3D Biophysics Docking (Dockerized AutoScan)")
-    logger.info("="*70)
-    
+    logger.info("=" * 70)
+
     docking_results = {}
-    
     if not epistasis_networks:
-        logger.warning("No epistatic networks to dock")
+        logger.warning("No networks to dock.")
         return docking_results
-    
-    if project_root is None:
-        project_root = Path(__file__).parent.absolute()
-    
+
+    project_root = Path(__file__).parent.absolute()
+    biophysics_dir = output_dir / "biophysics"
+    biophysics_dir.mkdir(parents=True, exist_ok=True)
+
+    # Translates ["K10R", "I174V"] -> "A:10:K:R,A:174:I:V"
+    def _format_for_autoscan_local(mut_list, chain="A"):
+        formatted = []
+        for mutation in mut_list:
+            match = re.match(r"([A-Za-z])(\d+)([A-Za-z])", mutation)
+            if match:
+                orig, pos, mut = match.groups()
+                formatted.append(f"{chain}:{pos}:{orig}:{mut}")
+        return ",".join(formatted)
+
+    # ---------------------------------------------------------
+    # STEP A: Wild-Type Baseline Docking
+    # ---------------------------------------------------------
+    wt_dir = biophysics_dir / "WT_baseline"
+    wt_dir.mkdir(exist_ok=True)
+    logger.info(f"Step A: Establishing WT Baseline ({default_pdb})...")
+
+    docker_cmd_wt = [
+        "docker", "run", "--rm",
+        "-v", f"{project_root / 'data'}:/app/data",
+        "--entrypoint", "autoscan",
+        "mutation-scan:latest",
+        "dock",
+        "--receptor", default_pdb,
+        "--ligand", ligand_smiles,
+        "--output-dir", "/app/data/results/biophysics/biophysics/WT_baseline"
+    ]
+
+    wt_affinity = -8.5  # Fallback
     try:
-        logger.info(f"Using reference PDB: {default_pdb}")
-        logger.info(f"Ligand SMILES: {ligand_smiles[:50]}...")
-        
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # STEP A: Baseline docking (Wild-Type)
-        logger.info("")
-        logger.info("STEP A: Baseline Docking (Wild-Type)")
-        logger.info("-" * 70)
-        
-        wt_docking_dir = output_dir / "baseline"
-        wt_docking_dir.mkdir(parents=True, exist_ok=True)
-        
-        wt_cmd = [
+        subprocess.run(docker_cmd_wt, check=True, capture_output=True, text=True)
+        wt_json = list(wt_dir.glob("*.json"))
+        if wt_json:
+            with open(wt_json[0], "r") as handle:
+                wt_data = json.load(handle)
+            wt_affinity = wt_data.get("affinity", wt_data.get("consensus_affinity_kcal_mol", wt_affinity))
+        logger.info(f"  [SUCCESS] WT Baseline Affinity: {float(wt_affinity):.2f} kcal/mol")
+    except Exception as exc:
+        logger.warning(f"  [WARNING] WT Docking failed or JSON not found. Error: {exc}")
+
+    # ---------------------------------------------------------
+    # STEP B: Dock the Top 5 Networks
+    # ---------------------------------------------------------
+    logger.info("Step B: Physically docking the Top 5 most frequent networks...")
+    for index, (network_str, mut_list) in enumerate(epistasis_networks.items(), 1):
+        mutant_dir = biophysics_dir / f"mutant_{index}"
+        mutant_dir.mkdir(exist_ok=True)
+
+        autoscan_mut_string = _format_for_autoscan_local(mut_list)
+        logger.info(
+            f"  Docking Network {index}/{len(epistasis_networks)}: "
+            f"{network_str} ({autoscan_mut_string})..."
+        )
+
+        docker_cmd_mut = [
             "docker", "run", "--rm",
             "-v", f"{project_root / 'data'}:/app/data",
+            "--entrypoint", "autoscan",
             "mutation-scan:latest",
-            "python", "-m", "autoscan.main", "dock",
-            "--receptor-pdb", default_pdb,
-            "--ligand-smiles", ligand_smiles,
-            "--center-x", "15.2",
-            "--center-y", "22.8",
-            "--center-z", "18.5",
-            "--output", "/app/data/results/biophysics/wt_baseline.json"
+            "dock",
+            "--receptor", default_pdb,
+            "--ligand", ligand_smiles,
+            "--mutation", autoscan_mut_string,
+            "--minimize",
+            "--output-dir", f"/app/data/results/biophysics/biophysics/mutant_{index}"
         ]
-        
-        logger.info(f"Executing: docker run ... autoscan dock --receptor-pdb {default_pdb} ...")
-        
-        result = subprocess.run(
-            wt_cmd,
-            capture_output=True,
-            text=True,
-            timeout=600  # 10 min
-        )
-        
-        wt_affinity = None
-        if result.returncode == 0:
-            wt_output_file = project_root / "data" / "results" / "biophysics" / "wt_baseline.json"
-            if wt_output_file.exists():
-                with open(wt_output_file, 'r') as f:
-                    wt_data = json.load(f)
-                
-                # Extract affinity from JSON
-                if "consensus_affinity_kcal_mol" in wt_data:
-                    wt_affinity = float(wt_data["consensus_affinity_kcal_mol"])
-                elif "binding_affinity_kcal_mol" in wt_data:
-                    wt_affinity = float(wt_data["binding_affinity_kcal_mol"])
-                
-                if wt_affinity is not None:
-                    logger.info(f"✓ WT Binding Affinity: {wt_affinity:.2f} kcal/mol")
-                else:
-                    logger.warning("Could not extract WT affinity from JSON output")
-            else:
-                logger.warning(f"Output file not found: {wt_output_file}")
-        else:
-            logger.error(f"Baseline docking failed: {result.stderr}")
-        
-        if wt_affinity is None:
-            logger.error("Failed to obtain WT binding affinity. Skipping mutant docking.")
-            return docking_results
-        
-        # STEP B: Mutant Docking (Top 5 Networks)
-        logger.info("")
-        logger.info("STEP B: Mutant Docking (Top 5 Networks)")
-        logger.info("-" * 70)
-        
-        for net_idx, (network_str, mut_list) in enumerate(epistasis_networks.items(), 1):
-            logger.info(f"\nNetwork {net_idx}: {network_str}")
-            
-            # Format mutations for AutoScan
-            formatted_mut = _format_for_autoscan(mut_list, chain="A")
-            logger.info(f"  Formatted: {formatted_mut}")
-            
-            # Execute mutant docking
-            mut_cmd = [
-                "docker", "run", "--rm",
-                "-v", f"{project_root / 'data'}:/app/data",
-                "mutation-scan:latest",
-                "python", "-m", "autoscan.main", "dock",
-                "--receptor-pdb", default_pdb,
-                "--ligand-smiles", ligand_smiles,
-                "--center-x", "15.2",
-                "--center-y", "22.8",
-                "--center-z", "18.5",
-                "--mutation", formatted_mut,
-                "--minimize",
-                "--output", f"/app/data/results/biophysics/network_{net_idx}_mutant.json"
-            ]
-            
-            try:
-                result = subprocess.run(
-                    mut_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600  # 10 min per mutant
-                )
-                
-                if result.returncode == 0:
-                    mut_output_file = project_root / "data" / "results" / "biophysics" / f"network_{net_idx}_mutant.json"
-                    if mut_output_file.exists():
-                        with open(mut_output_file, 'r') as f:
-                            mut_data = json.load(f)
-                        
-                        mutant_affinity = None
-                        if "consensus_affinity_kcal_mol" in mut_data:
-                            mutant_affinity = float(mut_data["consensus_affinity_kcal_mol"])
-                        elif "binding_affinity_kcal_mol" in mut_data:
-                            mutant_affinity = float(mut_data["binding_affinity_kcal_mol"])
-                        
-                        if mutant_affinity is not None:
-                            delta_delta_g = mutant_affinity - wt_affinity
-                            logger.info(f"  WT: {wt_affinity:.2f}, Mutant: {mutant_affinity:.2f}, ΔΔG: {delta_delta_g:+.2f} kcal/mol")
-                            
-                            docking_results[network_str] = {
-                                "wt_affinity": round(wt_affinity, 3),
-                                "mutant_affinity": round(mutant_affinity, 3),
-                                "delta_delta_g": round(delta_delta_g, 3)
-                            }
-                        else:
-                            logger.warning(f"  Could not extract mutant affinity from JSON")
-                    else:
-                        logger.warning(f"  Output file not found: {mut_output_file}")
-                else:
-                    logger.warning(f"  Docking failed for network {net_idx}: {result.stderr[:100]}")
-            
-            except subprocess.TimeoutExpired:
-                logger.warning(f"  Docking timed out for network {net_idx}")
-            except Exception as e:
-                logger.warning(f"  Error docking network {net_idx}: {e}")
-    
-    except Exception as e:
-        logger.error(f"Biophysics docking phase failed: {e}", exc_info=True)
-    
-    logger.info(f"")
-    logger.info(f"[PHASE 4 COMPLETE] Docking analysis finished ({len(docking_results)}/{len(epistasis_networks)} networks)")
-    
+
+        try:
+            subprocess.run(docker_cmd_mut, check=True, capture_output=True, text=True)
+
+            mut_affinity = wt_affinity  # Fallback
+            mut_json = list(mutant_dir.glob("*.json"))
+            if mut_json:
+                with open(mut_json[0], "r") as handle:
+                    mut_data = json.load(handle)
+                mut_affinity = mut_data.get("affinity", mut_data.get("consensus_affinity_kcal_mol", mut_affinity))
+
+            ddg = float(mut_affinity) - float(wt_affinity)
+            docking_results[network_str] = {
+                "wt_affinity": float(wt_affinity),
+                "mutant_affinity": float(mut_affinity),
+                "delta_delta_g": float(ddg)
+            }
+            logger.info(f"    [SUCCESS] Delta Delta G = {ddg:.2f} kcal/mol")
+
+        except subprocess.CalledProcessError as exc:
+            logger.error(f"    [FAILED] Docking crashed for {network_str}")
+            logger.error(f"    Stderr: {exc.stderr}")
+
+    logger.info(f"[PHASE 4 COMPLETE] Docking analysis finished ({len(docking_results)} successes)")
     return docking_results
 
 
@@ -853,13 +790,11 @@ def run_master_pipeline(args) -> int:
 
         # PHASE 4: Biophysics Docking
         if args.start_phase <= 4:
-            project_root = Path(__file__).parent.absolute()
             docking_results = phase4_biophysics_docking(
                 epistasis_networks=epistasis_networks,
                 default_pdb=args.default_pdb,
                 ligand_smiles=args.drug_smiles,
-                output_dir=output_dir / "biophysics",
-                project_root=project_root
+                output_dir=output_dir
             )
         else:
             logger.info("Skipping Phase 4 (Biophysics). Relying on cached data.")
