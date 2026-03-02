@@ -14,17 +14,15 @@ RUN apt-get update && apt-get install -y \
     libasound2t64 libxi6 libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. INSTALL MINICONDA (Python 3.10 with conda-forge packages)
+# 2. INSTALL MINICONDA
 ENV CONDA_DIR=/opt/conda
-
 RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
     /bin/bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh
 
-ENV PATH=$CONDA_DIR/bin:$PATH
-
-# 3. INSTALL NATIVE BIOPHYSICS STACK (OpenMM, Vina, OpenBabel, PyMOL)
-RUN conda install --override-channels -c conda-forge python=3.10 openbabel vina pymol -y
+# 3. INSTALL BIOPHYSICS STACK (Isolated Environment)
+RUN /opt/conda/bin/conda create -n biophysics --override-channels -c conda-forge python=3.10 openbabel vina pymol-open-source openmm pdbfixer pandas -y
+ENV PATH=/opt/conda/envs/biophysics/bin:$CONDA_DIR/bin:$PATH
 
 # 4. INSTALL NCBI DATASETS CLI
 RUN curl -L -o /usr/local/bin/datasets \
