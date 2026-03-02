@@ -620,7 +620,18 @@ def run_master_pipeline(args) -> int:
             if args.genome:
                 sample_id = Path(args.genome).stem
         else:
-            logger.info("Skipping Phase 1 (Genomics). Relying on cached data.")
+            logger.info("Skipping Phase 1 (Genomics). Loading cached mutation data...")
+            mutation_file = output_dir / "mutation_report.csv"
+            if mutation_file.exists():
+                try:
+                    mutations_df = pd.read_csv(mutation_file)
+                    logger.info(f"Loaded {len(mutations_df)} mutations from {mutation_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load mutations from {mutation_file}: {e}")
+                    mutations_df = pd.DataFrame()
+            else:
+                logger.warning(f"Mutation cache not found: {mutation_file}")
+                mutations_df = pd.DataFrame()
 
         # PHASE 2: Expression Analysis
         if args.start_phase <= 2:
@@ -628,7 +639,18 @@ def run_master_pipeline(args) -> int:
                 expression_file=Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
             )
         else:
-            logger.info("Skipping Phase 2 (Expression). Relying on cached data.")
+            logger.info("Skipping Phase 2 (Expression). Loading cached expression scores...")
+            expression_file = Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
+            if expression_file.exists():
+                try:
+                    expression_scores = phase2_expression_analysis(expression_file=expression_file)
+                    logger.info(f"Loaded expression scores from {expression_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load expression scores from {expression_file}: {e}")
+                    expression_scores = {}
+            else:
+                logger.warning(f"Expression score cache not found: {expression_file}")
+                expression_scores = {}
 
         # PHASE 3: Epistasis Detection
         if args.start_phase <= 3:
@@ -644,7 +666,20 @@ def run_master_pipeline(args) -> int:
                 epistasis_data=epistasis_data_dict
             )
         else:
-            logger.info("Skipping Phase 3 (Epistasis). Relying on cached data.")
+            logger.info("Skipping Phase 3 (Epistasis). Loading cached epistasis networks...")
+            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
+            if not epistasis_file.exists():
+                logger.warning(f"Epistasis cache not found: {epistasis_file}")
+                epistasis_networks = {}
+            else:
+                try:
+                    with open(epistasis_file, "r") as f:
+                        epistasis_data_dict = json.load(f)
+                    epistasis_networks = phase3_epistasis_detection(epistasis_data=epistasis_data_dict)
+                    logger.info(f"Loaded epistasis networks from {epistasis_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load epistasis networks from {epistasis_file}: {e}")
+                    epistasis_networks = {}
 
         # PHASE 4: Biophysics Docking
         if args.start_phase <= 4:
