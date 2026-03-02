@@ -694,70 +694,102 @@ def run_master_pipeline(args) -> int:
         logger.info("+" + "="*68 + "+")
         logger.info(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        # PHASE 1: Genomic Ingestion
-        if args.start_phase <= 1:
-            mutations_df, proteins_dir, refs_dir, genomes_dir = phase1_genomic_ingestion(
-                args=args,
-                target_genes=None,  # Can be extended from args
-                output_dir=output_dir
-            )
+        # PHASES 1 & 2: Conditionally execute or load from cache
+        if not args.resume_epistasis:
+            # PHASE 1: Genomic Ingestion
+            if args.start_phase <= 1:
+                mutations_df, proteins_dir, refs_dir, genomes_dir = phase1_genomic_ingestion(
+                    args=args,
+                    target_genes=None,  # Can be extended from args
+                    output_dir=output_dir
+                )
 
-            # Convert mutations DataFrame to epistasis input format for Phase 3
-            logger.info("Converting mutation data to epistasis analysis format...")
-            epistasis_input_dict = {}
+                # Convert mutations DataFrame to epistasis input format for Phase 3
+                logger.info("Converting mutation data to epistasis analysis format...")
+                epistasis_input_dict = {}
 
-            if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
-                # Mutations are already filtered in phase1_genomic_ingestion
-                # Create epistasis input dict with Acc_Gene composite keys
-                if 'Acc_Gene' in mutations_df.columns and 'Mutation' in mutations_df.columns:
-                    epistasis_input_dict = mutations_df.groupby('Acc_Gene')['Mutation'].apply(list).to_dict()
-                    logger.info(f"Prepared epistasis input for {len(epistasis_input_dict)} genome-gene pairs")
+                if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
+                    # Mutations are already filtered in phase1_genomic_ingestion
+                    # Create epistasis input dict with Acc_Gene composite keys
+                    if 'Acc_Gene' in mutations_df.columns and 'Mutation' in mutations_df.columns:
+                        epistasis_input_dict = mutations_df.groupby('Acc_Gene')['Mutation'].apply(list).to_dict()
+                        logger.info(f"Prepared epistasis input for {len(epistasis_input_dict)} genome-gene pairs")
+                    else:
+                        logger.warning("Mutation DataFrame missing expected columns (Acc_Gene, Mutation)")
                 else:
-                    logger.warning("Mutation DataFrame missing expected columns (Acc_Gene, Mutation)")
+                    logger.warning("No mutation data available for epistasis analysis")
+
+                # Save epistasis input for Phase 3
+                epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
+                epistasis_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(epistasis_file, 'w') as f:
+                    json.dump({"genomes": epistasis_input_dict}, f, indent=2)
+                logger.info(f"Saved epistasis input to {epistasis_file}")
+
+                if args.genome:
+                    sample_id = Path(args.genome).stem
             else:
-                logger.warning("No mutation data available for epistasis analysis")
+                logger.info("Skipping Phase 1 (Genomics). Loading cached mutation data...")
+                mutation_file = output_dir / "mutation_report.csv"
+                if mutation_file.exists():
+                    try:
+                        mutations_df = pd.read_csv(mutation_file)
+                        logger.info(f"Loaded {len(mutations_df)} mutations from {mutation_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load mutations from {mutation_file}: {e}")
+                        mutations_df = pd.DataFrame()
+                else:
+                    logger.warning(f"Mutation cache not found: {mutation_file}")
+                    mutations_df = pd.DataFrame()
 
-            # Save epistasis input for Phase 3
-            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
-            epistasis_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(epistasis_file, 'w') as f:
-                json.dump({"genomes": epistasis_input_dict}, f, indent=2)
-            logger.info(f"Saved epistasis input to {epistasis_file}")
-
-            if args.genome:
-                sample_id = Path(args.genome).stem
+            # PHASE 2: Expression Analysis
+            if args.start_phase <= 2:
+                expression_scores = phase2_expression_analysis(
+                    expression_file=Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
+                )
+            else:
+                logger.info("Skipping Phase 2 (Expression). Loading cached expression scores...")
+                expression_file = Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
+                if expression_file.exists():
+                    try:
+                        expression_scores = phase2_expression_analysis(expression_file=expression_file)
+                        logger.info(f"Loaded expression scores from {expression_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load expression scores from {expression_file}: {e}")
+                        expression_scores = {}
+                else:
+                    logger.warning(f"Expression score cache not found: {expression_file}")
+                    expression_scores = {}
         else:
-            logger.info("Skipping Phase 1 (Genomics). Loading cached mutation data...")
-            mutation_file = output_dir / "mutation_report.csv"
-            if mutation_file.exists():
+            # Fast-resume: Skip Phases 1 and 2, load interim cached data directly
+            logger.info("Resuming pipeline directly from Phase 3 using cached interim data...")
+            
+            # Load epistasis input
+            epistasis_input_dict = {}
+            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
+            if epistasis_file.exists():
                 try:
-                    mutations_df = pd.read_csv(mutation_file)
-                    logger.info(f"Loaded {len(mutations_df)} mutations from {mutation_file}")
+                    with open(epistasis_file, 'r') as f:
+                        epistasis_data = json.load(f)
+                    epistasis_input_dict = epistasis_data.get("genomes", {})
+                    logger.info(f"Loaded epistasis input from {epistasis_file}")
                 except Exception as e:
-                    logger.warning(f"Failed to load mutations from {mutation_file}: {e}")
+                    logger.warning(f"Failed to load epistasis data from {epistasis_file}: {e}")
+            else:
+                logger.warning(f"Epistasis file not found: {epistasis_file}")
+            
+            # Load genomics report (needed for Phase 5)
+            genomics_file = Path("data/results/1_genomics_report.csv")
+            if genomics_file.exists():
+                try:
+                    mutations_df = pd.read_csv(genomics_file)
+                    logger.info(f"Loaded {len(mutations_df)} mutations from genomics report")
+                except Exception as e:
+                    logger.warning(f"Failed to load genomics report from {genomics_file}: {e}")
                     mutations_df = pd.DataFrame()
             else:
-                logger.warning(f"Mutation cache not found: {mutation_file}")
+                logger.warning(f"Genomics report not found: {genomics_file}")
                 mutations_df = pd.DataFrame()
-
-        # PHASE 2: Expression Analysis
-        if args.start_phase <= 2:
-            expression_scores = phase2_expression_analysis(
-                expression_file=Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
-            )
-        else:
-            logger.info("Skipping Phase 2 (Expression). Loading cached expression scores...")
-            expression_file = Path(args.expression_file) if args.expression_file else Path("data/expression_scores.json")
-            if expression_file.exists():
-                try:
-                    expression_scores = phase2_expression_analysis(expression_file=expression_file)
-                    logger.info(f"Loaded expression scores from {expression_file}")
-                except Exception as e:
-                    logger.warning(f"Failed to load expression scores from {expression_file}: {e}")
-                    expression_scores = {}
-            else:
-                logger.warning(f"Expression score cache not found: {expression_file}")
-                expression_scores = {}
 
         # PHASE 3: Epistasis Detection
         if args.start_phase <= 3:
@@ -963,6 +995,12 @@ Examples:
         default=1,
         choices=[1, 2, 3, 4, 5],
         help='Which phase to start execution from. Use 3 to skip Genomics and go straight to Epistasis.'
+    )
+
+    parser.add_argument(
+        '--resume-epistasis',
+        action='store_true',
+        help='Skip Phases 1 and 2, load interim data, and start directly from Phase 3.'
     )
     
     parser.add_argument(
