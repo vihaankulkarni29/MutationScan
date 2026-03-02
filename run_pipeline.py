@@ -310,17 +310,18 @@ def phase2_expression_analysis(expression_file: Path) -> Dict[str, float]:
     return expression_scores
 
 
-def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[int]]:
+def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
     """
     Phase 3: Epistasis Network Detection
     
     Load pre-computed epistatic mutation networks.
     
     Args:
-        epistasis_data: Loaded epistasis input dictionary
+        epistasis_data: Loaded epistasis input dictionary with keys like "GCF_051448695.1|oqxB"
+                       and values as mutation string lists (e.g., ["K10R", "I174V"])
         
     Returns:
-        Dictionary mapping gene_name -> list of residue numbers
+        Dictionary mapping acc_gene ("Accession|Gene") -> list of mutation strings
     """
     logger = logging.getLogger(__name__)
     
@@ -335,31 +336,20 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[int]]:
         data = epistasis_data
         genomes_data = data.get("genomes", {})
 
-        if isinstance(genomes_data, dict):
-            genome_iterable = [genomes_data]
-        elif isinstance(genomes_data, list):
-            genome_iterable = genomes_data
-        else:
-            logger.warning("Unexpected epistasis input format for 'genomes'; expected dict or list")
+        if not isinstance(genomes_data, dict):
+            logger.warning("Unexpected epistasis input format for 'genomes'; expected dict")
             logger.info("No epistatic networks to analyze")
             return epistasis_networks
         
-        # Parse epistasis data (expected format from MutationScan)
-        for genome in genome_iterable:
-            if not isinstance(genome, dict):
+        # Parse epistasis data (keys are "Accession|Gene", values are mutation string lists)
+        for acc_gene, mutations in genomes_data.items():
+            if not isinstance(mutations, list):
                 continue
-            for gene, mutations in genome.items():
-                if gene not in epistasis_networks:
-                    import re
-                    positions = []
-                    for mutation in mutations:
-                        match = re.search(r'\d+', mutation)
-                        if match:
-                            positions.append(int(match.group()))
-                    
-                    if positions:
-                        epistasis_networks[gene] = sorted(list(set(positions)))
-                        logger.info(f"Found network for {gene}: residues {positions}")
+            
+            # Only add to network if there are at least 2 mutations (epistatic co-occurrence)
+            if len(mutations) >= 2:
+                epistasis_networks[acc_gene] = mutations
+                logger.info(f"Found epistatic network for {acc_gene}: {', '.join(mutations[:5])}{'...' if len(mutations) > 5 else ''}")
         
         logger.info(f"Identified {len(epistasis_networks)} epistatic networks")
         
@@ -373,7 +363,7 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[int]]:
 
 
 def phase4_biophysics_docking(
-    epistasis_networks: Dict[str, List[int]],
+    epistasis_networks: Dict[str, List[str]],
     default_pdb: str,
     ligand_smiles: str,
     output_dir: Path
@@ -384,13 +374,13 @@ def phase4_biophysics_docking(
     Calculate binding affinity changes (ΔΔG) for epistatic networks.
     
     Args:
-        epistasis_networks: Dictionary mapping gene -> residue list
+        epistasis_networks: Dictionary mapping acc_gene ("Accession|Gene") -> mutation string list
         default_pdb: Universal wild-type reference PDB ID
         ligand_smiles: SMILES string for the ligand
         output_dir: Output directory for docking results
         
     Returns:
-        Dictionary mapping gene -> {"wt_affinity", "mutant_affinity", "delta_delta_g"}
+        Dictionary mapping acc_gene -> {"wt_affinity", "mutant_affinity", "delta_delta_g"}
     """
     logger = logging.getLogger(__name__)
     
@@ -406,27 +396,35 @@ def phase4_biophysics_docking(
         return docking_results
     
     try:
+        import re
         bridge = AutoScanBridge()
         
-        for gene, residues in epistasis_networks.items():
+        for acc_gene, mut_list in epistasis_networks.items():
             pdb_id = default_pdb
             chain = "A"
             
-            logger.info(f"Docking {gene} ({pdb_id} chain {chain}) with residues {residues}...")
+            # Dynamically extract residue numbers from mutation strings
+            residues = []
+            for m in mut_list:
+                match = re.search(r'\d+', m)
+                if match:
+                    residues.append(int(match.group()))
+            
+            logger.info(f"Docking {acc_gene} ({pdb_id} chain {chain}) with {len(residues)} residues...")
             
             result = bridge.run_comparative_docking(
                 pdb_id=pdb_id,
                 chain=chain,
                 residues=residues,
                 ligand_smiles=ligand_smiles,
-                output_dir=output_dir / f"autoscan_{gene}/"
+                output_dir=output_dir / f"autoscan_{acc_gene.replace('|', '_')}/"
             )
             
             if result:
-                docking_results[gene] = result
+                docking_results[acc_gene] = result
                 logger.info(f"  [SUCCESS] DDG = {result['delta_delta_g']:.2f} kcal/mol")
             else:
-                logger.warning(f"  [FAILED] Docking failed for {gene}")
+                logger.warning(f"  [FAILED] Docking failed for {acc_gene}")
     
     except Exception as e:
         logger.error(f"Biophysics docking phase failed: {e}", exc_info=True)
@@ -441,120 +439,131 @@ def phase5_feature_aggregation(
     species: str,
     mutations_df: pd.DataFrame,
     expression_scores: Dict[str, float],
-    epistasis_networks: Dict[str, List[int]],
+    epistasis_networks: Dict[str, List[str]],
     docking_results: Dict[str, Dict[str, float]],
-    output_file: Path
-) -> pd.DataFrame:
+    output_dir: Path,
+    default_pdb: str
+) -> bool:
     """
     Phase 5: Feature Aggregation
     
-    Consolidate genomic, expression, and biophysical features into a
-    final engineered feature CSV for downstream statistical modeling.
-    
-    Schema:
-    - Sample_ID: Unique genome identifier
-    - Species: Organism name
-    - Gene: Target gene name
-    - Core_Mutations: Epistatic residue triad (comma-separated)
-    - Inferred_Expression_Score: Expression level from ControlScan
-    - WT_Affinity: Wild-type binding affinity (kcal/mol)
-    - Mutant_Affinity: Mutant binding affinity (kcal/mol)
-    - Delta_Delta_G: Binding affinity change (mutant - WT)
-    - Mutation_Count: Number of detected mutations in this gene
+    Split pipeline output into 3 clean, relational CSV tables:
+    - 1_genomics_report.csv: Core mutation data with reference PDB
+    - 2_epistasis_networks.csv: Co-occurring mutation networks
+    - 3_biophysics_docking.csv: Binding affinity calculations
     
     Args:
         sample_id: Unique identifier for this genome
         species: Species name (e.g., "Klebsiella pneumoniae")
-        mutations_df: DataFrame from mutation calling
+        mutations_df: DataFrame from mutation calling (with Acc_Gene column)
         expression_scores: Dict mapping gene -> expression score
-        epistasis_networks: Dict mapping gene -> residue list
-        docking_results: Dict mapping gene -> affinity dict
-        output_file: Path to save final features CSV
+        epistasis_networks: Dict mapping acc_gene -> mutation string list
+        docking_results: Dict mapping acc_gene -> affinity dict
+        output_dir: Directory to save the 3 CSV files
+        default_pdb: Default PDB reference for all genes
         
     Returns:
-        Aggregated DataFrame
+        True if successful
     """
     logger = logging.getLogger(__name__)
     
     logger.info("")
     logger.info("="*70)
-    logger.info("PHASE 5: Feature Aggregation")
+    logger.info("PHASE 5: Feature Aggregation (3-Table Output)")
     logger.info("="*70)
     
-    records = []
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Aggregate data by gene
-    unique_genes = set()
-    if not mutations_df.empty and 'Gene' in mutations_df.columns:
-        unique_genes.update(mutations_df['Gene'].unique())
-    unique_genes.update(epistasis_networks.keys())
-    unique_genes.update(expression_scores.keys())
-    unique_genes.update(docking_results.keys())
-    
-    for gene in sorted(unique_genes):
-        record = {
-            "Sample_ID": sample_id,
-            "Species": species,
-            "Gene": gene,
-            "Core_Mutations": ",".join(map(str, epistasis_networks.get(gene, []))),
-            "Inferred_Expression_Score": expression_scores.get(gene, 1.0),
-            "Mutation_Count": len(mutations_df[mutations_df['Gene'] == gene]) if not mutations_df.empty else 0,
-        }
+    try:
+        # CSV 1: Genomics Report (mutations_df with Ref_PDB)
+        logger.info("Generating 1_genomics_report.csv...")
+        genomics_df = mutations_df.copy()
         
-        # Add docking results if available
-        if gene in docking_results:
-            dock = docking_results[gene]
-            record.update({
-                "WT_Affinity_kcalmol": dock.get("wt_affinity"),
-                "Mutant_Affinity_kcalmol": dock.get("mutant_affinity"),
-                "Delta_Delta_G_kcalmol": dock.get("delta_delta_g"),
-            })
-        else:
-            record.update({
-                "WT_Affinity_kcalmol": None,
-                "Mutant_Affinity_kcalmol": None,
-                "Delta_Delta_G_kcalmol": None,
+        # Drop temporary Acc_Gene column if present
+        if 'Acc_Gene' in genomics_df.columns:
+            genomics_df = genomics_df.drop(columns=['Acc_Gene'])
+        
+        # Add Ref_PDB column
+        genomics_df['Ref_PDB'] = default_pdb
+        
+        genomics_output = output_dir / "1_genomics_report.csv"
+        genomics_df.to_csv(genomics_output, index=False)
+        logger.info(f"  Saved {len(genomics_df)} mutation records to {genomics_output}")
+        
+        # CSV 2: Epistasis Networks
+        logger.info("Generating 2_epistasis_networks.csv...")
+        epistasis_records = []
+        
+        for acc_gene, mut_list in epistasis_networks.items():
+            # Split acc_gene by "|"
+            parts = acc_gene.split("|", 1)
+            if len(parts) == 2:
+                accession, gene = parts
+            else:
+                accession = acc_gene
+                gene = "Unknown"
+            
+            # Join mutations with " + "
+            co_occurring_mutations = " + ".join(mut_list)
+            
+            epistasis_records.append({
+                "Accession": accession,
+                "Gene": gene,
+                "Co_occurring_Mutations": co_occurring_mutations,
+                "Mutation_Count": len(mut_list)
             })
         
-        records.append(record)
-    
-    # Create DataFrame
-    features_df = pd.DataFrame(records)
-    
-    # Sort by Delta_Delta_G (most significant changes first)
-    if "Delta_Delta_G_kcalmol" in features_df.columns:
-        features_df = features_df.sort_values(
-            by="Delta_Delta_G_kcalmol",
-            ascending=True,  # Most negative (strongest improvement) first
-            na_position='last'
-        )
-    
-    # Append to existing file or create new
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    
-    if output_file.exists():
-        logger.info(f"Appending to existing feature file: {output_file}")
-        existing_df = pd.read_csv(output_file)
-        features_df = pd.concat([existing_df, features_df], ignore_index=True)
-    else:
-        logger.info(f"Creating new feature file: {output_file}")
-    
-    # Save to CSV
-    features_df.to_csv(output_file, index=False)
-    logger.info(f"Saved {len(records)} feature rows to {output_file}")
-    
-    # Log summary statistics
-    logger.info("DDG Statistics:")
-    if 'Delta_Delta_G_kcalmol' in features_df.columns and not features_df['Delta_Delta_G_kcalmol'].dropna().empty:
-        ddg_stats = features_df['Delta_Delta_G_kcalmol'].describe()
-        mean_val = ddg_stats.get('mean', 0.0)
-        logger.info(f"  Mean: {mean_val:.2f} kcal/mol")
-    else:
-        logger.info("  No DDG data available to calculate statistics.")
-    
-    logger.info("[PHASE 5 COMPLETE] Feature aggregation finished")
-    
-    return features_df
+        epistasis_df = pd.DataFrame(epistasis_records)
+        epistasis_output = output_dir / "2_epistasis_networks.csv"
+        epistasis_df.to_csv(epistasis_output, index=False)
+        logger.info(f"  Saved {len(epistasis_df)} epistatic networks to {epistasis_output}")
+        
+        # CSV 3: Biophysics Docking
+        logger.info("Generating 3_biophysics_docking.csv...")
+        docking_records = []
+        
+        for acc_gene, affinity_dict in docking_results.items():
+            # Split acc_gene by "|"
+            parts = acc_gene.split("|", 1)
+            if len(parts) == 2:
+                accession, gene = parts
+            else:
+                accession = acc_gene
+                gene = "Unknown"
+            
+            docking_records.append({
+                "Accession": accession,
+                "Gene": gene,
+                "WT_Affinity_kcalmol": affinity_dict.get("wt_affinity"),
+                "Mutant_Affinity_kcalmol": affinity_dict.get("mutant_affinity"),
+                "Delta_Delta_G_kcalmol": affinity_dict.get("delta_delta_g")
+            })
+        
+        docking_df = pd.DataFrame(docking_records)
+        docking_output = output_dir / "3_biophysics_docking.csv"
+        docking_df.to_csv(docking_output, index=False)
+        logger.info(f"  Saved {len(docking_df)} docking results to {docking_output}")
+        
+        # Log summary statistics
+        logger.info("")
+        logger.info("Summary Statistics:")
+        logger.info(f"  Total Mutations: {len(genomics_df)}")
+        logger.info(f"  Epistatic Networks: {len(epistasis_df)}")
+        logger.info(f"  Docking Calculations: {len(docking_df)}")
+        
+        if not docking_df.empty and 'Delta_Delta_G_kcalmol' in docking_df.columns:
+            ddg_mean = docking_df['Delta_Delta_G_kcalmol'].mean()
+            ddg_std = docking_df['Delta_Delta_G_kcalmol'].std()
+            logger.info(f"  DDG Mean: {ddg_mean:.2f} ± {ddg_std:.2f} kcal/mol")
+        
+        logger.info("[PHASE 5 COMPLETE] Feature aggregation finished")
+        logger.info("")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Phase 5 aggregation failed: {e}", exc_info=True)
+        return False
 
 
 def run_master_pipeline(args) -> int:
@@ -601,12 +610,29 @@ def run_master_pipeline(args) -> int:
             epistasis_input_dict = {}
 
             if isinstance(mutations_df, pd.DataFrame) and not mutations_df.empty:
-                # Convert flat mutation list to genome-mapped dictionary
-                if 'Accession' in mutations_df.columns and 'Mutation' in mutations_df.columns:
-                    epistasis_input_dict = mutations_df.groupby('Accession')['Mutation'].apply(list).to_dict()
-                    logger.info(f"Mapped mutations for {len(epistasis_input_dict)} genomes")
+                # Data Cleaning & Alignment Filter
+                logger.info("Applying data cleaning and alignment quality filter...")
+                
+                # Drop useless columns
+                cols_to_keep = ['Accession', 'Gene', 'Mutation']
+                mutations_df = mutations_df[[c for c in cols_to_keep if c in mutations_df.columns]]
+                logger.info(f"Retained {len(cols_to_keep)} core columns")
+                
+                # Alignment Filter: Drop garbage assemblies (>20 mutations per gene)
+                mut_counts = mutations_df.groupby(['Accession', 'Gene']).size()
+                valid_groups = mut_counts[mut_counts <= 20].index
+                original_size = len(mutations_df)
+                mutations_df = mutations_df[mutations_df.set_index(['Accession', 'Gene']).index.isin(valid_groups)].reset_index(drop=True)
+                filtered_size = len(mutations_df)
+                logger.info(f"Alignment quality filter: retained {filtered_size}/{original_size} mutations")
+                
+                # Fix Dictionary Bug: Map by BOTH Accession and Gene
+                if 'Accession' in mutations_df.columns and 'Gene' in mutations_df.columns and 'Mutation' in mutations_df.columns:
+                    mutations_df['Acc_Gene'] = mutations_df['Accession'] + "|" + mutations_df['Gene']
+                    epistasis_input_dict = mutations_df.groupby('Acc_Gene')['Mutation'].apply(list).to_dict()
+                    logger.info(f"Mapped mutations for {len(epistasis_input_dict)} genome-gene pairs")
                 else:
-                    logger.warning("Mutation DataFrame missing expected columns (Accession, Mutation)")
+                    logger.warning("Mutation DataFrame missing expected columns (Accession, Gene, Mutation)")
             else:
                 logger.warning("No mutation data available for epistasis analysis")
 
@@ -692,17 +718,22 @@ def run_master_pipeline(args) -> int:
         else:
             logger.info("Skipping Phase 4 (Biophysics). Relying on cached data.")
 
-        # PHASE 5: Feature Aggregation (NO MACHINE LEARNING)
+        # PHASE 5: Feature Aggregation (3-Table Output)
         if args.start_phase <= 5:
-            features_df = phase5_feature_aggregation(
+            success = phase5_feature_aggregation(
                 sample_id=sample_id,
                 species=args.organism or "Unknown",
                 mutations_df=mutations_df,
                 expression_scores=expression_scores,
                 epistasis_networks=epistasis_networks,
                 docking_results=docking_results,
-                output_file=Path("data/results/final_engineered_features.csv")
+                output_dir=Path("data/results"),
+                default_pdb=args.default_pdb
             )
+            
+            if not success:
+                logger.error("Phase 5 aggregation failed")
+                return 1
         else:
             logger.info("Skipping Phase 5 (Feature Aggregation). Relying on cached data.")
         
@@ -711,8 +742,10 @@ def run_master_pipeline(args) -> int:
         logger.info("+" + "="*68 + "+")
         logger.info("|" + " "*20 + "[SUCCESS] PIPELINE COMPLETE" + " "*21 + "|")
         logger.info("|" + " "*68 + "|")
-        logger.info("|  Final biophysical and genomic features saved to:" + " "*16 + "|")
-        logger.info("|  data/results/final_engineered_features.csv" + " "*24 + "|")
+        logger.info("|  Final outputs saved to data/results/:" + " "*27 + "|")
+        logger.info("|    - 1_genomics_report.csv (mutation data)" + " "*24 + "|")
+        logger.info("|    - 2_epistasis_networks.csv (co-occurring mutations)" + " "*11 + "|")
+        logger.info("|    - 3_biophysics_docking.csv (binding affinities)" + " "*14 + "|")
         logger.info("|" + " "*68 + "|")
         logger.info("|  Ready for downstream statistical modeling." + " "*24 + "|")
         logger.info("+" + "="*68 + "+")
