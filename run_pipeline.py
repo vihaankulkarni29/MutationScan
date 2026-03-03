@@ -561,7 +561,7 @@ def phase4_biophysics_docking(
 
     wt_affinity = -8.5  # Fallback
     try:
-        subprocess.run(docker_cmd_wt, check=True, capture_output=True, text=True)
+        subprocess.run(docker_cmd_wt, check=True)
         wt_json = list(wt_dir.glob("*.json"))
         if wt_json:
             with open(wt_json[0], "r") as handle:
@@ -601,7 +601,7 @@ def phase4_biophysics_docking(
         ]
 
         try:
-            subprocess.run(docker_cmd_mut, check=True, capture_output=True, text=True)
+            subprocess.run(docker_cmd_mut, check=True)
 
             mut_affinity = wt_affinity  # Fallback
             mut_json = list(mutant_dir.glob("*.json"))
