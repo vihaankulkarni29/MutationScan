@@ -566,7 +566,7 @@ def phase4_biophysics_docking(
         if wt_json:
             with open(wt_json[0], "r") as handle:
                 wt_data = json.load(handle)
-            wt_affinity = wt_data.get("affinity", wt_data.get("consensus_affinity_kcal_mol", wt_affinity))
+            wt_affinity = wt_data.get("binding_affinity_kcal_mol", wt_affinity)
         logger.info(f"  [SUCCESS] WT Baseline Affinity: {float(wt_affinity):.2f} kcal/mol")
     except Exception as exc:
         logger.warning(f"  [WARNING] WT Docking failed or JSON not found. Error: {exc}")
@@ -608,7 +608,7 @@ def phase4_biophysics_docking(
             if mut_json:
                 with open(mut_json[0], "r") as handle:
                     mut_data = json.load(handle)
-                mut_affinity = mut_data.get("affinity", mut_data.get("consensus_affinity_kcal_mol", mut_affinity))
+                mut_affinity = mut_data.get("binding_affinity_kcal_mol", mut_affinity)
 
             ddg = float(mut_affinity) - float(wt_affinity)
             docking_results[network_str] = {
