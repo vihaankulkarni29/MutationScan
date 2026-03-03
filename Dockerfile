@@ -32,9 +32,9 @@ RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86
     rm ~/miniconda.sh
 
 # 3. CONDA PRE-LOAD (Physics + Data Science Stack)
-# We load ncbi-datasets-pylib and ML tools here to bypass pip compiler crashes
+# We load ncbi-datasets-pylib, rdkit, meeko, and ML tools here to bypass pip compiler crashes
 RUN /opt/conda/bin/conda create -n biophysics --override-channels -c conda-forge -c bioconda python=3.10 \
-    openbabel vina pymol-open-source openmm pdbfixer \
+    openbabel vina pymol-open-source openmm pdbfixer rdkit meeko \
     pandas numpy biopython scikit-learn joblib matplotlib seaborn ncbi-datasets-pylib -y
 
 # 4. ACTIVATE ENVIRONMENT
