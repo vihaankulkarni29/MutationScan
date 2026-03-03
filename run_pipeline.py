@@ -488,7 +488,8 @@ def phase4_biophysics_docking(
     output_dir: Path,
     center_x: float = 0.0,
     center_y: float = 0.0,
-    center_z: float = 0.0
+    center_z: float = 0.0,
+    md_stiffness: float = 500.0
 ) -> Dict[str, Dict[str, float]]:
     """
     Phase 4: Rigorous 3D Biophysics Docking via Dockerized AutoScan
@@ -597,6 +598,7 @@ def phase4_biophysics_docking(
             "--center-y", str(center_y),
             "--center-z", str(center_z),
             "--minimize",
+            "--stiffness", str(md_stiffness),
             "--output", f"/app/data/results/biophysics/mutant_{index}/result.json"
         ]
 
@@ -907,7 +909,8 @@ def run_master_pipeline(args) -> int:
                 output_dir=output_dir,
                 center_x=args.center_x,
                 center_y=args.center_y,
-                center_z=args.center_z
+                center_z=args.center_z,
+                md_stiffness=args.md_stiffness
             )
         else:
             logger.info("Skipping Phase 4 (Biophysics). Relying on cached data.")
@@ -1076,6 +1079,13 @@ Examples:
         type=float,
         default=0.0,
         help='Docking box center Z coordinate (Angstroms). Required by AutoScan.'
+    )
+    
+    parser.add_argument(
+        '--md-stiffness',
+        type=float,
+        default=500.0,
+        help='Backbone restraint spring constant (kJ/mol/nm²) for mutant relaxation. Default: 500.0'
     )
     
     parser.add_argument(
