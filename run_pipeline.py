@@ -556,7 +556,7 @@ def phase4_biophysics_docking(
         "--center-x", str(center_x),
         "--center-y", str(center_y),
         "--center-z", str(center_z),
-        "--output", "/app/data/results/biophysics/WT_baseline"
+        "--output", "/app/data/results/biophysics/WT_baseline/result.json"
     ]
 
     wt_affinity = -8.5  # Fallback
@@ -597,7 +597,7 @@ def phase4_biophysics_docking(
             "--center-y", str(center_y),
             "--center-z", str(center_z),
             "--minimize",
-            "--output", f"/app/data/results/biophysics/mutant_{index}"
+            "--output", f"/app/data/results/biophysics/mutant_{index}/result.json"
         ]
 
         try:
