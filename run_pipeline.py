@@ -341,106 +341,66 @@ def phase2_expression_analysis(expression_file: Path) -> Dict[str, float]:
     return expression_scores
 
 
-def phase3_epistasis_network(genomics_report_df: pd.DataFrame, top_n: int = 5) -> List[Dict[str, Any]]:
+def phase3_epistasis_network(genomics_report_df, top_n=5):
     """
-    Phase 3: Epistasis Network Detection using MutationScorer.
-
-    Groups mutations by accession, filters malformed mutations with MutationScorer,
-    computes frequency + severity-weighted network scores, and returns top networks.
-
-    Args:
-        genomics_report_df: DataFrame containing at least Accession and Mutation columns.
-        top_n: Number of top networks to return.
-
-    Returns:
-        List of network records with Network, Frequency, Mean_Severity,
-        Max_Severity, and Weighted_Score.
+    Phase 3: Epistasis Network Detection & Biochemical Scoring
+    Actively prunes BENIGN phylogenetic noise and caps network sizes 
+    before ranking by clinical frequency and structural severity.
     """
-    logger = logging.getLogger(__name__)
+    from collections import Counter
+    import sys
+    from pathlib import Path
     
-    logger.info("")
-    logger.info("="*70)
-    logger.info("PHASE 3: Epistasis Network Detection (Dynamic Top 5)")
-    logger.info("="*70)
+    sys.path.append(str(Path(__file__).resolve().parent / "src"))
+    from mutation_scan.analysis.control_scan import MutationScorer
     
-    epistasis_networks: List[Dict[str, Any]] = []
+    scorer = MutationScorer()
+    genome_groups = genomics_report_df.groupby('Accession')['Mutation'].apply(list)
+    network_counts = Counter()
     
-    try:
-        if genomics_report_df is None or genomics_report_df.empty:
-            logger.warning("No genomics report data available for epistasis analysis")
-            return epistasis_networks
-
-        required_cols = {"Accession", "Mutation"}
-        if not required_cols.issubset(set(genomics_report_df.columns)):
-            logger.warning("Genomics report missing required columns: Accession, Mutation")
-            logger.info("No epistatic networks to analyze")
-            return epistasis_networks
-
-        import importlib
-        mutation_scorer_module = importlib.import_module("mutation_scan.analysis.control_scan")
-        MutationScorer = getattr(mutation_scorer_module, "MutationScorer")
-        scorer = MutationScorer()
-
-        grouped_mutations = genomics_report_df.groupby("Accession")["Mutation"].apply(list)
-        network_counts = Counter()
-
-        for _, mutation_list in grouped_mutations.items():
-            valid_mutations = []
-            for mutation in mutation_list:
-                mutation_str = str(mutation).strip().upper()
-                score = scorer.score_single(mutation_str)
-                if score.get("Category") == "ERROR":
-                    continue
-                valid_mutations.append(mutation_str)
-
-            network_tuple = tuple(sorted(set(valid_mutations)))
-            if len(network_tuple) < 2:
-                continue
-            network_counts[network_tuple] += 1
-
-        network_records: List[Dict[str, Any]] = []
-        for network_tuple, freq in network_counts.items():
-            if freq < 2:
-                continue
-
-            network_score = scorer.score_network(list(network_tuple))
-            max_severity = float(network_score.get("Max_Severity", 0.0))
-            mean_severity = float(network_score.get("Mean_Severity", 0.0))
-            weighted_score = freq * max_severity
-
-            network_records.append({
-                "Network": " + ".join(network_tuple),
-                "Frequency": int(freq),
-                "Mean_Severity": round(mean_severity, 2),
-                "Max_Severity": round(max_severity, 2),
-                "Weighted_Score": round(weighted_score, 2)
-            })
-
-        epistasis_networks = sorted(
-            network_records,
-            key=lambda item: item["Weighted_Score"],
-            reverse=True
-        )[:top_n]
-
-        logger.info(f"Detected {len(network_counts)} unique epistatic networks across dataset")
-        logger.info("Selecting Top networks by weighted severity score (frequency * max_severity)")
-
-        for idx, record in enumerate(epistasis_networks, 1):
-            logger.info(
-                f"  {idx}. {record['Network']} "
-                f"(freq={record['Frequency']}, max={record['Max_Severity']:.2f}, "
-                f"weighted={record['Weighted_Score']:.2f})"
-            )
-
-        logger.info(f"Identified Top {len(epistasis_networks)} epistatic networks for docking")
+    MAX_NETWORK_SIZE = 5  # Protect the 3D physics engine from exploding
+    
+    for mut_list in genome_groups:
+        scored_muts = []
+        for mut in mut_list:
+            res = scorer.score_single(mut)
+            # ACTIVE FILTER: Drop sequencer artifacts AND harmless phylogenetic noise
+            if res.get('Category') not in ['ERROR', 'BENIGN']:
+                scored_muts.append((mut, res.get('Severity', 0.0)))
+                
+        # Sort the surviving mutations by severity (worst first)
+        scored_muts.sort(key=lambda x: x[1], reverse=True)
         
-    except Exception as e:
-        logger.error(f"Failed to load epistasis data: {e}")
-        logger.info("No epistatic networks to analyze")
-    
-    logger.info("[PHASE 3 COMPLETE] Epistasis detection finished")
-    
-    return epistasis_networks
+        # Cap the network to the top most destructive mutations to prevent OpenMM crashes
+        top_muts = [m[0] for m in scored_muts[:MAX_NETWORK_SIZE]]
+        top_muts = sorted(list(set(top_muts)))
+        
+        if len(top_muts) >= 2:
+            network_counts[tuple(top_muts)] += 1
+            
+    # Score and Weight the surviving elite networks
+    weighted_networks = []
+    for network_tuple, freq in network_counts.items():
+        if freq < 2:
+            continue 
+            
+        net_score = scorer.score_network(list(network_tuple))
+        max_sev = net_score.get('Max_Severity', 0.0)
+        mean_sev = net_score.get('Mean_Severity', 0.0)
+        
+        # Weighting: Frequency * Lethality
+        weighted_score = freq * max_sev
+        
+        weighted_networks.append({
+            'Network': " + ".join(network_tuple),
+            'Frequency': freq,
+            'Mean_Severity': mean_sev,
+            'Max_Severity': max_sev,
+            'Weighted_Score': round(weighted_score, 2)
+        })
+        
+    weighted_networks.sort(key=lambda x: x['Weighted_Score'], reverse=True)
+    return weighted_networks[:top_n]
 
 
 def _format_for_autoscan(mut_list: List[str], chain: str = "A") -> str:
