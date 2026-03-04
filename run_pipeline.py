@@ -37,6 +37,7 @@ Version: 2.1.0
 """
 
 import argparse
+from collections import Counter
 import json
 import logging
 import os
@@ -46,7 +47,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any
 
 import pandas as pd
 
@@ -340,19 +341,20 @@ def phase2_expression_analysis(expression_file: Path) -> Dict[str, float]:
     return expression_scores
 
 
-def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
+def phase3_epistasis_network(genomics_report_df: pd.DataFrame, top_n: int = 5) -> List[Dict[str, Any]]:
     """
-    Phase 3: Epistasis Network Detection (Dynamic Top 5 Frequency-Based)
-    
-    Load pre-computed epistatic mutation networks, rank by frequency,
-    and return only the Top 5 most prevalent networks.
-    
+    Phase 3: Epistasis Network Detection using MutationScorer.
+
+    Groups mutations by accession, filters malformed mutations with MutationScorer,
+    computes frequency + severity-weighted network scores, and returns top networks.
+
     Args:
-        epistasis_data: Loaded epistasis input dictionary with keys like "GCF_051448695.1|oqxB"
-                       and values as mutation string lists (e.g., ["K10R", "I174V"])
-        
+        genomics_report_df: DataFrame containing at least Accession and Mutation columns.
+        top_n: Number of top networks to return.
+
     Returns:
-        Dictionary mapping mutation_network_string (e.g., "K10R + I174V") -> mutation list
+        List of network records with Network, Frequency, Mean_Severity,
+        Max_Severity, and Weighted_Score.
     """
     logger = logging.getLogger(__name__)
     
@@ -361,42 +363,75 @@ def phase3_epistasis_detection(epistasis_data: Dict) -> Dict[str, List[str]]:
     logger.info("PHASE 3: Epistasis Network Detection (Dynamic Top 5)")
     logger.info("="*70)
     
-    epistasis_networks = {}
+    epistasis_networks: List[Dict[str, Any]] = []
     
     try:
-        data = epistasis_data
-        genomes_data = data.get("genomes", {})
+        if genomics_report_df is None or genomics_report_df.empty:
+            logger.warning("No genomics report data available for epistasis analysis")
+            return epistasis_networks
 
-        if not isinstance(genomes_data, dict):
-            logger.warning("Unexpected epistasis input format for 'genomes'; expected dict")
+        required_cols = {"Accession", "Mutation"}
+        if not required_cols.issubset(set(genomics_report_df.columns)):
+            logger.warning("Genomics report missing required columns: Accession, Mutation")
             logger.info("No epistatic networks to analyze")
             return epistasis_networks
-        
-        # Count frequency of each mutation network
-        network_frequency = {}
-        
-        # Parse epistasis data (keys are "Accession|Gene", values are mutation string lists)
-        for acc_gene, mutations in genomes_data.items():
-            if not isinstance(mutations, list) or len(mutations) < 2:
+
+        import importlib
+        mutation_scorer_module = importlib.import_module("mutation_scan.analysis.control_scan")
+        MutationScorer = getattr(mutation_scorer_module, "MutationScorer")
+        scorer = MutationScorer()
+
+        grouped_mutations = genomics_report_df.groupby("Accession")["Mutation"].apply(list)
+        network_counts = Counter()
+
+        for _, mutation_list in grouped_mutations.items():
+            valid_mutations = []
+            for mutation in mutation_list:
+                mutation_str = str(mutation).strip().upper()
+                score = scorer.score_single(mutation_str)
+                if score.get("Category") == "ERROR":
+                    continue
+                valid_mutations.append(mutation_str)
+
+            network_tuple = tuple(sorted(set(valid_mutations)))
+            if len(network_tuple) < 2:
                 continue
-            
-            # Format network as string: "K10R + I174V"
-            network_key = " + ".join(sorted(mutations))
-            network_frequency[network_key] = network_frequency.get(network_key, 0) + 1
-        
-        logger.info(f"Detected {len(network_frequency)} unique epistatic networks across dataset")
-        
-        # Sort by frequency (descending) and take Top 5
-        sorted_networks = sorted(network_frequency.items(), key=lambda x: x[1], reverse=True)
-        top5_networks = sorted_networks[:5]
-        
-        logger.info("Selecting Top 5 most frequent networks (threshold: >= 2 mutations)")
-        
-        for idx, (network_str, freq) in enumerate(top5_networks, 1):
-            mut_list = network_str.split(" + ")
-            epistasis_networks[network_str] = mut_list
-            logger.info(f"  {idx}. {network_str} (frequency: {freq} genomes)")
-        
+            network_counts[network_tuple] += 1
+
+        network_records: List[Dict[str, Any]] = []
+        for network_tuple, freq in network_counts.items():
+            if freq < 2:
+                continue
+
+            network_score = scorer.score_network(list(network_tuple))
+            max_severity = float(network_score.get("Max_Severity", 0.0))
+            mean_severity = float(network_score.get("Mean_Severity", 0.0))
+            weighted_score = freq * max_severity
+
+            network_records.append({
+                "Network": " + ".join(network_tuple),
+                "Frequency": int(freq),
+                "Mean_Severity": round(mean_severity, 2),
+                "Max_Severity": round(max_severity, 2),
+                "Weighted_Score": round(weighted_score, 2)
+            })
+
+        epistasis_networks = sorted(
+            network_records,
+            key=lambda item: item["Weighted_Score"],
+            reverse=True
+        )[:top_n]
+
+        logger.info(f"Detected {len(network_counts)} unique epistatic networks across dataset")
+        logger.info("Selecting Top networks by weighted severity score (frequency * max_severity)")
+
+        for idx, record in enumerate(epistasis_networks, 1):
+            logger.info(
+                f"  {idx}. {record['Network']} "
+                f"(freq={record['Frequency']}, max={record['Max_Severity']:.2f}, "
+                f"weighted={record['Weighted_Score']:.2f})"
+            )
+
         logger.info(f"Identified Top {len(epistasis_networks)} epistatic networks for docking")
         
     except Exception as e:
@@ -482,7 +517,7 @@ def _smiles_to_sdf(smiles: str, output_path: Path) -> bool:
 
 
 def phase4_biophysics_docking(
-    epistasis_networks: Dict[str, List[str]],
+    epistasis_networks: List[Dict[str, Any]],
     default_pdb: str,
     ligand_smiles: str,
     output_dir: Path,
@@ -678,7 +713,7 @@ def phase5_feature_aggregation(
         species: Species name (e.g., "Klebsiella pneumoniae")
         mutations_df: DataFrame from mutation calling (with Acc_Gene column)
         expression_scores: Dict mapping gene -> expression score
-        epistasis_networks: Dict mapping acc_gene -> mutation string list
+        epistasis_networks: List of ranked epistasis network dictionaries
         docking_results: Dict mapping acc_gene -> affinity dict
         output_dir: Directory to save the 3 CSV files
         default_pdb: Default PDB reference for all genes
@@ -713,20 +748,14 @@ def phase5_feature_aggregation(
         
         # CSV 2: Epistasis Networks (Top 5)
         logger.info("Generating 2_epistasis_networks.csv...")
-        epistasis_records = []
-        
-        for network_idx, (network_str, mut_list) in enumerate(epistasis_networks.items(), 1):
-            # network_str is already formatted as "K10R + I174V"
-            epistasis_records.append({
-                "Network_Rank": network_idx,
-                "Gene_Network": network_str,
-                "Co_occurring_Mutations": network_str,
-                "Mutation_Count": len(mut_list)
-            })
-        
-        epistasis_df = pd.DataFrame(epistasis_records)
+        epistasis_df = pd.DataFrame(epistasis_networks)
+        if not epistasis_df.empty:
+            target_cols = ['Network', 'Frequency', 'Mean_Severity', 'Max_Severity', 'Weighted_Score']
+            epistasis_df = epistasis_df[[col for col in target_cols if col in epistasis_df.columns]]
+        epistasis_df.index.name = 'Network_Rank'
+        epistasis_df.index = epistasis_df.index + 1
         epistasis_output = output_dir / "2_epistasis_networks.csv"
-        epistasis_df.to_csv(epistasis_output, index=False)
+        epistasis_df.to_csv(epistasis_output, index=True)
         logger.info(f"  Saved {len(epistasis_df)} top epistatic networks to {epistasis_output}")
         
         # CSV 3: Biophysics Docking (Top 5 Networks)
@@ -790,7 +819,7 @@ def run_master_pipeline(args) -> int:
         # Default values for checkpointed execution
         mutations_df = pd.DataFrame()
         expression_scores = {}
-        epistasis_networks = {}
+        epistasis_networks = []
         docking_results = {}
         sample_id = args.organism.split()[0] + "_" + args.organism.split()[1] if args.organism and " " in args.organism else (args.organism or "Unknown")
         
@@ -900,37 +929,36 @@ def run_master_pipeline(args) -> int:
 
         # PHASE 3: Epistasis Detection
         if args.start_phase <= 3:
-            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
-            if not epistasis_file.exists():
-                logger.warning(f"Epistasis file not found: {epistasis_file}")
-                epistasis_data_dict = {"genomes": {}}
-            else:
-                with open(epistasis_file, "r") as f:
-                    epistasis_data_dict = json.load(f)
-
-            epistasis_networks = phase3_epistasis_detection(
-                epistasis_data=epistasis_data_dict
+            epistasis_networks = phase3_epistasis_network(
+                genomics_report_df=mutations_df,
+                top_n=5
             )
         else:
             logger.info("Skipping Phase 3 (Epistasis). Loading cached epistasis networks...")
-            epistasis_file = Path(args.epistasis_file) if args.epistasis_file else Path("data/interim/epistasis_input.json")
-            if not epistasis_file.exists():
-                logger.warning(f"Epistasis cache not found: {epistasis_file}")
-                epistasis_networks = {}
+            epistasis_cache = Path("data/results/2_epistasis_networks.csv")
+            if not epistasis_cache.exists():
+                logger.warning(f"Epistasis cache not found: {epistasis_cache}")
+                epistasis_networks = []
             else:
                 try:
-                    with open(epistasis_file, "r") as f:
-                        epistasis_data_dict = json.load(f)
-                    epistasis_networks = phase3_epistasis_detection(epistasis_data=epistasis_data_dict)
-                    logger.info(f"Loaded epistasis networks from {epistasis_file}")
+                    epistasis_df_cache = pd.read_csv(epistasis_cache)
+                    epistasis_networks = epistasis_df_cache.to_dict(orient="records")
+                    logger.info(f"Loaded epistasis networks from {epistasis_cache}")
                 except Exception as e:
-                    logger.warning(f"Failed to load epistasis networks from {epistasis_file}: {e}")
-                    epistasis_networks = {}
+                    logger.warning(f"Failed to load epistasis networks from {epistasis_cache}: {e}")
+                    epistasis_networks = []
+
+        epistasis_for_docking: Dict[str, List[str]] = {}
+        for network_record in epistasis_networks:
+            network_str = str(network_record.get("Network", "")).strip()
+            if not network_str:
+                continue
+            epistasis_for_docking[network_str] = [m.strip() for m in network_str.split(" + ") if m.strip()]
 
         # PHASE 4: Biophysics Docking
         if args.start_phase <= 4:
             docking_results = phase4_biophysics_docking(
-                epistasis_networks=epistasis_networks,
+                epistasis_networks=epistasis_for_docking,
                 default_pdb=args.default_pdb,
                 ligand_smiles=args.drug_smiles,
                 output_dir=output_dir,
