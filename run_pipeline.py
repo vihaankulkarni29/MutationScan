@@ -276,7 +276,7 @@ def phase1_genomic_ingestion(
         # Remove garbage alignments: Drop genomes with >20 mutations per gene
         if 'Accession' in mutations_df.columns and 'Gene' in mutations_df.columns:
             mut_counts = mutations_df.groupby(['Accession', 'Gene']).size()
-            valid_groups = mut_counts[mut_counts <= 20].index
+            valid_groups = mut_counts[mut_counts <= 200].index
             mutations_df = mutations_df[mutations_df.set_index(['Accession', 'Gene']).index.isin(valid_groups)].reset_index(drop=True)
             filtered_count = len(mutations_df)
             logger.info(f"Alignment quality filter: {filtered_count}/{original_count} mutations retained (removed {original_count - filtered_count} from poor alignments)")
