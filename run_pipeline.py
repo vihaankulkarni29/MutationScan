@@ -540,6 +540,31 @@ def phase4_biophysics_docking(
                 formatted.append(f"{chain}:{pos}:{orig}:{mut}")
         return ",".join(formatted)
 
+    supports_stiffness_flag = False
+    try:
+        autoscan_help_cmd = [
+            "docker", "run", "--rm",
+            "--entrypoint", "autoscan",
+            "mutationscan:latest",
+            "--help"
+        ]
+        autoscan_help_result = subprocess.run(
+            autoscan_help_cmd,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        help_text = f"{autoscan_help_result.stdout}\n{autoscan_help_result.stderr}"
+        supports_stiffness_flag = "--stiffness" in help_text
+    except Exception as exc:
+        logger.warning(f"Could not determine AutoScan stiffness flag support: {exc}")
+
+    if not supports_stiffness_flag:
+        logger.warning(
+            "AutoScan image does not support '--stiffness'. "
+            "Proceeding without stiffness override."
+        )
+
     # ---------------------------------------------------------
     # STEP A: Wild-Type Baseline Docking
     # ---------------------------------------------------------
@@ -598,9 +623,11 @@ def phase4_biophysics_docking(
             "--center-y", str(center_y),
             "--center-z", str(center_z),
             "--minimize",
-            "--stiffness", str(md_stiffness),
             "--output", f"/app/data/results/biophysics/mutant_{index}/result.json"
         ]
+
+        if supports_stiffness_flag:
+            docker_cmd_mut[-2:-2] = ["--stiffness", str(md_stiffness)]
 
         try:
             subprocess.run(docker_cmd_mut, check=True)
