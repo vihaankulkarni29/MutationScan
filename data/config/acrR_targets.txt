@@ -1,2 +1,5 @@
-# Escherichia coli acrR-focused target list
+acrA
+acrB
+tolC
 acrR
+marR

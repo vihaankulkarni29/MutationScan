@@ -1,2 +1,0 @@
-# Escherichia coli acrR-focused target list
-acrR
