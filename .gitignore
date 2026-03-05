@@ -56,14 +56,39 @@ dmypy.json
 .pylintrc
 .flake8
 
-# Project specific
+# Project specific Data & Caches
 data/genomes/*
-data/output/*
-data/databases/*
-data/interim/
 !data/genomes/.gitkeep
+data/output/*
 !data/output/.gitkeep
+data/databases/*
 !data/databases/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/results/*
+!data/results/.gitkeep
+data/proteins/*
+!data/proteins/.gitkeep
+data/refs/*
+!data/refs/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+data/ligands/*
+!data/ligands/.gitkeep
+!data/ligands/*.sdf
+!data/ligands/*.pdbqt
+
+# Global ignores for dynamic biophysics and data files
+*.csv
+*.pdb
+*.pdbqt
+*.fasta
+*.faa
+*.fna
+
+# Downloaded tools/binaries
+datasets.exe
+*.exe
 
 # Logs
 logs/
@@ -78,6 +103,9 @@ logs/
 *.tmp
 *.bak
 *.backup
+temp_data_collection/
+filter_modern_strains.py
+get_refs.py
 
 # OS specific
 Thumbs.db
