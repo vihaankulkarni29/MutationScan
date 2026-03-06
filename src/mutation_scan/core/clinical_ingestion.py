@@ -150,9 +150,9 @@ class ClinicalMetadataCurator:
         timeout: int = 30,
     ) -> Tuple[int, int]:
         """
-        Download nucleotide assemblies (.fna) from BV-BRC FTP for all strains.
+        Download nucleotide assemblies (.fna) from BV-BRC HTTPS endpoint for all strains.
 
-        FTP Endpoint: ftp://ftp.bvbrc.org/genomes/{genome_id}/{genome_id}.fna
+        HTTPS Endpoint: https://ftp.bvbrc.org/genomes/{genome_id}/{genome_id}.fna
 
         Args:
             cleaned_df: Cleaned metadata DataFrame with Genome ID column
@@ -177,7 +177,7 @@ class ClinicalMetadataCurator:
             genome_id = str(row[genome_id_column]).strip()
             strain_name = row.get("Strain", genome_id)
 
-            ftp_url = f"ftp://ftp.bvbrc.org/genomes/{genome_id}/{genome_id}.fna"
+            download_url = f"https://ftp.bvbrc.org/genomes/{genome_id}/{genome_id}.fna"
             output_path = self.genomes_dir / f"{genome_id}.fna"
 
             # Skip if already downloaded
@@ -192,18 +192,18 @@ class ClinicalMetadataCurator:
 
             for attempt in range(1, retry_count + 1):
                 try:
-                    with urllib.request.urlopen(ftp_url, timeout=timeout) as response, open(output_path, 'wb') as out_file:
+                    with urllib.request.urlopen(download_url, timeout=timeout) as response, open(output_path, 'wb') as out_file:
                         shutil.copyfileobj(response, out_file)
-                    logger.info(f"  └─ SUCCESS (attempt {attempt}/{retry_count})")
+                    logger.info(f"  -> SUCCESS (attempt {attempt}/{retry_count})")
                     success_count += 1
                     downloaded = True
                     break
                 except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
                     if attempt < retry_count:
-                        logger.warning(f"  └─ RETRY {attempt}/{retry_count}: {type(e).__name__}")
+                        logger.warning(f"  -> RETRY {attempt}/{retry_count}: {type(e).__name__}")
                         time.sleep(1)  # Brief backoff
                     else:
-                        logger.error(f"  └─ FAILED after {retry_count} attempts: {e}")
+                        logger.error(f"  -> FAILED after {retry_count} attempts: {e}")
                         fail_count += 1
 
             # Safe API pacing
