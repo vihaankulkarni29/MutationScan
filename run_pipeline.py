@@ -196,11 +196,13 @@ def phase1_genomic_ingestion(
             target_genes=target_genes,
         )
         
-        # Safe check for extraction results
-        if not extraction_stats.empty and 'Extracted' in extraction_stats.columns:
-            logger.info(f"Protein extraction complete: {extraction_stats['Extracted'].sum()} total extractions")
+        # Ensure extraction_stats is valid before trying to sum it
+        if extraction_stats is not None and not extraction_stats.empty and 'Extracted' in extraction_stats.columns:
+            total_extracted = extraction_stats['Extracted'].sum()
+            logger.info(f"Protein extraction complete: {total_extracted} total extractions")
         else:
-            logger.warning("Protein extraction yielded no results (0 genomes processed or extraction failed).")
+            logger.error("Protein extraction failed or returned 0 results. Check genome downloads.")
+            return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
         
         # Step 1.5: Placeholder for variant calling (simplified)
         logger.info("Step 1.5: Calling variants from extracted proteins...")

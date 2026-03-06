@@ -172,22 +172,21 @@ class ClinicalMetadataCurator:
         # PATCH: Restore missing Genome IDs from the raw CSV
         if "Genome ID" not in cleaned_df.columns:
             try:
-                # Dynamically hunt for the raw file in the same directory as the input CSV
-                input_dir = getattr(self, 'input_dir', os.getcwd())
-
-                possible_paths = [
-                    os.path.join(input_dir, 'BVBRC_genome_amr.csv'),
-                    os.path.join(input_dir, 'raw_amr.csv'),
-                    'BVBRC_genome_amr.csv',
-                    'raw_amr.csv',
-                    os.path.join(os.getcwd(), 'data', 'raw', 'BVBRC_genome_amr.csv'),
-                    os.path.join(os.getcwd(), 'data', 'raw', 'raw_amr.csv')
-                ]
-                raw_path = next((p for p in possible_paths if os.path.exists(p)), None)
+                # Omniscient Hunter: Scan the entire project for the raw CSV
+                raw_path = None
+                for root_dir, dirs, files in os.walk(os.getcwd()):
+                    if 'BVBRC_genome_amr.csv' in files or 'raw_amr.csv' in files:
+                        # Prefer BVBRC_genome_amr.csv, but accept raw_amr.csv as fallback
+                        if 'BVBRC_genome_amr.csv' in files:
+                            raw_path = os.path.join(root_dir, 'BVBRC_genome_amr.csv')
+                            break
+                        elif 'raw_amr.csv' in files and not raw_path:
+                            raw_path = os.path.join(root_dir, 'raw_amr.csv')
 
                 if not raw_path:
-                    raise FileNotFoundError("Could not locate raw BVBRC CSV.")
+                    raise FileNotFoundError("Could not locate raw BVBRC CSV (searched entire project for BVBRC_genome_amr.csv or raw_amr.csv).")
 
+                logger.info(f"Found raw CSV at: {raw_path}")
                 raw_df = pd.read_csv(raw_path)
 
                 # Normalize column names to fix invisible whitespace/case issues
