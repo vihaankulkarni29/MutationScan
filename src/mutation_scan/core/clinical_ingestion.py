@@ -9,6 +9,7 @@ Replaces legacy NCBI Entrez API with direct BV-BRC integration for:
 """
 
 import logging
+import shutil
 import time
 import urllib.request
 import urllib.parse
@@ -191,7 +192,8 @@ class ClinicalMetadataCurator:
 
             for attempt in range(1, retry_count + 1):
                 try:
-                    urllib.request.urlretrieve(ftp_url, output_path, timeout=timeout)
+                    with urllib.request.urlopen(ftp_url, timeout=timeout) as response, open(output_path, 'wb') as out_file:
+                        shutil.copyfileobj(response, out_file)
                     logger.info(f"  └─ SUCCESS (attempt {attempt}/{retry_count})")
                     success_count += 1
                     downloaded = True
