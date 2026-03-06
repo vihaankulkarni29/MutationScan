@@ -177,8 +177,11 @@ class ClinicalMetadataCurator:
 
                 possible_paths = [
                     os.path.join(input_dir, 'BVBRC_genome_amr.csv'),
+                    os.path.join(input_dir, 'raw_amr.csv'),
                     'BVBRC_genome_amr.csv',
-                    os.path.join(os.getcwd(), 'data', 'raw', 'BVBRC_genome_amr.csv')
+                    'raw_amr.csv',
+                    os.path.join(os.getcwd(), 'data', 'raw', 'BVBRC_genome_amr.csv'),
+                    os.path.join(os.getcwd(), 'data', 'raw', 'raw_amr.csv')
                 ]
                 raw_path = next((p for p in possible_paths if os.path.exists(p)), None)
 

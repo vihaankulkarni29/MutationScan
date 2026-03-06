@@ -195,7 +195,12 @@ def phase1_genomic_ingestion(
             genome_ids=genome_ids,
             target_genes=target_genes,
         )
-        logger.info(f"Protein extraction complete: {extraction_stats['Extracted'].sum()} total extractions")
+        
+        # Safe check for extraction results
+        if not extraction_stats.empty and 'Extracted' in extraction_stats.columns:
+            logger.info(f"Protein extraction complete: {extraction_stats['Extracted'].sum()} total extractions")
+        else:
+            logger.warning("Protein extraction yielded no results (0 genomes processed or extraction failed).")
         
         # Step 1.5: Placeholder for variant calling (simplified)
         logger.info("Step 1.5: Calling variants from extracted proteins...")
