@@ -169,7 +169,19 @@ class ClinicalMetadataCurator:
         # PATCH: Restore missing Genome IDs from the raw CSV
         if "Genome ID" not in cleaned_df.columns:
             try:
-                raw_df = pd.read_csv('BVBRC_genome_amr.csv')
+                # Hunt for the raw file in possible directories
+                possible_paths = [
+                    'BVBRC_genome_amr.csv',
+                    os.path.join('temp_data_collection', 'BVBRC_genome_amr.csv'),
+                    os.path.join('data', 'raw', 'raw_amr.csv')
+                ]
+
+                raw_path = next((p for p in possible_paths if os.path.exists(p)), None)
+
+                if not raw_path:
+                    raise FileNotFoundError("Could not locate raw BVBRC CSV to extract Genome IDs.")
+
+                raw_df = pd.read_csv(raw_path)
                 mapping = dict(zip(raw_df['Genome Name'], raw_df['Genome ID']))
                 strain_col = 'Strain' if 'Strain' in cleaned_df.columns else cleaned_df.columns[0]
                 cleaned_df['Genome ID'] = cleaned_df[strain_col].map(mapping)
@@ -178,6 +190,7 @@ class ClinicalMetadataCurator:
                 output_csv = os.path.join('data', 'results', 'final_clinical_dataset.csv')
                 if os.path.exists(os.path.dirname(output_csv)):
                     cleaned_df.to_csv(output_csv, index=False)
+
             except Exception as e:
                 logger.error(f"Failed to map Genome IDs: {e}")
 
