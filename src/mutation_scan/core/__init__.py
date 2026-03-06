@@ -4,6 +4,7 @@ Core Module - Genome Ingestion & Gene Detection
 Contains modules for:
 - ingestion_engine: Flexible identifier resolution engine (BioSample/Accession/BV-BRC)
 - metadata_interrogator: Epidemiological metadata enrichment and scientific filtering
+- universal_downloader: Multi-source genome assembly downloader (BV-BRC + NCBI Datasets)
 - clinical_ingestion: BV-BRC metadata curation and automated FTP downloads
 - tblastn_extractor: Translating aligner for frameshift-free protein extraction
 - entrez_handler_legacy: Deprecated NCBI Datasets API (Legacy Fallback)
@@ -14,6 +15,7 @@ from .clinical_ingestion import ClinicalMetadataCurator
 from .tblastn_extractor import TblastnSequenceExtractor
 from .ingestion_engine import GenomicIngestionEngine
 from .metadata_interrogator import MetadataInterrogator
+from .universal_downloader import UniversalGenomeDownloader
 from .genome_processor import GenomeProcessor
 from .gene_finder import GeneFinder
 from .abricate_wrapper import AbricateWrapper
@@ -30,6 +32,7 @@ __all__ = [
     "TblastnSequenceExtractor",
     "GenomicIngestionEngine",
     "MetadataInterrogator",
+    "UniversalGenomeDownloader",
     "GenomeProcessor",
     "GeneFinder",
     "AbricateWrapper",
