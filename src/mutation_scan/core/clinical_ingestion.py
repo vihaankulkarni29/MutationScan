@@ -9,6 +9,7 @@ Replaces legacy NCBI Entrez API with direct BV-BRC integration for:
 """
 
 import logging
+import os
 import shutil
 import time
 import urllib.request
@@ -165,6 +166,21 @@ class ClinicalMetadataCurator:
         """
         logger.info(f"Starting FTP downloads from BV-BRC for {len(cleaned_df)} genomes")
 
+        # PATCH: Restore missing Genome IDs from the raw CSV
+        if "Genome ID" not in cleaned_df.columns:
+            try:
+                raw_df = pd.read_csv('BVBRC_genome_amr.csv')
+                mapping = dict(zip(raw_df['Genome Name'], raw_df['Genome ID']))
+                strain_col = 'Strain' if 'Strain' in cleaned_df.columns else cleaned_df.columns[0]
+                cleaned_df['Genome ID'] = cleaned_df[strain_col].map(mapping)
+
+                # Save the fixed dataset back so it's clean for Phase 2
+                output_csv = os.path.join('data', 'results', 'final_clinical_dataset.csv')
+                if os.path.exists(os.path.dirname(output_csv)):
+                    cleaned_df.to_csv(output_csv, index=False)
+            except Exception as e:
+                logger.error(f"Failed to map Genome IDs: {e}")
+
         if genome_id_column not in cleaned_df.columns:
             logger.error(f"Column '{genome_id_column}' not found in DataFrame")
             logger.info("Available columns: " + ", ".join(cleaned_df.columns))
@@ -174,11 +190,13 @@ class ClinicalMetadataCurator:
         fail_count = 0
 
         for idx, row in cleaned_df.iterrows():
-            genome_id = str(row[genome_id_column]).strip()
-            strain_name = row.get("Strain", genome_id)
+            # Extract and URL-encode the genome ID
+            raw_id = str(row.get('Genome ID', row.iloc[0])).strip()
+            genome_id = urllib.parse.quote(raw_id)
+            strain_name = row.get("Strain", raw_id)
 
             download_url = f"https://ftp.bvbrc.org/genomes/{genome_id}/{genome_id}.fna"
-            output_path = self.genomes_dir / f"{genome_id}.fna"
+            output_path = self.genomes_dir / f"{raw_id}.fna"
 
             # Skip if already downloaded
             if output_path.exists():
