@@ -60,7 +60,6 @@ RUN pip install --no-cache-dir setuptools==69.5.1 wheel pbr typer && \
 # 8. COPY APPLICATION ARCHITECTURE
 COPY src /app/src
 COPY config /app/config
-COPY models /app/models
 COPY pyproject.toml /app/
 
 # 9. CONFIGURE ENVIRONMENT
