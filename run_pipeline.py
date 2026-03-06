@@ -59,7 +59,9 @@ except ImportError:
     RDKIT_AVAILABLE = False
 
 # Import MutationScan modules
-from mutation_scan.core.clinical_ingestion import ClinicalMetadataCurator
+from mutation_scan.core.ingestion_engine import GenomicIngestionEngine
+from mutation_scan.core.metadata_interrogator import MetadataInterrogator
+from mutation_scan.core.universal_downloader import UniversalGenomeDownloader
 from mutation_scan.core.tblastn_extractor import TblastnSequenceExtractor
 from mutation_scan.biophysics.autoscan_bridge import AutoScanBridge
 from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
@@ -146,68 +148,77 @@ def phase1_genomic_ingestion(
     proteins_dir.mkdir(parents=True, exist_ok=True)
     refs_dir.mkdir(parents=True, exist_ok=True)
     
-    # BRANCH 1: BV-BRC Integration (New Workflow)
+    # BRANCH 1: Production Universal Ingestion Workflow
     if hasattr(args, 'input_csv') and args.input_csv:
         logger.info("="*70)
-        logger.info("BV-BRC INTEGRATION WORKFLOW")
+        logger.info("UNIVERSAL GENOMIC INGESTION WORKFLOW")
         logger.info("="*70)
-        
+
         input_csv_path = Path(args.input_csv)
-        if not input_csv_path.exists():
-            raise FileNotFoundError(f"Input CSV not found: {input_csv_path}")
-        
-        # Step 1.1: Initialize Clinical Metadata Curator
-        logger.info("Step 1.1: Initializing Clinical Metadata Curator...")
-        curator = ClinicalMetadataCurator(
+
+        # Step 1.1: Ingestion Engine (Route & Resolve)
+        logger.info("Step 1.1: Initializing Ingestion Engine (ID Resolution)...")
+        ingestion_engine = GenomicIngestionEngine(
+            email=args.email,
+            api_key=args.api_key if hasattr(args, 'api_key') else None
+        )
+        resolved_df = ingestion_engine.route_and_resolve_input(str(input_csv_path))
+
+        # Step 1.2: Metadata Interrogator (Filter & Curate)
+        logger.info("Step 1.2: Interrogating NCBI BioSample XML (Geographic + Temporal Filters)...")
+        interrogator = MetadataInterrogator(
             email=args.email,
             api_key=args.api_key if hasattr(args, 'api_key') else None,
-            genomes_dir=genomes_dir,
-            results_dir=output_dir,
+            output_dir=output_dir / "results"
         )
-        
-        # Step 1.2: Process and filter metadata
-        logger.info("Step 1.2: Processing BV-BRC metadata (modernity + geographic filters)...")
-        cleaned_df = curator.process_bvbrc_csv(input_csv_path)
-        logger.info(f"Cleaned dataset: {len(cleaned_df)} Indian clinical strains")
-        
-        # Step 1.3: Download genomes from FTP
-        logger.info("Step 1.3: Downloading nucleotide assemblies from BV-BRC FTP...")
-        success, fail = curator.download_bvbrc_genomes(
-            cleaned_df,
-            genome_id_column="Genome ID" if "Genome ID" in cleaned_df.columns else cleaned_df.columns[0]
+        # Note: interrogate_and_filter saves 'curated_metadata.csv' to the output_dir
+        curated_df, rejected_df = interrogator.interrogate_and_filter(resolved_df)
+
+        # Step 1.3: Universal Downloader
+        logger.info("Step 1.3: Downloading nucleotide assemblies via Universal Downloader...")
+        downloader = UniversalGenomeDownloader(
+            api_key=args.api_key if hasattr(args, 'api_key') else None,
+            genomes_dir=genomes_dir
         )
-        logger.info(f"FTP downloads: {success} successful, {fail} failed")
-        
+
+        curated_csv_path = output_dir / "results" / "curated_metadata.csv"
+        if not curated_csv_path.exists():
+            logger.error("CRITICAL: curated_metadata.csv not found. No genomes passed the scientific filters.")
+            return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
+
+        success, fail = downloader.download_curated_genomes(curated_csv_path)
+        logger.info(f"Downloads complete: {success} successful, {fail} failed")
+
+        if success == 0:
+            logger.error("CRITICAL: 0 genomes were successfully downloaded. Aborting downstream extraction.")
+            return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
+
         # Step 1.4: Extract proteins using tblastn
         logger.info("Step 1.4: Extracting target gene proteins using tblastn...")
         logger.info("(Translating aligner prevents frameshift artifacts - 'The Alanine Trap')")
-        
+
         extractor = TblastnSequenceExtractor(
             genomes_dir=genomes_dir,
             refs_dir=refs_dir,
             output_dir=proteins_dir,
             tblastn_binary="tblastn",
         )
-        
+
         # Get list of successfully downloaded genomes
         genome_ids = [f.stem for f in genomes_dir.glob("*.fna")]
         extraction_stats = extractor.extract_all_genomes(
             genome_ids=genome_ids,
             target_genes=target_genes,
         )
-        
-        # Ensure extraction_stats is valid before trying to sum it
+
         if extraction_stats is not None and not extraction_stats.empty and 'Extracted' in extraction_stats.columns:
-            total_extracted = extraction_stats['Extracted'].sum()
-            logger.info(f"Protein extraction complete: {total_extracted} total extractions")
+            logger.info(f"Protein extraction complete: {extraction_stats['Extracted'].sum()} total extractions")
         else:
-            logger.error("Protein extraction failed or returned 0 results. Check genome downloads.")
+            logger.error("Protein extraction failed or returned 0 results.")
             return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
-        
+
         # Step 1.5: Placeholder for variant calling (simplified)
         logger.info("Step 1.5: Calling variants from extracted proteins...")
-        # NOTE: Variant calling logic can be implemented here using the extracted protein FAA files
-        # For now, create a minimal mutations DataFrame
         mutations_df = pd.DataFrame({
             'Accession': genome_ids,
             'Gene': ['tblastn-extracted'] * len(genome_ids),
