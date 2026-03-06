@@ -109,6 +109,9 @@ class ClinicalMetadataCurator:
         Returns:
             Cleaned DataFrame with curated clinical strains
         """
+        # Dynamically store the directory of the user's input file
+        self.input_dir = os.path.dirname(os.path.abspath(str(csv_path)))
+        
         logger.info(f"Processing BV-BRC CSV: {csv_path}")
 
         df = pd.read_csv(csv_path)
@@ -169,11 +172,13 @@ class ClinicalMetadataCurator:
         # PATCH: Restore missing Genome IDs from the raw CSV
         if "Genome ID" not in cleaned_df.columns:
             try:
-                # Hunt for the raw file
+                # Dynamically hunt for the raw file in the same directory as the input CSV
+                input_dir = getattr(self, 'input_dir', os.getcwd())
+
                 possible_paths = [
+                    os.path.join(input_dir, 'BVBRC_genome_amr.csv'),
                     'BVBRC_genome_amr.csv',
-                    os.path.join('temp_data_collection', 'BVBRC_genome_amr.csv'),
-                    os.path.join('data', 'raw', 'BVBRC_genome_amr.csv')
+                    os.path.join(os.getcwd(), 'data', 'raw', 'BVBRC_genome_amr.csv')
                 ]
                 raw_path = next((p for p in possible_paths if os.path.exists(p)), None)
 
