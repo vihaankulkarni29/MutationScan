@@ -169,30 +169,50 @@ class ClinicalMetadataCurator:
         # PATCH: Restore missing Genome IDs from the raw CSV
         if "Genome ID" not in cleaned_df.columns:
             try:
-                # Hunt for the raw file in possible directories
+                # Hunt for the raw file
                 possible_paths = [
                     'BVBRC_genome_amr.csv',
                     os.path.join('temp_data_collection', 'BVBRC_genome_amr.csv'),
-                    os.path.join('data', 'raw', 'raw_amr.csv')
+                    os.path.join('data', 'raw', 'BVBRC_genome_amr.csv')
                 ]
-
                 raw_path = next((p for p in possible_paths if os.path.exists(p)), None)
 
                 if not raw_path:
-                    raise FileNotFoundError("Could not locate raw BVBRC CSV to extract Genome IDs.")
+                    raise FileNotFoundError("Could not locate raw BVBRC CSV.")
 
                 raw_df = pd.read_csv(raw_path)
-                mapping = dict(zip(raw_df['Genome Name'], raw_df['Genome ID']))
-                strain_col = 'Strain' if 'Strain' in cleaned_df.columns else cleaned_df.columns[0]
-                cleaned_df['Genome ID'] = cleaned_df[strain_col].map(mapping)
 
-                # Save the fixed dataset back so it's clean for Phase 2
+                # Normalize column names to fix invisible whitespace/case issues
+                col_map = {str(c).strip().lower(): c for c in raw_df.columns}
+                name_col = col_map.get('genome name', col_map.get('strain'))
+                id_col = col_map.get('genome id')
+
+                if not name_col or not id_col:
+                    raise KeyError(f"Missing required columns. Found: {list(raw_df.columns)}")
+
+                # Create a strict string-to-string mapping, stripping all whitespace
+                mapping = dict(zip(
+                    raw_df[name_col].astype(str).str.strip(),
+                    raw_df[id_col].astype(str).str.strip()
+                ))
+
+                strain_col = 'Strain' if 'Strain' in cleaned_df.columns else cleaned_df.columns[0]
+                cleaned_df['Genome ID'] = cleaned_df[strain_col].astype(str).str.strip().map(mapping)
+
+                # Protect against NaNs creating broken URLs
+                missing_ids = cleaned_df['Genome ID'].isna().sum()
+                if missing_ids > 0:
+                    logger.warning(f"  -> Dropping {missing_ids} strains that failed to map to a numeric ID.")
+                    cleaned_df = cleaned_df.dropna(subset=['Genome ID']).copy()
+
+                # Save the fixed, clean dataset
                 output_csv = os.path.join('data', 'results', 'final_clinical_dataset.csv')
                 if os.path.exists(os.path.dirname(output_csv)):
                     cleaned_df.to_csv(output_csv, index=False)
 
             except Exception as e:
                 logger.error(f"Failed to map Genome IDs: {e}")
+                return False, 0
 
         if genome_id_column not in cleaned_df.columns:
             logger.error(f"Column '{genome_id_column}' not found in DataFrame")
