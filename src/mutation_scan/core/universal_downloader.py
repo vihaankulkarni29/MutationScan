@@ -175,6 +175,11 @@ class UniversalGenomeDownloader:
             safe_id = urllib.parse.quote(genome_id)
             download_url = f"https://ftp.bvbrc.org/genomes/{safe_id}/{safe_id}.fna"
             output_path = self.genomes_dir / f"{genome_id}.fna"
+
+            # Idempotency check: Skip if already downloaded
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.debug(f"Genome {genome_id} already exists locally. Skipping.")
+                return True
             
             logger.debug(f"[{idx+1}/{total}] BV-BRC URL: {download_url}")
             
@@ -224,6 +229,11 @@ class UniversalGenomeDownloader:
             True if download succeeded, False otherwise
         """
         output_path = self.genomes_dir / f"{biosample_id}.fna"
+
+        # Idempotency check: Skip if already downloaded
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.debug(f"Genome {biosample_id} already exists locally. Skipping.")
+            return True
         
         # Retry loop
         for attempt in range(1, self.max_retries + 1):
