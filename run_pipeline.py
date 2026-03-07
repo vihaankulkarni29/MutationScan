@@ -175,23 +175,38 @@ def phase1_genomic_ingestion(
         curated_df, rejected_df = interrogator.interrogate_and_filter(resolved_df)
 
         # Step 1.3: Universal Downloader
-        logger.info("Step 1.3: Downloading nucleotide assemblies via Universal Downloader...")
-        downloader = UniversalGenomeDownloader(
-            api_key=args.api_key if hasattr(args, 'api_key') else None,
-            genomes_dir=genomes_dir
-        )
+        if not args.skip_download:
+            logger.info("Step 1.3: Downloading nucleotide assemblies via Universal Downloader...")
+            downloader = UniversalGenomeDownloader(
+                api_key=args.api_key if hasattr(args, 'api_key') else None,
+                genomes_dir=genomes_dir
+            )
 
-        curated_csv_path = output_dir / "results" / "curated_metadata.csv"
-        if not curated_csv_path.exists():
-            logger.error("CRITICAL: curated_metadata.csv not found. No genomes passed the scientific filters.")
-            return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
+            curated_csv_path = output_dir / "results" / "curated_metadata.csv"
+            if not curated_csv_path.exists():
+                logger.error("CRITICAL: curated_metadata.csv not found. No genomes passed the scientific filters.")
+                return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
 
-        success, fail = downloader.download_curated_genomes(curated_csv_path)
-        logger.info(f"Downloads complete: {success} successful, {fail} failed")
+            success, fail = downloader.download_curated_genomes(curated_csv_path)
+            logger.info(f"Downloads complete: {success} successful, {fail} failed")
 
-        if success == 0:
-            logger.error("CRITICAL: 0 genomes were successfully downloaded. Aborting downstream extraction.")
-            return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
+            if success == 0:
+                logger.error("CRITICAL: 0 genomes were successfully downloaded. Aborting downstream extraction.")
+                return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
+        else:
+            logger.info("Step 1.3: Skipping Universal Downloader (--skip-download mode)")
+            logger.info("Assuming genomes already exist in data/genomes/")
+            
+            # Verify at least some genomes exist locally
+            existing_genomes = list(genomes_dir.glob("*.fna"))
+            if not existing_genomes:
+                logger.error("CRITICAL: No .fna files found in data/genomes/ directory.")
+                logger.error("Please either:")
+                logger.error("  1. Remove --skip-download to download genomes, OR")
+                logger.error("  2. Manually place .fna files in data/genomes/")
+                return pd.DataFrame(), proteins_dir, refs_dir, genomes_dir
+            
+            logger.info(f"Found {len(existing_genomes)} existing genome(s) in data/genomes/")
 
         # Step 1.4: Extract proteins using tblastn
         logger.info("Step 1.4: Extracting target gene proteins using tblastn...")
