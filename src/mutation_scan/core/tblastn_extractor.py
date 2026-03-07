@@ -14,6 +14,10 @@ import logging
 import re
 import subprocess
 import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -42,6 +46,7 @@ class TblastnSequenceExtractor:
         refs_dir: Path,
         output_dir: Path,
         tblastn_binary: str = "tblastn",
+        uniprot_taxid: Optional[str] = None,
     ):
         """
         Initialize TblastnSequenceExtractor.
@@ -51,11 +56,13 @@ class TblastnSequenceExtractor:
             refs_dir: Directory containing wild-type reference .faa files
             output_dir: Directory for extracted protein sequences
             tblastn_binary: Path to tblastn executable (default: assume in PATH)
+            uniprot_taxid: Optional UniProt Taxonomy ID for reference auto-fetching (e.g., 83333 for E. coli K-12)
         """
         self.genomes_dir = Path(genomes_dir)
         self.refs_dir = Path(refs_dir)
         self.output_dir = Path(output_dir)
         self.tblastn_binary = tblastn_binary
+        self.uniprot_taxid = uniprot_taxid
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -65,6 +72,10 @@ class TblastnSequenceExtractor:
         logger.info(f"  Genomes: {self.genomes_dir}")
         logger.info(f"  References: {self.refs_dir}")
         logger.info(f"  Output: {self.output_dir}")
+        if self.uniprot_taxid:
+            logger.info(f"  UniProt TaxID (for auto-fetch): {self.uniprot_taxid}")
+        else:
+            logger.info(f"  UniProt TaxID: None (using local refs only)")
 
     def _verify_tblastn_available(self) -> None:
         """Check if tblastn is available in PATH or as provided."""
@@ -286,6 +297,10 @@ class TblastnSequenceExtractor:
         Returns:
             DataFrame with columns: Genome, Gene, Success (bool)
         """
+        # Ensure all required reference sequences exist (fetch from UniProt if needed)
+        if target_genes:
+            self._ensure_references_exist(target_genes)
+        
         logger.info(f"Processing {len(genome_ids)} genomes")
 
         results = []
@@ -302,3 +317,55 @@ class TblastnSequenceExtractor:
             })
 
         return pd.DataFrame(results)
+
+    def _ensure_references_exist(self, target_genes: List[str]) -> None:
+        """
+        Ensure all required reference sequences exist, auto-fetching from UniProt if needed.
+        
+        Dynamic Reference Fetching Strategy:
+        - If --uniprot-taxid is provided: Attempt to fetch missing references from UniProt
+        - If --uniprot-taxid is omitted: Rely strictly on local files in refs/ directory
+        
+        Args:
+            target_genes: List of gene names to check/fetch
+        """
+        self.refs_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not self.uniprot_taxid:
+            logger.info("No --uniprot-taxid provided. Relying strictly on local reference FASTA files in refs/ directory.")
+            return
+        
+        logger.info(f"Checking references for {len(target_genes)} genes...")
+        for gene in target_genes:
+            ref_path = self.refs_dir / f"{gene.lower()}.fasta"
+            if ref_path.exists():
+                logger.debug(f"Reference exists: {ref_path.name}")
+                continue
+            
+            logger.info(f"Reference for {gene} missing. Auto-fetching from UniProt for TaxID {self.uniprot_taxid}...")
+            try:
+                # Query UniProt for the reviewed (canonical) reference protein
+                query = f"gene:{gene}+AND+taxonomy_id:{self.uniprot_taxid}+AND+reviewed:true"
+                url = f"https://rest.uniprot.org/uniprotkb/search?query={urllib.parse.quote(query)}&format=fasta&size=1"
+                
+                req = urllib.request.Request(url, headers={'Accept': 'text/plain'})
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    fasta_data = response.read().decode('utf-8').strip()
+                
+                if fasta_data:
+                    with open(ref_path, 'w') as f:
+                        f.write(fasta_data)
+                    logger.info(f"Successfully saved canonical reference for {gene} to {ref_path.name}")
+                else:
+                    logger.warning(f"Could not find Reviewed UniProt reference for {gene} (TaxID: {self.uniprot_taxid}).")
+                
+                # UniProt rate limiting (be respectful)
+                time.sleep(0.5)
+                
+            except urllib.error.HTTPError as e:
+                logger.error(f"HTTP error fetching reference for {gene}: {e.code} {e.reason}")
+            except urllib.error.URLError as e:
+                logger.error(f"Network error fetching reference for {gene}: {e}")
+            except Exception as e:
+                logger.error(f"Failed to fetch reference for {gene}: {e}")
+

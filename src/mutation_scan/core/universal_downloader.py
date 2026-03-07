@@ -5,6 +5,11 @@ Phase 3 of the genomic ingestion pipeline.
 Downloads nucleotide assemblies (.fna) from curated metadata using two pathways:
 - BV-BRC HTTPS: Native BV-BRC strains via secure FTP
 - NCBI Datasets REST API: BioSample-resolved strains via official REST endpoint
+
+Performance: Throttled Handshake with Parallel Payloads pattern
+- 8 concurrent workers for maximum throughput
+- Thread lock on NCBI API handshakes to enforce 3 requests/second limit
+- Unlocked parallel downloads of heavy payloads
 """
 
 import io
@@ -12,11 +17,13 @@ import json
 import logging
 import os
 import shutil
+import threading
 import time
 import urllib.parse
 import urllib.request
 import urllib.error
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Tuple, Optional
 
@@ -27,15 +34,20 @@ logger = logging.getLogger(__name__)
 
 class UniversalGenomeDownloader:
     """
-    Production-grade genome downloader with dual-source resolution.
+    Production-grade genome downloader with dual-source resolution and parallel execution.
     
     Workflow:
     1. Read curated_metadata.csv from Phase 2 (only strains that passed filters)
-    2. For each strain:
+    2. Spawn 8 concurrent workers for dual-pathway downloading:
        - If Resolved_BioSample == "BVBRC_NATIVE": Download from BV-BRC HTTPS
        - If Resolved_BioSample is standard ID: Use NCBI Datasets REST API
     3. Extract and save .fna files to data/genomes/
     4. Return success/fail statistics for pipeline monitoring
+    
+    Thread Safety:
+    - NCBI handshake (Step A) is protected by ncbi_lock to enforce 0.35s pacing
+    - Payload downloads (Step B) run in parallel without lock
+    - BV-BRC downloads are lock-free with individual timeout handling
     """
 
     def __init__(
@@ -55,6 +67,7 @@ class UniversalGenomeDownloader:
         self.api_key = api_key
         self.genomes_dir = Path(genomes_dir or "data/genomes")
         self.max_retries = max_retries
+        self.ncbi_lock = threading.Lock()  # Protects NCBI handshakes (Step A)
         
         # Ensure output directory exists
         self.genomes_dir.mkdir(parents=True, exist_ok=True)
@@ -63,13 +76,19 @@ class UniversalGenomeDownloader:
         logger.info(f"  NCBI API Key: {'SET' if self.api_key else 'NOT SET'}")
         logger.info(f"  Genomes Directory: {self.genomes_dir}")
         logger.info(f"  Max Retries: {self.max_retries}")
+        logger.info(f"  NCBI Rate Limit: Protected by thread lock (0.35s pacing)")
 
     def download_curated_genomes(
         self, 
         curated_csv: Optional[Path] = None
     ) -> Tuple[int, int]:
         """
-        Main router: Download all genomes from curated metadata.
+        Main router: Download all genomes from curated metadata using parallel workers.
+        
+        Implements "Throttled Handshake with Parallel Payloads" pattern:
+        - 8 concurrent workers maximize throughput
+        - NCBI API handshakes (DNS, auth) protected by lock to enforce 3 req/s limit
+        - Large payload downloads (genome zips) run in parallel without contention
 
         Args:
             curated_csv: Path to curated_metadata.csv (default: data/results/curated_metadata.csv)
@@ -78,7 +97,7 @@ class UniversalGenomeDownloader:
             Tuple of (success_count, fail_count)
         """
         logger.info("="*70)
-        logger.info("UNIVERSAL GENOME DOWNLOADER - MULTI-SOURCE ASSEMBLY ACQUISITION")
+        logger.info("UNIVERSAL GENOME DOWNLOADER - PARALLEL MULTI-SOURCE ACQUISITION")
         logger.info("="*70)
         
         # Load curated metadata from Phase 2
@@ -93,28 +112,35 @@ class UniversalGenomeDownloader:
         if 'Resolved_BioSample' not in df.columns:
             raise ValueError("Curated metadata must contain 'Resolved_BioSample' column")
         
-        # Initialize counters
+        logger.info(f"Launching parallel downloads with 8 concurrent workers...")
+        
         success_count = 0
         fail_count = 0
         
-        # Iterate through curated strains
-        for idx, row in df.iterrows():
-            biosample_id = str(row['Resolved_BioSample']).strip()
+        # Worker function that processes one row
+        def process_row(idx_row_tuple):
+            idx, row = idx_row_tuple
+            biosample_id = str(row.get('Resolved_BioSample', '')).strip()
             
-            logger.info(f"[{idx+1}/{len(df)}] Processing: {biosample_id}")
-            
-            # BRANCH 1: BV-BRC Native Pathway
-            if biosample_id == "BVBRC_NATIVE":
-                success = self._download_bvbrc_genome(row, idx, len(df))
-            # BRANCH 2: NCBI Datasets REST API Pathway
+            if biosample_id == 'BVBRC_NATIVE':
+                return self._download_bvbrc_genome(row, idx, len(df))
             else:
-                success = self._download_ncbi_genome(biosample_id, idx, len(df))
+                return self._download_ncbi_genome(biosample_id, idx, len(df))
+        
+        # Execute downloads in parallel
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(process_row, (idx, row)): idx 
+                      for idx, row in df.iterrows()}
             
-            # Update counters
-            if success:
-                success_count += 1
-            else:
-                fail_count += 1
+            for future in as_completed(futures):
+                try:
+                    if future.result():
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                except Exception as e:
+                    logger.error(f"Worker thread crashed: {e}")
+                    fail_count += 1
         
         logger.info("="*70)
         logger.info(f"Download complete: {success_count} successful, {fail_count} failed")
@@ -183,12 +209,12 @@ class UniversalGenomeDownloader:
         total: int
     ) -> bool:
         """
-        Download genome from NCBI via Datasets REST API.
+        Download genome from NCBI via Datasets REST API with rate-limit protection.
 
-        Two-step process:
-        1. Get assembly accession for the BioSample
-        2. Download genome zip and extract .fna file
-
+        Two-step process with differing synchronization strategies:
+        - Step A (Handshake): Protected by ncbi_lock to enforce 0.35s pacing
+        - Step B (Payload): Unlocked for parallel execution
+        
         Args:
             biosample_id: NCBI BioSample accession (e.g., SAMN02604018)
             idx: Current row index (for logging)
@@ -204,28 +230,35 @@ class UniversalGenomeDownloader:
             try:
                 logger.debug(f"[{idx+1}/{total}] NCBI Attempt {attempt}/{self.max_retries}")
                 
-                # Step A: Get Assembly Accession for the BioSample
-                api_url = (
-                    f"https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/taxon/"
-                    f"Escherichia%20coli/dataset_report?filters.biosample={biosample_id}"
-                )
-                if self.api_key:
-                    api_url += f"&api_key={self.api_key}"
+                # STEP A: The Handshake (Strictly Locked & Throttled)
+                accession = None
+                with self.ncbi_lock:
+                    logger.debug(f"[{idx+1}/{total}] Acquiring NCBI handshake lock...")
+                    api_url = (
+                        f"https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/taxon/"
+                        f"Escherichia%20coli/dataset_report?filters.biosample={biosample_id}"
+                    )
+                    if self.api_key:
+                        api_url += f"&api_key={self.api_key}"
+                    
+                    req = urllib.request.Request(api_url, headers={'Accept': 'application/json'})
+                    
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                    
+                    reports = data.get('reports', [])
+                    if not reports:
+                        logger.error(f"[{idx+1}/{total}] No assembly found for BioSample {biosample_id}")
+                        return False
+                    
+                    accession = reports[0]['accession']
+                    logger.debug(f"[{idx+1}/{total}] Found assembly: {accession}")
+                    
+                    # Strict NCBI pacing (3 requests per second = 0.35s per request)
+                    time.sleep(0.35)
                 
-                req = urllib.request.Request(api_url, headers={'Accept': 'application/json'})
-                
-                with urllib.request.urlopen(req, timeout=15) as response:
-                    data = json.loads(response.read().decode('utf-8'))
-                
-                reports = data.get('reports', [])
-                if not reports:
-                    logger.error(f"[{idx+1}/{total}] No assembly found for BioSample {biosample_id}")
-                    return False
-                
-                accession = reports[0]['accession']
-                logger.debug(f"[{idx+1}/{total}] Found assembly: {accession}")
-                
-                # Step B: Download the Genome ZIP in-memory and extract the .fna
+                # STEP B: The Payload (Unlocked, Parallel execution)
+                logger.debug(f"[{idx+1}/{total}] Released lock, downloading payload in parallel...")
                 download_url = (
                     f"https://api.ncbi.nlm.nih.gov/datasets/v2alpha/genome/accession/"
                     f"{accession}/download?include_annotation_type=GENOME_FASTA"
@@ -249,9 +282,6 @@ class UniversalGenomeDownloader:
                         with z.open(fna_filename) as zf:
                             with open(output_path, 'wb') as f:
                                 shutil.copyfileobj(zf, f)
-                
-                # NCBI REST API pacing (3 requests per second = 0.34s per request)
-                time.sleep(0.34)
                 
                 logger.info(f"[{idx+1}/{total}] NCBI download successful: {output_path.name}")
                 return True

@@ -202,6 +202,7 @@ def phase1_genomic_ingestion(
             refs_dir=refs_dir,
             output_dir=proteins_dir,
             tblastn_binary="tblastn",
+            uniprot_taxid=getattr(args, 'uniprot_taxid', None)
         )
 
         # Get list of successfully downloaded genomes
@@ -1153,6 +1154,13 @@ Examples:
         type=int,
         default=max(1, (os.cpu_count() or 4) - 2),
         help='Number of concurrent threads for parallel genome processing (default: CPU count - 2)'
+    )
+    
+    parser.add_argument(
+        '--uniprot-taxid',
+        type=str,
+        default=None,
+        help='UniProt Taxonomy ID for reference auto-fetching (e.g., 83333 for E. coli K-12). If omitted, relies on local FASTA files in refs/.'
     )
     
     args = parser.parse_args()
