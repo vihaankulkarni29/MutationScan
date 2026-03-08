@@ -83,6 +83,27 @@ extractor = TblastnSequenceExtractor(
     uniprot_taxid=uniprot_taxid if uniprot_taxid else None
 )
 
+# ---------------------------------------------------------
+# THE BLAST SHIELD: Pre-flight Reference Validation
+# ---------------------------------------------------------
+missing_refs = []
+for gene in target_genes:
+    ref_fasta = refs_dir / f"{gene}.fasta"
+    ref_faa = refs_dir / f"{gene}_WT.faa"
+
+    # Check if either valid file exists and has content
+    fasta_valid = ref_fasta.exists() and ref_fasta.stat().st_size > 0
+    faa_valid = ref_faa.exists() and ref_faa.stat().st_size > 0
+
+    if not (fasta_valid or faa_valid):
+        missing_refs.append(gene)
+
+if missing_refs:
+    logging.error(f"CRITICAL: Missing or empty reference proteins for: {missing_refs}")
+    logging.error("Auto-fetch failed or local files are missing. Cannot proceed with extraction.")
+    sys.exit(1)  # Clean, graceful exit.
+# ---------------------------------------------------------
+
 # Validate that genomes exist
 genome_files = list(genomes_dir.glob("*.fna"))
 if not genome_files:

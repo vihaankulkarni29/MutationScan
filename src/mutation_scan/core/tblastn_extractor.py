@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from Bio import SeqIO
+from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,10 @@ class TblastnSequenceExtractor:
         success_count = 0
         fail_count = 0
 
+        # Snakemake may clean output directories after upstream failures.
+        # Recreate defensively before writing files for this genome.
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
         for ref_faa in ref_files:
             gene_name = ref_faa.stem.replace("_WT", "")
 
@@ -164,7 +169,7 @@ class TblastnSequenceExtractor:
                     # Save as protein FASTA
                     output_faa = self.output_dir / f"{genome_id}_{gene_name}.faa"
                     record = SeqRecord(
-                        seq=translated_seq,
+                        seq=Seq(translated_seq),
                         id=f"{genome_id}_{gene_name}",
                         description=f"tblastn-extracted {gene_name} from {genome_id}",
                     )
@@ -242,12 +247,9 @@ class TblastnSequenceExtractor:
                 command,
                 capture_output=True,
                 text=True,
+                check=True,
                 timeout=60,
             )
-
-            if result.returncode != 0:
-                logger.warning(f"tblastn failed for {gene_name}: {result.stderr}")
-                return None
 
             # Parse output
             with open(tmp_output, "r") as f:
@@ -272,6 +274,12 @@ class TblastnSequenceExtractor:
 
         except subprocess.TimeoutExpired:
             logger.error(f"tblastn timeout for {gene_name}")
+            return None
+        except subprocess.CalledProcessError as e:
+            logger.warning(
+                f"tblastn failed for {gene_name} (exit {e.returncode}): "
+                f"{(e.stderr or '').strip()}"
+            )
             return None
         except Exception as e:
             logger.error(f"Error running tblastn for {gene_name}: {e}")
@@ -301,20 +309,46 @@ class TblastnSequenceExtractor:
         if target_genes:
             self._ensure_references_exist(target_genes)
         
-        logger.info(f"Processing {len(genome_ids)} genomes")
+        total = len(genome_ids)
+        gene_count = len(target_genes) if target_genes else "all"
+        logger.info(
+            f"Starting extraction for {total} genomes across {gene_count} targets..."
+        )
 
         results = []
+        fully_successful = 0
+        partial_or_failed = 0
 
-        for genome_id in genome_ids:
-            success, fail = self.extract_with_tblastn(
-                genome_id, target_genes=target_genes
-            )
+        for idx, genome_id in enumerate(genome_ids, start=1):
+            logger.info(f"[{idx}/{total}] Extracting {genome_id}...")
+            try:
+                success, fail = self.extract_with_tblastn(
+                    genome_id, target_genes=target_genes
+                )
+            except Exception as e:
+                # Graceful degradation: continue to next genome.
+                logger.warning(
+                    f"  -> Failed to process genome {genome_id}: {e}"
+                )
+                success, fail = 0, 1
 
             results.append({
                 "Genome": genome_id,
                 "Extracted": success,
                 "Failed": fail,
             })
+
+            if fail == 0 and success > 0:
+                fully_successful += 1
+            else:
+                partial_or_failed += 1
+
+        logger.info("=" * 50)
+        logger.info(
+            f"Extraction Complete: {fully_successful} fully successful, "
+            f"{partial_or_failed} partial/failed."
+        )
+        logger.info("=" * 50)
 
         return pd.DataFrame(results)
 

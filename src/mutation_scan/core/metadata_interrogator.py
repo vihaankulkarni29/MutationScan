@@ -41,6 +41,8 @@ class MetadataInterrogator:
         email: str = "user@example.com",
         api_key: Optional[str] = None,
         output_dir: Optional[Path] = None,
+        filter_country: Optional[str] = "india",
+        filter_min_year: Optional[int] = 2015,
     ):
         """
         Initialize MetadataInterrogator.
@@ -49,10 +51,14 @@ class MetadataInterrogator:
             email: Email for NCBI API requests (required for Entrez)
             api_key: Optional NCBI API key for higher rate limits
             output_dir: Output directory for curated/rejected datasets
+                    filter_country: Geographic filter (case-insensitive). Set to None to disable.
+                    filter_min_year: Minimum collection year filter. Set to None to disable.
         """
         self.email = email
         self.api_key = api_key
         self.output_dir = Path(output_dir or "data/results")
+        self.filter_country = filter_country.lower() if filter_country else None
+        self.filter_min_year = filter_min_year
         
         # Ensure output directory exists
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -240,7 +246,7 @@ class MetadataInterrogator:
 
     def _validate_strain(self, location: str, date_str: str) -> Tuple[bool, str]:
         """
-        Apply scientific filters: Geographic (India-only) + Temporal (2015+).
+        Apply scientific filters: Geographic + Temporal.
 
         Args:
             location: Geographic location string
@@ -249,22 +255,23 @@ class MetadataInterrogator:
         Returns:
             Tuple of (Passed: bool, Reason: str)
         """
-        # 1. Geographic Filter (India-only)
-        if "india" not in str(location).lower():
-            return False, "Failed Geographic Filter (Not India)"
+        # 1. Geographic Filter (if configured)
+        if self.filter_country and self.filter_country not in str(location).lower():
+            return False, f"Failed Geographic Filter (Not {self.filter_country.title()})"
         
-        # 2. Temporal Filter (2015+ with 1905 typo rescue)
+        # 2. Temporal Filter (if configured)
         if pd.isna(date_str) or str(date_str).lower() in ["n/a", "missing", "unknown"]:
             return False, "Failed Temporal Filter (Missing Date)"
         
-        try:
-            year = int(str(date_str)[:4])
-            if year == 1905:
-                pass  # Rescue known THSTI typo
-            elif year < 2015:
-                return False, f"Failed Temporal Filter (Year {year} is pre-2015)"
-        except (ValueError, TypeError):
-            return False, "Failed Temporal Filter (Invalid Date Format)"
+        if self.filter_min_year is not None:
+            try:
+                year = int(str(date_str)[:4])
+                if year == 1905:
+                    pass  # Rescue known THSTI typo
+                elif year < self.filter_min_year:
+                    return False, f"Failed Temporal Filter (Year {year} < {self.filter_min_year})"
+            except (ValueError, TypeError):
+                return False, "Failed Temporal Filter (Invalid Date Format)"
         
         # All filters passed
         return True, "Passed"

@@ -18,6 +18,8 @@ genomes_dir = Path(snakemake.output.genomes_dir)
 
 email = snakemake.params.email
 api_key = snakemake.params.api_key
+filter_country = snakemake.params.filter_country
+filter_min_year = snakemake.params.filter_min_year
 
 results_dir = Path(curated_csv).parent
 results_dir.mkdir(parents=True, exist_ok=True)
@@ -28,7 +30,13 @@ ingestion_engine = GenomicIngestionEngine(email=email, api_key=api_key)
 resolved_df = ingestion_engine.route_and_resolve_input(input_csv)
 
 logging.info("Step 1.2: Interrogating and filtering metadata...")
-interrogator = MetadataInterrogator(email=email, api_key=api_key, output_dir=results_dir)
+interrogator = MetadataInterrogator(
+    email=email, 
+    api_key=api_key, 
+    output_dir=results_dir,
+    filter_country=filter_country,
+    filter_min_year=filter_min_year
+)
 curated_df, rejected_df = interrogator.interrogate_and_filter(resolved_df)
 
 if not curated_df.empty:
