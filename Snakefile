@@ -14,7 +14,9 @@ if not GENOMES_DIR:
 # ---------------------------------------------------------
 rule all:
     input:
-        "data/results/1_genomics_report.csv"
+        "data/results/1_genomics_report.csv",
+        "data/results/2_epistasis_networks.csv",
+        "data/results/ControlScan_Networks"
 
 # ---------------------------------------------------------
 # PHASE 1a: ACQUISITION (Will be skipped if GENOMES_DIR is local)
@@ -40,9 +42,21 @@ rule extract_and_call:
         targets_file=config["targets_file"]
     output:
         proteins_dir=directory("data/results/proteins"),
-        refs_dir=directory("data/results/refs"),
         mutations_csv="data/results/1_genomics_report.csv"
     params:
+        refs_dir="data/results/refs",
         uniprot_taxid=config.get("uniprot_taxid", "")
     script:
         "src/scripts/02_extract_and_call.py"
+
+# ---------------------------------------------------------
+# PHASE 2 & 3: CONTROLSCAN & EPISTASIS
+# ---------------------------------------------------------
+rule biochemical_epistasis:
+    input:
+        mutations_csv="data/results/1_genomics_report.csv"
+    output:
+        epistasis_csv="data/results/2_epistasis_networks.csv",
+        networks_dir=directory("data/results/ControlScan_Networks")
+    script:
+        "src/scripts/03_biochemical_epistasis.py"

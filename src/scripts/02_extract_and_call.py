@@ -32,9 +32,9 @@ genomes_dir = Path(snakemake.input.genomes_dir)
 targets_file = Path(snakemake.input.targets_file)
 
 proteins_dir = Path(snakemake.output.proteins_dir)
-refs_dir = Path(snakemake.output.refs_dir)
 mutations_csv = Path(snakemake.output.mutations_csv)
 
+refs_dir = Path(snakemake.params.refs_dir)
 uniprot_taxid = snakemake.params.uniprot_taxid
 
 # ---------------------------------------------------------
