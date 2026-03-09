@@ -6,13 +6,11 @@ This package provides automated analysis of bacterial genomes, including:
 - AMR gene screening
 - Protein sequence extraction
 - Pairwise sequence alignment
-- 3D mutation visualization
 - 3D biophysics calculations (ΔΔG predictions)
 
 Refactored v2.0: Modular src-layout architecture
 - core: Genome ingestion & gene detection
 - analysis: Variant calling & ML predictions
-- visualization: 3D structure visualization
 - biophysics: 3D docking and binding affinity predictions
 - utils: Shared utilities
 """
@@ -24,14 +22,12 @@ __email__ = "contact@example.com"
 # Import subpackages
 from . import core
 from . import analysis
-from . import visualization
 from . import biophysics
 from . import utils
 
 __all__ = [
     "core",
     "analysis",
-    "visualization",
     "biophysics",
     "utils",
 ]

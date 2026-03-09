@@ -25,12 +25,14 @@ from typing import Optional, List
 import pandas as pd
 
 # Import MutationScan modules (refactored structure)
-from mutation_scan.core.entrez_handler import NCBIDatasetsGenomeDownloader
-from mutation_scan.core.gene_finder import GeneFinder
-from mutation_scan.core.sequence_extractor import SequenceExtractor
-from mutation_scan.core.reference_builder import ReferenceBuilder
-from mutation_scan.analysis.variant_caller import VariantCaller
-from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
+# Note: main.py is now legacy; the Snakemake pipeline is the primary orchestrator
+# These imports are left commented for backward compatibility
+# from mutation_scan.core.entrez_handler import NCBIDatasetsGenomeDownloader
+# from mutation_scan.core.gene_finder import GeneFinder
+# from mutation_scan.core.sequence_extractor import SequenceExtractor
+# from mutation_scan.core.reference_builder import ReferenceBuilder
+# from mutation_scan.analysis.variant_caller import VariantCaller
+# from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
 
 
 def print_startup_banner() -> None:

@@ -1,0 +1,17 @@
+name: mutationscan
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10
+  - snakemake-minimal
+  - blast
+  - openmm
+  - smina
+  - pandas
+  - biopython
+  - networkx
+  - matplotlib
+  - pyyaml
+  - requests

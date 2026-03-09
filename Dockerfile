@@ -1,75 +1,26 @@
-# BASE IMAGE: State Public Health Bioinformatics (StaPH-B)
-FROM staphb/abricate:latest
+# Use Miniforge for fast, robust Conda environment solving
+FROM condaforge/miniforge3:latest
 
-# METADATA
-LABEL maintainer="MutationScan Team"
-LABEL version="2.1"
-LABEL description="Democratized AMR Pipeline (Genomics + Biophysics)"
+# Set working directory
+WORKDIR /app
 
-# 1. SWITCH TO ROOT & INSTALL SYSTEM DEPENDENCIES
-USER root
+# Install system-level dependencies required by SMINA and OpenMM
 RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    bzip2 \
-    unzip \
-    zip \
-    libgl1 \
-    libegl1 \
-    libxrandr2 \
-    libxss1 \
-    libxcursor1 \
-    libxcomposite1 \
-    libasound2t64 \
-    libxi6 \
-    libxtst6 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. INSTALL MINICONDA
-ENV CONDA_DIR=/opt/conda
-RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
-    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
-    rm ~/miniconda.sh
+# Copy the environment definition
+COPY environment.yml .
 
-# 3. CONDA PRE-LOAD (Physics + Data Science Stack)
-# We load ncbi-datasets-pylib, rdkit, meeko, and ML tools here to bypass pip compiler crashes
-RUN /opt/conda/bin/conda create -n biophysics --override-channels -c conda-forge -c bioconda python=3.10 \
-    openbabel vina pymol-open-source openmm pdbfixer rdkit meeko \
-    pandas numpy biopython scikit-learn joblib matplotlib seaborn ncbi-datasets-pylib -y
+# Create the conda environment and clean up caches to keep the image small
+RUN mamba env create -f environment.yml && mamba clean -afy
 
-# 4. ACTIVATE ENVIRONMENT
-ENV PATH=/opt/conda/envs/biophysics/bin:$CONDA_DIR/bin:$PATH
+# Activate the conda environment globally for all subsequent commands
+ENV PATH="/opt/conda/envs/mutationscan/bin:$PATH"
 
-# 5. INSTALL NCBI DATASETS CLI
-RUN curl -L -o /usr/local/bin/datasets \
-    "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" && \
-    chmod +x /usr/local/bin/datasets
+# Copy the entire codebase into the container
+COPY . .
 
-# 6. SETUP ABRICATE OFFLINE DATABASES
-RUN abricate --setupdb
-
-# 7. INSTALL PYTHON PIPELINE DEPENDENCIES
-WORKDIR /app
-COPY requirements.txt .
-# Pip will now gracefully skip the heavy packages and only install AutoScan
-# Use --no-deps for AutoScan since openmm is pre-installed via conda
-RUN pip install --no-cache-dir setuptools==69.5.1 wheel pbr typer && \
-    pip install --no-cache-dir --no-deps git+https://github.com/vihaankulkarni29/AutoScan.git && \
-    pip install --no-cache-dir --no-deps -r requirements.txt
-
-# 8. COPY APPLICATION ARCHITECTURE
-COPY src /app/src
-COPY config /app/config
-COPY pyproject.toml /app/
-
-# 9. CONFIGURE ENVIRONMENT
-ENV PYTHONPATH="${PYTHONPATH}:/app/src"
-
-# 10. PERMISSIONS
-RUN useradd -m bioinfo && \
-    chown -R bioinfo:bioinfo /app
-USER bioinfo
-
-# 11. ENTRYPOINT
-ENTRYPOINT ["python", "-m", "mutation_scan.main"]
-CMD ["--help"]
+# Set Snakemake as the default entrypoint
+# Set Snakemake as the default command (entrypoint can be overridden if needed)
+CMD ["snakemake", "--help"]
