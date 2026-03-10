@@ -21,6 +21,10 @@ ENV PATH="/opt/conda/envs/mutationscan/bin:$PATH"
 # Copy the entire codebase into the container
 COPY . .
 
-# Set Snakemake as the default entrypoint
+# ---------------------------------------------------------
+# THE FIX: Universally expose the custom Python package
+# ---------------------------------------------------------
+ENV PYTHONPATH="/app/src"
+
 # Set Snakemake as the default command (entrypoint can be overridden if needed)
 CMD ["snakemake", "--help"]
