@@ -4,14 +4,16 @@ channels:
   - bioconda
   - defaults
 dependencies:
-  - python=3.10
-  - snakemake-minimal
+  - python>=3.10
+  - pip
+  - pytest
+  - snakemake-minimal>=7.32.4
   - blast
   - openmm
   - smina
-  - pandas
-  - biopython
-  - networkx
-  - matplotlib
-  - pyyaml
-  - requests
+  - pandas>=2.0.0
+  - biopython>=1.81
+  - networkx>=3.0
+  - matplotlib>=3.7.0
+  - pyyaml>=6.0
+  - requests>=2.31.0

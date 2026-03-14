@@ -1,12 +1,11 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mutation_scan"
 version = "2.1.0"
 description = "Deterministic Genotype-to-Phenotype-to-Biophysics Engine"
-authors = [{name = "Vihaan Kulkarni"}]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

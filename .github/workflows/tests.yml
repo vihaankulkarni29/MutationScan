@@ -10,7 +10,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     
-    # Required for Conda environments in GitHub Actions
+    # Crucial: forces every step to use the Conda environment
     defaults:
       run:
         shell: bash -el {0}
@@ -24,19 +24,21 @@ jobs:
       with:
         activate-environment: mutationscan
         environment-file: environment.yml
-        auto-activate: false           
-        miniforge-variant: Miniforge3  
+        auto-activate: true
+        miniforge-variant: Miniforge3
         use-mamba: true
 
-    - name: Set PYTHONPATH
-      run: echo "PYTHONPATH=$PWD/src" >> $GITHUB_ENV
+    - name: Install Package
+      run: |
+        # Installs MutationScan so the core logic is importable by pytest
+        pip install -e .
 
     - name: Run Core Unit Tests
       run: |
-        # Only run tests in the unit/ directory to avoid legacy integration files
-        pytest tests/unit/ -v
+        # Using python -m pytest ensures it uses the Conda environment's pytest
+        python -m pytest tests/unit/ -v
 
     - name: Validate Snakemake DAG (Dry-Run)
       run: |
-        # Proves the Snakemake orchestrator and dynamic routing are structurally sound
+        # Proves the dynamic routing logic works without failing
         snakemake -n --cores 1
