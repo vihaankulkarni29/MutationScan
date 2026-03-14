@@ -172,8 +172,6 @@ class UniversalGenomeDownloader:
                 return False
             
             genome_id = str(row['Genome ID']).strip()
-            safe_id = urllib.parse.quote(genome_id)
-            download_url = f"https://ftp.bvbrc.org/genomes/{safe_id}/{safe_id}.fna"
             output_path = self.genomes_dir / f"{genome_id}.fna"
 
             # Idempotency check: Skip if already downloaded
@@ -181,16 +179,27 @@ class UniversalGenomeDownloader:
                 logger.debug(f"Genome {genome_id} already exists locally. Skipping.")
                 return True
             
-            logger.debug(f"[{idx+1}/{total}] BV-BRC URL: {download_url}")
-            
             # Retry loop
             for attempt in range(1, self.max_retries + 1):
                 try:
                     logger.debug(f"[{idx+1}/{total}] Attempt {attempt}/{self.max_retries}")
-                    
-                    with urllib.request.urlopen(download_url, timeout=30) as response:
-                        with open(output_path, 'wb') as out_file:
-                            shutil.copyfileobj(response, out_file)
+
+                    # ---------------------------------------------------------
+                    # THE FIX: Native FTPS (FTP over TLS) for BV-BRC
+                    # ---------------------------------------------------------
+                    import ftplib
+
+                    # Connect to the secure BV-BRC server
+                    ftps = ftplib.FTP_TLS('ftp.bvbrc.org')
+                    ftps.login()          # Anonymous login
+                    ftps.prot_p()         # Encrypt the data channel
+
+                    remote_path = f"/genomes/{genome_id}/{genome_id}.fna"
+
+                    with open(output_path, 'wb') as f:
+                        ftps.retrbinary(f"RETR {remote_path}", f.write)
+
+                    ftps.quit()
                     
                     logger.info(f"[{idx+1}/{total}] BV-BRC download successful: {output_path.name}")
                     return True
