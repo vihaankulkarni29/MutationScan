@@ -4,10 +4,15 @@ configfile: "config/config.yaml"
 # ---------------------------------------------------------
 # DYNAMIC ROUTING & EXECUTION LOGIC
 # ---------------------------------------------------------
-# If the user provides local genomes, bypass acquisition.
 GENOMES_DIR = config.get("local_genomes", "")
+
 if not GENOMES_DIR:
+    # SCENARIO A: Downloading from CSV.
     GENOMES_DIR = "data/results/genomes"
+    PHASE_1A_SYNC = "data/results/curated_metadata.csv" # Force Phase 1b to wait
+else:
+    # SCENARIO B: Local Genomes provided. 
+    PHASE_1A_SYNC = [] # Disconnect the Phase 1a dependency
 
 # Check if user wants to trigger Phase 4
 RUN_BIOPHYSICS = bool(config.get("default_pdb", ""))
@@ -55,7 +60,8 @@ rule acquire_genomes:
 rule extract_and_call:
     input:
         genomes_dir=GENOMES_DIR,
-        targets_file=config["targets_file"]
+        targets_file=config["targets_file"],
+        sync=PHASE_1A_SYNC  # THE FIX: Binds Phase 1b explicitly to Phase 1a's output
     output:
         proteins_dir=directory("data/results/proteins"),
         mutations_csv="data/results/1_genomics_report.csv"

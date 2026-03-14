@@ -32,7 +32,6 @@ import pandas as pd
 # from mutation_scan.core.sequence_extractor import SequenceExtractor
 # from mutation_scan.core.reference_builder import ReferenceBuilder
 # from mutation_scan.analysis.variant_caller import VariantCaller
-# from mutation_scan.visualization.pymol_viz import PyMOLVisualizer
 
 
 def print_startup_banner() -> None:

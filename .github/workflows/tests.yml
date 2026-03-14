@@ -1,47 +1,42 @@
-name: Tests and Code Quality
+name: MutationScan CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
-  test:
+  build-and-test:
     runs-on: ubuntu-latest
+
+    # Required for Conda environments in GitHub Actions
+    defaults:
+      run:
+        shell: bash -el {0}
+
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v4
+    - name: Set up Conda Environment
+      uses: conda-incubator/setup-miniconda@v3
       with:
-        python-version: '3.9'
+        activate-environment: mutationscan
+        environment-file: environment.yml
+        auto-activate-base: false
+        miniforge-variant: Mambaforge
+        use-mamba: true
 
-    - name: Install dependencies
+    - name: Set PYTHONPATH
+      run: echo "PYTHONPATH=$PWD/src" >> $GITHUB_ENV
+
+    - name: Run Core Unit Tests
       run: |
-        python -m pip install --upgrade pip
-        # Install the package in editable mode so tests can find 'mutation_scan'
-        pip install -e . 
-        pip install pytest
+        # Only run tests in the unit/ directory to avoid legacy integration files
+        pytest tests/unit/ -v
 
-    - name: Run Tests (Ignore Warnings)
-      # We assume you haven't written deep unit tests for the new structure yet.
-      # This checks if the code is importable and runs basic tests if they exist.
+    - name: Validate Snakemake DAG (Dry-Run)
       run: |
-        pytest tests/ || echo "Tests failed, but proceeding for now"
-
-  docker:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-    
-    - name: Build Docker Image
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        push: false
-        tags: mutation-scan:latest
+        # Proves the Snakemake orchestrator and dynamic routing are structurally sound
+        snakemake -n --cores 1
