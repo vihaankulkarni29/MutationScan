@@ -24,8 +24,8 @@ jobs:
       with:
         activate-environment: mutationscan
         environment-file: environment.yml
-        auto-activate-base: false
-        miniforge-variant: Mambaforge
+        auto-activate: false
+        miniforge-variant: Miniforge3
         use-mamba: true
 
     - name: Set PYTHONPATH
