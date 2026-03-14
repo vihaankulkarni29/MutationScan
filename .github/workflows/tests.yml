@@ -40,5 +40,6 @@ jobs:
 
     - name: Validate Snakemake DAG (Dry-Run)
       run: |
-        # Proves the dynamic routing logic works without failing
-        snakemake -n --cores 1
+        # Override the input_csv requirement by forcing the local_genomes route.
+        # This proves the DAG compiles without needing actual biological data files.
+        snakemake -n --cores 1 --config local_genomes="data/genomes"
