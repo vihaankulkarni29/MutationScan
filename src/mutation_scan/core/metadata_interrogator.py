@@ -259,11 +259,11 @@ class MetadataInterrogator:
         if self.filter_country and self.filter_country not in str(location).lower():
             return False, f"Failed Geographic Filter (Not {self.filter_country.title()})"
         
-        # 2. Temporal Filter (if configured)
-        if pd.isna(date_str) or str(date_str).lower() in ["n/a", "missing", "unknown"]:
-            return False, "Failed Temporal Filter (Missing Date)"
-        
-        if self.filter_min_year is not None:
+        # 2. Temporal Filter (if configured to a non-zero year)
+        if self.filter_min_year is not None and self.filter_min_year > 0:
+            if pd.isna(date_str) or str(date_str).lower() in ["n/a", "missing", "unknown"]:
+                return False, "Failed Temporal Filter (Missing Date)"
+
             try:
                 year = int(str(date_str)[:4])
                 if year == 1905:
