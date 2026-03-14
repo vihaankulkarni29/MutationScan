@@ -9,7 +9,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-
+    
     # Required for Conda environments in GitHub Actions
     defaults:
       run:
@@ -24,8 +24,8 @@ jobs:
       with:
         activate-environment: mutationscan
         environment-file: environment.yml
-        auto-activate: false
-        miniforge-variant: Miniforge3
+        auto-activate: false           
+        miniforge-variant: Miniforge3  
         use-mamba: true
 
     - name: Set PYTHONPATH
