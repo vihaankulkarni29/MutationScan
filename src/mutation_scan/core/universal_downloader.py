@@ -155,63 +155,60 @@ class UniversalGenomeDownloader:
         total: int
     ) -> bool:
         """
-        Download genome from BV-BRC via HTTPS.
-
-        Args:
-            row: DataFrame row containing Genome ID
-            idx: Current row index (for logging)
-            total: Total row count (for logging)
-
-        Returns:
-            True if download succeeded, False otherwise
+        Download genome from BV-BRC via secure FTP using an industrial cURL subprocess wrapper 
+        to bypass Python's native TLS session resumption limitations.
         """
+        import subprocess
+        import os
+        import time
+
         try:
-            # Extract Genome ID from the row
             if 'Genome ID' not in row or pd.isna(row['Genome ID']):
-                logger.error(f"[{idx+1}/{total}] BVBRC_NATIVE row missing Genome ID column")
                 return False
-            
+
             genome_id = str(row['Genome ID']).strip()
             output_path = self.genomes_dir / f"{genome_id}.fna"
 
-            # Idempotency check: Skip if already downloaded
+            # Idempotency check: Skip if already downloaded fully
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
                 logger.debug(f"Genome {genome_id} already exists locally. Skipping.")
                 return True
-            
+
+            remote_url = f"ftp://ftp.bvbrc.org/genomes/{genome_id}/{genome_id}.fna"
+
             # Retry loop
             for attempt in range(1, self.max_retries + 1):
-                try:
-                    logger.debug(f"[{idx+1}/{total}] Attempt {attempt}/{self.max_retries}")
+                cmd = [
+                    "curl", "--silent", "--show-error", "--fail",
+                    "--ssl-reqd", "--user", "anonymous:guest",
+                    remote_url, "--output", str(output_path)
+                ]
 
-                    # ---------------------------------------------------------
-                    # THE FIX: Native FTPS (FTP over TLS) for BV-BRC
-                    # ---------------------------------------------------------
-                    import ftplib
+                # Execute curl natively within the Docker container
+                result = subprocess.run(cmd, capture_output=True, text=True)
 
-                    # Connect to the secure BV-BRC server
-                    ftps = ftplib.FTP_TLS('ftp.bvbrc.org')
-                    ftps.login()          # Anonymous login
-                    ftps.prot_p()         # Encrypt the data channel
-
-                    remote_path = f"/genomes/{genome_id}/{genome_id}.fna"
-
-                    with open(output_path, 'wb') as f:
-                        ftps.retrbinary(f"RETR {remote_path}", f.write)
-
-                    ftps.quit()
-                    
+                if result.returncode == 0:
                     logger.info(f"[{idx+1}/{total}] BV-BRC download successful: {output_path.name}")
                     return True
-                    
-                except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
-                    logger.warning(f"[{idx+1}/{total}] Attempt {attempt} failed: {e}")
+                else:
+                    err_msg = result.stderr
+
+                    # Gracefully handle 550 Missing File errors (Database Rot)
+                    if "550" in err_msg:
+                        logger.warning(f"[{idx+1}/{total}] Genome {genome_id} deprecated on server (550). Skipping.")
+                        if os.path.exists(output_path):
+                            os.remove(output_path)  # Cleanup empty file
+                        return False
+
+                    logger.warning(f"[{idx+1}/{total}] Attempt {attempt} failed: {err_msg.strip()}")
                     if attempt < self.max_retries:
                         time.sleep(2 ** attempt)  # Exponential backoff
                     else:
                         logger.error(f"[{idx+1}/{total}] All {self.max_retries} attempts failed for {genome_id}")
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
                         return False
-        
+
         except Exception as e:
             logger.error(f"[{idx+1}/{total}] Unexpected error in BV-BRC download: {e}")
             return False
