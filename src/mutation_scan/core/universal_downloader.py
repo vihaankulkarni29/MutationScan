@@ -180,7 +180,7 @@ class UniversalGenomeDownloader:
             for attempt in range(1, self.max_retries + 1):
                 cmd = [
                     "curl", "--silent", "--show-error", "--fail",
-                    "--ssl-reqd", "--user", "anonymous:guest",
+                    "--ssl-reqd", "--insecure", "--user", "anonymous:guest",
                     remote_url, "--output", str(output_path)
                 ]
 
