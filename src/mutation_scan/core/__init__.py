@@ -1,17 +1,17 @@
 """
-Core Module - Genome Ingestion & Gene Detection
+Core Module - Gene Detection & Sequence Analysis
 
 Contains modules for:
-- ingestion_engine: Flexible identifier resolution engine (BioSample/Accession/BV-BRC)
-- metadata_interrogator: Epidemiological metadata enrichment and scientific filtering
-- universal_downloader: Multi-source genome assembly downloader (BV-BRC + NCBI Datasets)
 - tblastn_extractor: Translating aligner for frameshift-free protein extraction
+- genome_processor: FASTA genome parsing and contig management
+- gene_finder: Resistance gene screening logic
+- sequence_extractor: Coordinate-based sequence extraction
+- coordinate_parser: BLAST HSP coordinate parsing
+- translator: DNA codon translation
+- reference_builder: Reference sequence index construction
 """
 
 from .tblastn_extractor import TblastnSequenceExtractor
-from .ingestion_engine import GenomicIngestionEngine
-from .metadata_interrogator import MetadataInterrogator
-from .universal_downloader import UniversalGenomeDownloader
 from .genome_processor import GenomeProcessor
 from .gene_finder import GeneFinder
 from .sequence_extractor import SequenceExtractor
@@ -21,9 +21,6 @@ from .reference_builder import ReferenceBuilder
 
 __all__ = [
     "TblastnSequenceExtractor",
-    "GenomicIngestionEngine",
-    "MetadataInterrogator",
-    "UniversalGenomeDownloader",
     "GenomeProcessor",
     "GeneFinder",
     "SequenceExtractor",

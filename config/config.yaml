@@ -1,29 +1,4 @@
-# MutationScan Default Configuration Manifest
-# Override at runtime via: snakemake --config key="value"
-
-# Credentials
-email: "default@example.com"
-api_key: ""
-
-# Phase 1: Genomic Data (Provide input_csv OR local_genomes)
-input_csv: "temp_data_collection/pure_indian_metadata.csv"
-local_genomes: "" # If provided, skips Phase 1a downloads
-
-# Phase 1 Filters (Leave blank to disable filtering)
-filter_country: "India"
-filter_min_year: 2015
-
-# Phase 1b & Beyond: Extraction & References
+# MutationScan Core Configuration
+local_genomes: "data/local_genomes"
 targets_file: "config/acr_targets.txt"
-uniprot_taxid: "83333" # E. coli K-12
-local_refs: ""
-
-# Phase 4: HTVS Biophysics (Optional)
-# Leave default_pdb blank ("") to skip physics and docking entirely
-default_pdb: ""
-chain_map: "gyrA:A,parC:C"
-ligand: "data/ligands/ligand.sdf"
-center_x: 188.520
-center_y: 189.680
-center_z: 130.347
-md_stiffness: 500.0
+default_pdb: "data/5o66.pdb"

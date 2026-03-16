@@ -1,106 +1,76 @@
 # Snakefile - MutationScan Master Workflow
 configfile: "config/config.yaml"
 
-# ---------------------------------------------------------
-# DYNAMIC ROUTING & EXECUTION LOGIC
-# ---------------------------------------------------------
-GENOMES_DIR = config.get("local_genomes", "")
+import os
 
-if not GENOMES_DIR:
-    # SCENARIO A: Downloading from CSV.
-    GENOMES_DIR = "data/results/genomes"
-    PHASE_1A_SYNC = "data/results/curated_metadata.csv" # Force Phase 1b to wait
-else:
-    # SCENARIO B: Local Genomes provided. 
-    PHASE_1A_SYNC = [] # Disconnect the Phase 1a dependency
+# ---------------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------------
+# The entry point is now strictly a local directory of provided genomes.
+GENOMES_DIR = config.get("local_genomes", "data/local_genomes")
+TARGETS_FILE = config.get("targets_file", "config/acr_targets.txt")
+DEFAULT_PDB = config.get("default_pdb", "data/5o66.pdb")
 
-# Check if user wants to trigger Phase 4
-RUN_BIOPHYSICS = bool(config.get("default_pdb", ""))
-
-# ---------------------------------------------------------
-# MASTER TARGET RULE
-# ---------------------------------------------------------
-TARGETS = [
-    "data/results/1_genomics_report.csv",
-    "data/results/2_epistasis_networks.csv",
-    "data/results/ControlScan_Networks",
-]
-
-if RUN_BIOPHYSICS:
-    TARGETS.extend([
-        "data/results/3_biophysics_docking.csv",
-        "data/results/Mutated_Structures",
-        "data/results/README_Biophysics.txt",
-    ])
-
-
+# ---------------------------------------------------------------------------
+# MASTER RULE
+# ---------------------------------------------------------------------------
 rule all:
-    input: TARGETS
-
-# ---------------------------------------------------------
-# PHASE 1a: ACQUISITION (Will be skipped if GENOMES_DIR is local)
-# ---------------------------------------------------------
-rule acquire_genomes:
     input:
-        raw_csv=config["input_csv"]
-    output:
-        curated_csv="data/results/curated_metadata.csv",
-        genomes_dir=directory("data/results/genomes")
-    params:
-        email=config["email"],
-        api_key=config.get("api_key", ""),
-        filter_country=config.get("filter_country", "india"),
-        filter_min_year=config.get("filter_min_year", 2015)
-    script:
-        "src/scripts/01_acquire_genomes.py"
+        "data/results/1_genomics_report.csv",
+        "data/results/2_epistasis_networks.csv",
+        "data/results/ControlScan_Networks",
+        "data/results/3_biophysics_docking.csv"
 
-# ---------------------------------------------------------
-# PHASE 1b: EXTRACTION & CALLING
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PHASE 1: EXTRACTION & VARIANT CALLING (The New Entry Point)
+# ---------------------------------------------------------------------------
 rule extract_and_call:
     input:
-        genomes_dir=GENOMES_DIR,
-        targets_file=config["targets_file"],
-        sync=PHASE_1A_SYNC  # THE FIX: Binds Phase 1b explicitly to Phase 1a's output
+        genomes=GENOMES_DIR,
+        targets=TARGETS_FILE
     output:
-        proteins_dir=directory("data/results/proteins"),
-        mutations_csv="data/results/1_genomics_report.csv"
-    params:
-        refs_dir="data/results/refs",
-        uniprot_taxid=config.get("uniprot_taxid", "")
-    script:
-        "src/scripts/02_extract_and_call.py"
+        proteins=directory("data/results/proteins"),
+        report="data/results/1_genomics_report.csv"
+    shell:
+        """
+        python src/scripts/02_extract_and_call.py \
+            --genomes {input.genomes} \
+            --targets {input.targets} \
+            --output-dir data/results
+        """
 
-# ---------------------------------------------------------
-# PHASE 2 & 3: CONTROLSCAN & EPISTASIS
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PHASE 2: BIOCHEMICAL EPISTASIS
+# ---------------------------------------------------------------------------
 rule biochemical_epistasis:
     input:
-        mutations_csv="data/results/1_genomics_report.csv"
+        report="data/results/1_genomics_report.csv"
     output:
-        epistasis_csv="data/results/2_epistasis_networks.csv",
-        networks_dir=directory("data/results/ControlScan_Networks")
-    script:
-        "src/scripts/03_biochemical_epistasis.py"
+        networks="data/results/2_epistasis_networks.csv",
+        plots=directory("data/results/ControlScan_Networks")
+    shell:
+        """
+        python src/scripts/03_biochemical_epistasis.py \
+            --report {input.report} \
+            --output-dir data/results
+        """
 
-
-# ---------------------------------------------------------
-# PHASE 4: HTVS BIOPHYSICS (OPTIONAL)
-# ---------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PHASE 3: OPENMM DYNAMICS & HTVS DOCKING
+# ---------------------------------------------------------------------------
 rule htvs_biophysics:
     input:
-        epistasis_csv="data/results/2_epistasis_networks.csv"
+        networks="data/results/2_epistasis_networks.csv",
+        proteins="data/results/proteins",
+        pdb=DEFAULT_PDB
     output:
-        docking_csv="data/results/3_biophysics_docking.csv",
-        mutated_dir=directory("data/results/Mutated_Structures"),
-        readme="data/results/README_Biophysics.txt"
-    params:
-        pdb=config.get("default_pdb", ""),
-        chain_map=config.get("chain_map", ""),
-        ligand=config.get("ligand", ""),
-        center_x=config.get("center_x", 0.0),
-        center_y=config.get("center_y", 0.0),
-        center_z=config.get("center_z", 0.0),
-        stiffness=config.get("md_stiffness", 500.0)
-    script:
-        "src/scripts/04_htvs_biophysics.py"
+        docking_report="data/results/3_biophysics_docking.csv",
+        mutated_pdbs=directory("data/results/Mutated_Structures")
+    shell:
+        """
+        python src/scripts/04_htvs_biophysics.py \
+            --networks {input.networks} \
+            --proteins {input.proteins} \
+            --reference-pdb {input.pdb} \
+            --output-dir data/results
+        """
