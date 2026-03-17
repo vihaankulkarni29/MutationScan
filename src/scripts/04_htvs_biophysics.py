@@ -355,6 +355,9 @@ def fmt_number(value):
 
 
 def main():
+    RESULTS_DIR = Path(snakemake.params.out_dir)
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
     networks_csv = Path(snakemake.input.networks)
     reference_pdb = Path(snakemake.input.pdb_file)
     docking_report = Path(snakemake.output.docking_report)
@@ -362,7 +365,7 @@ def main():
     readme_path = Path(snakemake.output[2])
 
     ligand_cfg = snakemake.config.get("ligand", "")
-    ligand_path = Path(ligand_cfg) if ligand_cfg else Path("data/ciprofloxacin.sdf")
+    ligand_path = Path(ligand_cfg) if ligand_cfg else RESULTS_DIR / "ciprofloxacin.sdf"
     chain_map = parse_chain_map(snakemake.config.get("chain_map", ""))
     default_chain = "A"
 

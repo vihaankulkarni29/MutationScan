@@ -1,4 +1,5 @@
 # MutationScan Core Configuration
+job_name: "default_run"
 local_genomes: "data/local_genomes"
 targets_file: "config/acr_targets.txt"
 default_pdb: "data/5o66.pdb"

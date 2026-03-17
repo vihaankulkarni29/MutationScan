@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from itertools import combinations
 from pathlib import Path
@@ -20,9 +21,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Snakemake Context Injection
-mutations_csv = Path(snakemake.input.mutations_csv)
-epistasis_csv = Path(snakemake.output.epistasis_csv)
-networks_dir = Path(snakemake.output.networks_dir)
+mutations_csv = Path(getattr(snakemake.input, "mutations_csv", snakemake.input.report))
+epistasis_csv = Path(getattr(snakemake.output, "epistasis_csv", snakemake.output.networks))
+networks_dir = Path(getattr(snakemake.output, "networks_dir", snakemake.output.plots_dir))
+RESULTS_DIR = Path(snakemake.params.out_dir)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 networks_dir.mkdir(parents=True, exist_ok=True)
 

@@ -14,6 +14,7 @@ Snakemake Context Injection:
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -30,11 +31,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------
 genomes_dir = Path(snakemake.input.genomes_dir)
 targets_file = Path(snakemake.input.targets_file)
+RESULTS_DIR = Path(snakemake.params.out_dir)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 proteins_dir = Path(snakemake.output.proteins_dir)
-mutations_csv = Path(snakemake.output.mutations_csv)
+mutations_csv = Path(getattr(snakemake.output, "mutations_csv", snakemake.output.report))
 
-refs_dir = Path(snakemake.params.refs_dir)
+refs_dir = Path(snakemake.params.refs_dir) if hasattr(snakemake.params, "refs_dir") else RESULTS_DIR / "refs"
 uniprot_taxid = snakemake.params.uniprot_taxid
 
 # ---------------------------------------------------------
