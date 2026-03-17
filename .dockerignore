@@ -1,0 +1,8 @@
+.git/
+.snakemake/
+data/local_genomes/
+data/output/
+data/results/
+tests/
+__pycache__/
+*.pyc

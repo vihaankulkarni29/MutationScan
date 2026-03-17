@@ -1,3 +1,22 @@
+# Snakemake State
+.snakemake/
+
+# Dynamic Data & Results (Strict quarantine)
+data/local_genomes/*
+!data/local_genomes/.gitkeep
+data/output/*
+!data/output/.gitkeep
+data/results/*
+!data/results/.gitkeep
+data/ligands/*
+!data/ligands/.gitkeep
+
+# IDE & Python Caches
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -75,8 +94,6 @@ data/raw/*
 !data/raw/.gitkeep
 data/ligands/*
 !data/ligands/.gitkeep
-!data/ligands/*.sdf
-!data/ligands/*.pdbqt
 
 # Global ignores for dynamic biophysics and data files
 *.csv
