@@ -11,9 +11,21 @@ GENOMES_DIR = config.get("local_genomes", "data/local_genomes")
 TARGETS_FILE = config.get("targets_file", "config/acr_targets.txt")
 DEFAULT_PDB = config.get("default_pdb", "data/5o66.pdb")
 JOB_NAME = config.get("job_name", "default_run")
+SKIP_EXTRACTION = str(config.get("skip_extraction", False)).lower() in ("1", "true", "yes", "y")
+LEGACY_RESULTS_DIR = config.get("legacy_results_dir", "data/results")
 
 # THIS IS THE CRITICAL LINE:
 OUT_DIR = f"data/output/{JOB_NAME}"
+
+# When skip_extraction=true, reuse existing proteins/refs (legacy defaults).
+PROTEINS_INPUT_DIR = config.get(
+    "proteins_dir",
+    f"{LEGACY_RESULTS_DIR}/proteins" if SKIP_EXTRACTION else f"{OUT_DIR}/proteins"
+)
+REFS_INPUT_DIR = config.get(
+    "refs_dir",
+    f"{LEGACY_RESULTS_DIR}/refs" if SKIP_EXTRACTION else f"{OUT_DIR}/refs"
+)
 
 # ---------------------------------------------------------------------------
 # MASTER RULE
@@ -48,9 +60,8 @@ rule extract_proteins:
 # ---------------------------------------------------------------------------
 rule call_variants:
     input:
-        proteins_dir=f"{OUT_DIR}/proteins",
-        refs_dir=f"{OUT_DIR}/refs",
-        extraction_marker=f"{OUT_DIR}/proteins/.proteins_extracted"
+        proteins_dir=PROTEINS_INPUT_DIR,
+        refs_dir=REFS_INPUT_DIR
     output:
         report=f"{OUT_DIR}/1_genomics_report.csv",
         marker=f"{OUT_DIR}/.variants_called"
@@ -79,7 +90,7 @@ rule biochemical_epistasis:
 rule htvs_biophysics:
     input:
         networks=f"{OUT_DIR}/2_epistasis_networks.csv",
-        proteins_dir=f"{OUT_DIR}/proteins",
+        proteins_dir=PROTEINS_INPUT_DIR,
         pdb_file=DEFAULT_PDB
     output:
         docking_report=f"{OUT_DIR}/3_biophysics_docking.csv",
