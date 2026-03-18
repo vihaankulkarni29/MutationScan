@@ -332,10 +332,10 @@ class VariantCaller:
         
         try:
             # Load reference sequence
-            ref_record = SeqIO.read(ref_file, "fasta")
+            ref_record = SeqIO.read(ref_file, "fasta-pearson")
             
             # Load query sequence
-            query_record = SeqIO.read(faa_file, "fasta")
+            query_record = SeqIO.read(faa_file, "fasta-pearson")
             
             # Perform global alignment
             mutations = self._align_and_call_mutations(

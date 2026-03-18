@@ -24,21 +24,34 @@ rule all:
         f"{OUT_DIR}/3_biophysics_docking.csv"
 
 # ---------------------------------------------------------------------------
-# PHASE 1: EXTRACTION & VARIANT CALLING (The New Entry Point)
+# PHASE 1A: PROTEIN EXTRACTION
 # ---------------------------------------------------------------------------
-rule extract_and_call:
+rule extract_proteins:
     input:
         genomes_dir=GENOMES_DIR,
         targets_file=TARGETS_FILE
     output:
         proteins_dir=directory(f"{OUT_DIR}/proteins"),
-        report=f"{OUT_DIR}/1_genomics_report.csv"
+        refs_dir=directory(f"{OUT_DIR}/refs")
     params:
-        refs_dir=f"{OUT_DIR}/refs",
         uniprot_taxid=config.get("uniprot_taxid", ""),
         out_dir=OUT_DIR
     script:
-        "src/scripts/02_extract_and_call.py"
+        "src/scripts/02a_extract_proteins.py"
+
+# ---------------------------------------------------------------------------
+# PHASE 1B: VARIANT CALLING
+# ---------------------------------------------------------------------------
+rule call_variants:
+    input:
+        proteins_dir=f"{OUT_DIR}/proteins",
+        refs_dir=f"{OUT_DIR}/refs"
+    output:
+        report=f"{OUT_DIR}/1_genomics_report.csv"
+    params:
+        out_dir=OUT_DIR
+    script:
+        "src/scripts/02b_call_variants.py"
 
 # ---------------------------------------------------------------------------
 # PHASE 2: BIOCHEMICAL EPISTASIS
