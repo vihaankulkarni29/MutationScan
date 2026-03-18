@@ -23,6 +23,7 @@ ANTI-HALLUCINATION RULES:
 import importlib
 import inspect
 import logging
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import json
@@ -332,10 +333,10 @@ class VariantCaller:
         
         try:
             # Load reference sequence
-            ref_record = SeqIO.read(ref_file, "fasta-pearson")
+            ref_record = self._load_sequence_record(ref_file, f"{gene_name}_WT")
             
             # Load query sequence
-            query_record = SeqIO.read(faa_file, "fasta-pearson")
+            query_record = self._load_sequence_record(faa_file, f"{accession}_{gene_name}")
             
             # Perform global alignment
             mutations = self._align_and_call_mutations(
@@ -350,6 +351,50 @@ class VariantCaller:
         except Exception as e:
             logger.error(f"Error calling variants for {faa_file.name}: {e}")
             return []
+
+    def _load_sequence_record(self, sequence_file: Path, fallback_id: str) -> SeqRecord:
+        """
+        Load a protein sequence from a file with robust fallbacks.
+
+        Supported formats:
+        - FASTA with headers (standard, pearson, 2line)
+        - Headerless raw sequence files (legacy refs with wrapped lines/spaces)
+        """
+        parse_errors: List[str] = []
+
+        for fmt in ("fasta-pearson", "fasta", "fasta-2line"):
+            try:
+                return SeqIO.read(sequence_file, fmt)
+            except Exception as e:
+                parse_errors.append(f"{fmt}: {e}")
+
+        # Fallback: parse as a raw amino-acid sequence without FASTA header.
+        text = sequence_file.read_text(encoding="utf-8", errors="ignore")
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        if not lines:
+            raise ValueError(
+                f"Sequence file is empty: {sequence_file}. Parse attempts: {'; '.join(parse_errors)}"
+            )
+
+        if lines[0].startswith(">"):
+            raise ValueError(
+                f"Failed to parse FASTA file {sequence_file}. Parse attempts: {'; '.join(parse_errors)}"
+            )
+
+        # Legacy reference files may contain whitespace-grouped residues.
+        sequence = re.sub(r"\s+", "", "".join(lines)).upper()
+        if not sequence:
+            raise ValueError(f"No amino-acid sequence detected in {sequence_file}")
+
+        # Validate basic protein alphabet; allow X and stop (*) for robustness.
+        if not re.fullmatch(r"[ACDEFGHIKLMNPQRSTVWYBXZJUO\*]+", sequence):
+            logger.warning(
+                f"Non-standard residue symbols detected in {sequence_file}; proceeding with best-effort parsing"
+            )
+
+        logger.debug(f"Loaded headerless sequence file: {sequence_file}")
+        return SeqRecord(Seq(sequence), id=fallback_id, description=f"loaded_from:{sequence_file.name}")
 
     def _align_and_call_mutations(
         self,
