@@ -11,6 +11,8 @@ GENOMES_DIR = config.get("local_genomes", "data/local_genomes")
 TARGETS_FILE = config.get("targets_file", "config/acr_targets.txt")
 DEFAULT_PDB = config.get("default_pdb", "data/5o66.pdb")
 JOB_NAME = config.get("job_name", "default_run")
+
+# THIS IS THE CRITICAL LINE:
 OUT_DIR = f"data/output/{JOB_NAME}"
 
 # ---------------------------------------------------------------------------
@@ -32,7 +34,8 @@ rule extract_proteins:
         targets_file=TARGETS_FILE
     output:
         proteins_dir=directory(f"{OUT_DIR}/proteins"),
-        refs_dir=directory(f"{OUT_DIR}/refs")
+        refs_dir=directory(f"{OUT_DIR}/refs"),
+        marker=f"{OUT_DIR}/proteins/.proteins_extracted"
     params:
         uniprot_taxid=config.get("uniprot_taxid", ""),
         out_dir=OUT_DIR
@@ -45,9 +48,11 @@ rule extract_proteins:
 rule call_variants:
     input:
         proteins_dir=f"{OUT_DIR}/proteins",
-        refs_dir=f"{OUT_DIR}/refs"
+        refs_dir=f"{OUT_DIR}/refs",
+        extraction_marker=f"{OUT_DIR}/proteins/.proteins_extracted"
     output:
-        report=f"{OUT_DIR}/1_genomics_report.csv"
+        report=f"{OUT_DIR}/1_genomics_report.csv",
+        marker=f"{OUT_DIR}/.variants_called"
     params:
         out_dir=OUT_DIR
     script:

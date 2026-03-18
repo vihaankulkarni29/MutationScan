@@ -71,8 +71,12 @@ else:
     logger.info(f"Variant calling complete: {len(mutations_df)} mutations identified")
 
 # ---------------------------------------------------------
-# COMPLETION
+# COMPLETION - WRITE MARKER FILE
 # ---------------------------------------------------------
+marker_file = mutations_csv.parent / ".variants_called"
+marker_file.touch()
+logger.info(f"Marker file created: {marker_file}")
+
 logger.info("Phase 1b Complete!")
 logger.info(f"  Mutations called: {len(mutations_df)}")
 logger.info(f"  Genomics report saved: {mutations_csv}")

@@ -124,7 +124,11 @@ if not protein_files:
 logger.info(f"Extraction complete: {len(protein_files)} protein files generated")
 
 # ---------------------------------------------------------
-# COMPLETION
+# COMPLETION - WRITE MARKER FILE
 # ---------------------------------------------------------
+marker_file = proteins_dir / ".proteins_extracted"
+marker_file.touch()
+logger.info(f"Marker file created: {marker_file}")
+
 logger.info("Phase 1a Complete!")
 logger.info(f"  Proteins extracted: {len(protein_files)}")
