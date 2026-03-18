@@ -34,6 +34,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 proteins_dir = Path(snakemake.output.proteins_dir)
 refs_dir = Path(snakemake.output.refs_dir)
 uniprot_taxid = snakemake.params.uniprot_taxid
+skip_extraction = snakemake.params.skip_extraction
 
 # ---------------------------------------------------------
 # SANITY CHECKS & SETUP
@@ -55,6 +56,22 @@ logger.info(f"  Targets File: {targets_file}")
 logger.info(f"  Proteins Output: {proteins_dir}")
 logger.info(f"  References Dir: {refs_dir}")
 logger.info(f"  UniProt TaxID: {uniprot_taxid if uniprot_taxid else 'None (local refs only)'}")
+logger.info(f"  Skip Extraction: {skip_extraction}")
+
+# ---------------------------------------------------------
+# EARLY EXIT: If skip_extraction is True and proteins already exist
+# ---------------------------------------------------------
+if skip_extraction:
+    protein_files = list(proteins_dir.glob("*.faa"))
+    if protein_files and (refs_dir / "gyrA_WT.faa").exists():
+        logger.info(f"SKIP_EXTRACTION=True and proteins exist ({len(protein_files)} files)")
+        logger.info("Skipping extraction, creating marker file and exiting...")
+        marker_file = proteins_dir / ".proteins_extracted"
+        marker_file.touch()
+        logger.info("Phase 1a Complete (skipped)!")
+        sys.exit(0)
+    else:
+        logger.warning("SKIP_EXTRACTION=True but proteins don't exist. Proceeding with extraction...")
 
 # ---------------------------------------------------------
 # STEP 1.4: LOAD TARGET GENES

@@ -38,7 +38,8 @@ rule extract_proteins:
         marker=f"{OUT_DIR}/proteins/.proteins_extracted"
     params:
         uniprot_taxid=config.get("uniprot_taxid", ""),
-        out_dir=OUT_DIR
+        out_dir=OUT_DIR,
+        skip_extraction=config.get("skip_extraction", False)
     script:
         "src/scripts/02a_extract_proteins.py"
 
