@@ -10,6 +10,7 @@ dependencies:
   - snakemake-minimal>=7.32.4
   - blast
   - openmm
+  - pdbfixer
   - smina
   - pandas>=2.0.0
   - biopython>=1.81
@@ -17,3 +18,7 @@ dependencies:
   - matplotlib>=3.7.0
   - pyyaml>=6.0
   - requests>=2.31.0
+  - rdkit
+  - gemmi
+  - pip:
+      - meeko>=0.6

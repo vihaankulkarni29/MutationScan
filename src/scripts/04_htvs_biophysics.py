@@ -210,18 +210,50 @@ def prepare_ligand_pdbqt(ligand_path, out_dir):
     if ligand_pdbqt.exists() and ligand_pdbqt.stat().st_size > 0:
         return ligand_pdbqt
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "meeko.cli.mk_prepare_ligand",
-        "-i",
-        str(ligand_path),
-        "-o",
-        str(ligand_pdbqt),
+    candidate_cmds = [
+        [
+            sys.executable,
+            "-m",
+            "meeko.cli.mk_prepare_ligand",
+            "-i",
+            str(ligand_path),
+            "-o",
+            str(ligand_pdbqt),
+        ],
+        [
+            "mk_prepare_ligand.py",
+            "-i",
+            str(ligand_path),
+            "-o",
+            str(ligand_pdbqt),
+        ],
     ]
-    result = run_cmd(cmd, "ligand preparation", allow_failure=True)
-    if result.returncode != 0 and not ligand_pdbqt.exists():
-        raise RuntimeError("Ligand preparation failed and no PDBQT was generated.")
+
+    failures = []
+    for cmd in candidate_cmds:
+        result = run_cmd(cmd, "ligand preparation", allow_failure=True)
+        if result.returncode == 0 and ligand_pdbqt.exists() and ligand_pdbqt.stat().st_size > 0:
+            return ligand_pdbqt
+
+        failures.append(
+            {
+                "cmd": " ".join(cmd),
+                "returncode": result.returncode,
+                "stdout": (result.stdout or "").strip(),
+                "stderr": (result.stderr or "").strip(),
+            }
+        )
+
+    failure_summary = "\n".join(
+        [
+            f"Command: {entry['cmd']}\nReturn code: {entry['returncode']}\nSTDOUT: {entry['stdout']}\nSTDERR: {entry['stderr']}"
+            for entry in failures
+        ]
+    )
+    raise RuntimeError(
+        "Ligand preparation failed and no PDBQT was generated. "
+        f"Input ligand: {ligand_path}\nAttempts:\n{failure_summary}"
+    )
     return ligand_pdbqt
 
 
