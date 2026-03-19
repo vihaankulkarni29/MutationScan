@@ -32,10 +32,25 @@ networks_dir.mkdir(parents=True, exist_ok=True)
 logger.info("Step 2: Loading genomic report for biochemical scoring...")
 df = pd.read_csv(mutations_csv)
 
-if df.empty or 'Mutation' not in df.columns:
+required_cols = {'Accession', 'Mutation', 'Gene'}
+if df.empty or not required_cols.issubset(df.columns):
     logger.warning("No mutations to analyze. Generating empty Phase 2/3 outputs.")
-    pd.DataFrame().to_csv(epistasis_csv, index=False)
+    pd.DataFrame(columns=[
+        'Node_1',
+        'Node_2',
+        'Node_1_Gene',
+        'Node_2_Gene',
+        'Node_1_Mutation',
+        'Node_2_Mutation',
+        'Frequency',
+        'Avg_Biochemical_Severity',
+        'Composite_Network_Score',
+    ]).to_csv(epistasis_csv, index=False)
     sys.exit(0)
+
+df['Gene'] = df['Gene'].astype(str).str.strip().str.lower()
+df['Mutation'] = df['Mutation'].astype(str).str.strip()
+df['Mutation_Token'] = df['Gene'] + ':' + df['Mutation']
 
 # ---------------------------------------------------------
 # PHASE 2: ControlScan Biochemical Scoring
@@ -62,11 +77,11 @@ df['ControlScan_Score'] = df['Mutation'].apply(apply_controlscan)
 logger.info("Step 3.1: Calculating Co-occurrence Frequencies...")
 co_occurrences = {}
 # Build a lookup dictionary for scores to speed up the loop
-score_lookup = df.set_index('Mutation')['ControlScan_Score'].to_dict()
+score_lookup = df.set_index('Mutation_Token')['ControlScan_Score'].to_dict()
 
 # Group by genome to find mutations that happen together
 for accession, group in df.groupby('Accession'):
-    muts = sorted(group['Mutation'].dropna().unique())
+    muts = sorted(group['Mutation_Token'].dropna().unique())
     if len(muts) > 1:
         for pair in combinations(muts, 2):
             if pair not in co_occurrences:
@@ -80,6 +95,9 @@ for pair, freq in co_occurrences.items():
     score_B = score_lookup.get(pair[1], 1.0)
     avg_severity = (score_A + score_B) / 2.0
 
+    gene_1, mutation_1 = pair[0].split(':', 1) if ':' in pair[0] else (None, pair[0])
+    gene_2, mutation_2 = pair[1].split(':', 1) if ':' in pair[1] else (None, pair[1])
+
     # The Core Equation
     composite_score = freq * avg_severity
 
@@ -87,6 +105,10 @@ for pair, freq in co_occurrences.items():
         {
             'Node_1': pair[0],
             'Node_2': pair[1],
+            'Node_1_Gene': gene_1,
+            'Node_2_Gene': gene_2,
+            'Node_1_Mutation': mutation_1,
+            'Node_2_Mutation': mutation_2,
             'Frequency': freq,
             'Avg_Biochemical_Severity': avg_severity,
             'Composite_Network_Score': composite_score,

@@ -8,6 +8,7 @@ import urllib.request
 from pathlib import Path
 
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ SMINA_URL = "https://sourceforge.net/projects/smina/files/smina.static/download"
 CIPRO_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/2764/SDF"
 BOX_SIZE = 25.0
 EXHAUSTIVENESS = 8
+MD_STEPS_DEFAULT = 5000
 
 
 def parse_chain_map(raw):
@@ -163,6 +165,10 @@ def run_cmd(cmd, label, allow_failure=False):
         if result.stderr:
             logger.error(result.stderr)
     return result
+
+
+def as_bool(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def parse_affinity(text):
@@ -327,7 +333,7 @@ def apply_mutations_to_structure(reference_pdb, parsed_mutations, mutated_pdb_ou
         PDBFile.writeFile(fixer.topology, fixer.positions, handle)
 
 
-def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose):
+def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose, exhaustiveness):
     cmd = [
         binary,
         "--receptor",
@@ -347,7 +353,7 @@ def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose):
         "--size_z",
         str(BOX_SIZE),
         "--exhaustiveness",
-        str(EXHAUSTIVENESS),
+        str(exhaustiveness),
         "--out",
         str(out_pose),
     ]
@@ -355,6 +361,109 @@ def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose):
     if result.returncode != 0:
         return None
     return parse_affinity(result.stdout)
+
+
+def relax_structure_with_openmm(input_pdb, output_pdb, md_steps, restraint_k):
+    from openmm import CustomExternalForce, LangevinIntegrator, LocalEnergyMinimizer, unit
+    from openmm.app import ForceField, HBonds, Modeller, NoCutoff, PDBFile, Simulation
+
+    pdb = PDBFile(str(input_pdb))
+    forcefield = ForceField("amber14-all.xml", "amber14/tip3p.xml")
+
+    modeller = Modeller(pdb.topology, pdb.positions)
+    modeller.addHydrogens(forcefield)
+
+    system = forcefield.createSystem(
+        modeller.topology,
+        nonbondedMethod=NoCutoff,
+        constraints=HBonds,
+    )
+
+    restraint = CustomExternalForce("k*((x-x0)^2 + (y-y0)^2 + (z-z0)^2)")
+    restraint.addGlobalParameter("k", float(restraint_k) * unit.kilojoule_per_mole / unit.nanometer**2)
+    restraint.addPerParticleParameter("x0")
+    restraint.addPerParticleParameter("y0")
+    restraint.addPerParticleParameter("z0")
+
+    for atom in modeller.topology.atoms():
+        if atom.name in {"CA", "N", "C", "O"}:
+            pos = modeller.positions[atom.index]
+            restraint.addParticle(atom.index, [pos.x, pos.y, pos.z])
+
+    system.addForce(restraint)
+
+    integrator = LangevinIntegrator(
+        300 * unit.kelvin,
+        1.0 / unit.picosecond,
+        0.002 * unit.picoseconds,
+    )
+    simulation = Simulation(modeller.topology, system, integrator)
+    simulation.context.setPositions(modeller.positions)
+
+    LocalEnergyMinimizer.minimize(simulation.context)
+    if int(md_steps) > 0:
+        simulation.step(int(md_steps))
+
+    state = simulation.context.getState(getPositions=True)
+    with open(output_pdb, "w", encoding="utf-8") as handle:
+        PDBFile.writeFile(modeller.topology, state.getPositions(), handle)
+
+
+def build_target_networks(networks_df, focus_mutation, focus_gene):
+    if not focus_mutation:
+        return networks_df
+
+    synthetic_node = f"{focus_gene}:{focus_mutation}" if focus_gene else focus_mutation
+    logger.info("Focused biophysics mode enabled: %s", synthetic_node)
+
+    return pd.DataFrame(
+        [
+            {
+                "Node_1": synthetic_node,
+                "Node_2": "",
+                "Node_1_Gene": focus_gene or None,
+                "Node_2_Gene": None,
+                "Frequency": None,
+                "Avg_Biochemical_Severity": None,
+                "Composite_Network_Score": None,
+            }
+        ]
+    )
+
+
+def extract_gene_from_node(node_value):
+    node = str(node_value or "").strip()
+    if ":" not in node:
+        return None
+    return node.split(":", 1)[0].strip().lower() or None
+
+
+def filter_networks_by_target_protein(networks_df, target_protein):
+    target = str(target_protein or "").strip().lower()
+    if not target:
+        return networks_df
+
+    df = networks_df.copy()
+    if df.empty or "Node_1" not in df.columns or "Node_2" not in df.columns:
+        return df
+
+    if "Node_1_Gene" in df.columns and "Node_2_Gene" in df.columns:
+        g1 = df["Node_1_Gene"].astype(str).str.strip().str.lower()
+        g2 = df["Node_2_Gene"].astype(str).str.strip().str.lower()
+    else:
+        g1 = df["Node_1"].apply(extract_gene_from_node)
+        g2 = df["Node_2"].apply(extract_gene_from_node)
+
+    mask = (g1 == target) & (g2 == target)
+    filtered = df[mask].copy()
+
+    logger.info(
+        "Docking target filter applied: %s (kept %s/%s networks)",
+        target,
+        len(filtered),
+        len(df),
+    )
+    return filtered
 
 
 def append_disclaimer(readme_path, protein_name, ligand_name, mutation_network, wt_affinity, mut_affinity, ddg_score):
@@ -399,6 +508,13 @@ def main():
     ligand_cfg = snakemake.config.get("ligand", "")
     ligand_path = Path(ligand_cfg) if ligand_cfg else RESULTS_DIR / "ciprofloxacin.sdf"
     chain_map = parse_chain_map(snakemake.config.get("chain_map", ""))
+    focus_mutation = str(snakemake.config.get("biophysics_focus_mutation", "")).strip()
+    focus_gene = str(snakemake.config.get("biophysics_focus_gene", "")).strip().lower()
+    docking_target = str(snakemake.config.get("docking_target", "")).strip().lower()
+    deep_relaxed_md = as_bool(snakemake.config.get("biophysics_deep_relaxed_md", False))
+    md_steps = int(snakemake.config.get("biophysics_md_steps", MD_STEPS_DEFAULT))
+    md_restraint = float(snakemake.config.get("biophysics_md_restraint_k", 50.0))
+    docking_exhaustiveness = int(snakemake.config.get("biophysics_exhaustiveness", EXHAUSTIVENESS))
     default_chain = "A"
 
     mutated_pdbs_dir.mkdir(parents=True, exist_ok=True)
@@ -415,7 +531,20 @@ def main():
     docking_binary = ensure_smina_binary(mutated_pdbs_dir)
     ligand_pdbqt = prepare_ligand_pdbqt(ligand_path, mutated_pdbs_dir)
 
-    df = pd.read_csv(networks_csv)
+    if focus_mutation:
+        df = build_target_networks(pd.DataFrame(), focus_mutation=focus_mutation, focus_gene=focus_gene)
+    else:
+        try:
+            df = pd.read_csv(networks_csv)
+        except EmptyDataError:
+            logger.warning("Networks file is empty: %s", networks_csv)
+            df = pd.DataFrame()
+
+        df = build_target_networks(df, focus_mutation=focus_mutation, focus_gene=focus_gene)
+
+    if not focus_mutation:
+        df = filter_networks_by_target_protein(df, docking_target)
+
     if df.empty or not {"Node_1", "Node_2"}.issubset(df.columns):
         pd.DataFrame(columns=[
             "Node_1",
@@ -432,11 +561,22 @@ def main():
         readme_path.write_text("No valid epistatic network rows found.\n", encoding="utf-8")
         return
 
+    wt_structure_for_docking = reference_pdb
+    if deep_relaxed_md:
+        wt_relaxed = mutated_pdbs_dir / "WT_relaxed.pdb"
+        logger.info(
+            "Deep relaxed MD mode enabled. Running WT relaxation with steps=%s, restraint_k=%s",
+            md_steps,
+            md_restraint,
+        )
+        relax_structure_with_openmm(reference_pdb, wt_relaxed, md_steps=md_steps, restraint_k=md_restraint)
+        wt_structure_for_docking = wt_relaxed
+
     results = []
     for idx, row in df.iterrows():
         node_1 = str(row["Node_1"]).strip()
         node_2 = str(row["Node_2"]).strip()
-        mutation_network = f"{node_1} + {node_2}"
+        mutation_network = node_1 if not node_2 else f"{node_1} + {node_2}"
 
         parsed_mutations = []
         for token in (node_1, node_2):
@@ -473,19 +613,48 @@ def main():
         center = pocket_center_from_mutations(reference_pdb, parsed_mutations)
 
         wt_receptor_prefix = mutated_pdbs_dir / f"network_{idx + 1}_WT_receptor"
-        wt_receptor_pdbqt = prepare_receptor_pdbqt(reference_pdb, center, wt_receptor_prefix)
+        wt_receptor_pdbqt = prepare_receptor_pdbqt(wt_structure_for_docking, center, wt_receptor_prefix)
         wt_pose = mutated_pdbs_dir / f"network_{idx + 1}_WT_docked.pdbqt"
-        wt_affinity = run_docking(docking_binary, wt_receptor_pdbqt, ligand_pdbqt, center, wt_pose)
+        wt_affinity = run_docking(
+            docking_binary,
+            wt_receptor_pdbqt,
+            ligand_pdbqt,
+            center,
+            wt_pose,
+            exhaustiveness=docking_exhaustiveness,
+        )
 
         mutated_pdb = mutated_pdbs_dir / f"network_{idx + 1}_mutated.pdb"
         mut_affinity = None
         status = "ok"
         try:
             apply_mutations_to_structure(reference_pdb, parsed_mutations, mutated_pdb)
+            structure_for_mut_docking = mutated_pdb
+            if deep_relaxed_md:
+                mutated_relaxed = mutated_pdbs_dir / f"network_{idx + 1}_mutated_relaxed.pdb"
+                relax_structure_with_openmm(
+                    mutated_pdb,
+                    mutated_relaxed,
+                    md_steps=md_steps,
+                    restraint_k=md_restraint,
+                )
+                structure_for_mut_docking = mutated_relaxed
+
             mut_receptor_prefix = mutated_pdbs_dir / f"network_{idx + 1}_MUT_receptor"
-            mut_receptor_pdbqt = prepare_receptor_pdbqt(mutated_pdb, center, mut_receptor_prefix)
+            mut_receptor_pdbqt = prepare_receptor_pdbqt(
+                structure_for_mut_docking,
+                center,
+                mut_receptor_prefix,
+            )
             mut_pose = mutated_pdbs_dir / f"network_{idx + 1}_MUT_docked.pdbqt"
-            mut_affinity = run_docking(docking_binary, mut_receptor_pdbqt, ligand_pdbqt, center, mut_pose)
+            mut_affinity = run_docking(
+                docking_binary,
+                mut_receptor_pdbqt,
+                ligand_pdbqt,
+                center,
+                mut_pose,
+                exhaustiveness=docking_exhaustiveness,
+            )
         except Exception as exc:
             logger.warning("Mutation threading or mutant docking failed for %s: %s", mutation_network, exc)
             status = "mutant_failed_fallback"
