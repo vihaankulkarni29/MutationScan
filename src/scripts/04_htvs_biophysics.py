@@ -1,10 +1,12 @@
 import logging
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import urllib.request
+from urllib.error import ContentTooShortError
 from pathlib import Path
 
 import pandas as pd
@@ -183,11 +185,37 @@ def parse_affinity(text):
 
 
 def ensure_smina_binary(work_dir):
+    installed_smina = shutil.which("smina")
+    if installed_smina:
+        logger.info("Using installed smina binary at %s", installed_smina)
+        return installed_smina
+
     work_dir.mkdir(parents=True, exist_ok=True)
     smina_path = work_dir / "smina"
     if not smina_path.exists():
         logger.info("Downloading Smina binary to %s", smina_path)
-        urllib.request.urlretrieve(SMINA_URL, smina_path)
+        max_attempts = 3
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                urllib.request.urlretrieve(SMINA_URL, smina_path)
+                if smina_path.exists() and smina_path.stat().st_size > 0:
+                    last_error = None
+                    break
+            except ContentTooShortError as exc:
+                last_error = exc
+                logger.warning("Smina download attempt %s/%s incomplete: %s", attempt, max_attempts, exc)
+                try:
+                    if smina_path.exists():
+                        smina_path.unlink()
+                except OSError:
+                    pass
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Smina download attempt %s/%s failed: %s", attempt, max_attempts, exc)
+
+        if last_error is not None:
+            raise RuntimeError(f"Failed to download Smina binary after {max_attempts} attempts: {last_error}")
 
     try:
         mode = os.stat(smina_path).st_mode
