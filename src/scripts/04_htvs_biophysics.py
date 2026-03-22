@@ -41,8 +41,13 @@ AA_MAP = {
 SMINA_URL = "https://sourceforge.net/projects/smina/files/smina.static/download"
 CIPRO_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/2764/SDF"
 BOX_SIZE = 25.0
-EXHAUSTIVENESS = 8
+EXHAUSTIVENESS = 16
 MD_STEPS_DEFAULT = 5000
+
+# Default active-site centers for target proteins (x, y, z)
+TARGET_POCKET_CENTERS = {
+    "acrb": (18.0, -24.0, 5.0),
+}
 
 
 def parse_chain_map(raw):
@@ -156,6 +161,33 @@ def pocket_center_from_mutations(pdb_path, parsed_mutations):
     if fallback is not None:
         return fallback
     return (18.5, 55.2, 20.1)
+
+
+def resolve_docking_center(config, docking_target):
+    raw_x = config.get("center_x", None)
+    raw_y = config.get("center_y", None)
+    raw_z = config.get("center_z", None)
+
+    if raw_x is not None and raw_y is not None and raw_z is not None:
+        try:
+            center = (float(raw_x), float(raw_y), float(raw_z))
+            logger.info("Using user-specified docking center: %s", center)
+            return center
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid center override values (center_x/center_y/center_z). Falling back to defaults."
+            )
+
+    target = str(docking_target or "").strip().lower()
+    if target and target in TARGET_POCKET_CENTERS:
+        center = TARGET_POCKET_CENTERS[target]
+        logger.info("Using predefined pocket center for %s: %s", target, center)
+        return center
+
+    # Generic fallback when target is unknown and no explicit center is provided.
+    center = (18.5, 55.2, 20.1)
+    logger.info("Using generic docking center fallback: %s", center)
+    return center
 
 
 def run_cmd(cmd, label, allow_failure=False):
@@ -361,7 +393,7 @@ def apply_mutations_to_structure(reference_pdb, parsed_mutations, mutated_pdb_ou
         PDBFile.writeFile(fixer.topology, fixer.positions, handle)
 
 
-def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose, exhaustiveness):
+def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose, exhaustiveness, flex_residues=None):
     cmd = [
         binary,
         "--receptor",
@@ -385,10 +417,31 @@ def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose, exhausti
         "--out",
         str(out_pose),
     ]
+
+    # Enable flexible receptor sidechains for mutant docking when requested.
+    if flex_residues:
+        cmd.extend(["--flex", str(flex_residues)])
+
     result = run_cmd(cmd, f"docking {receptor_pdbqt.name}", allow_failure=True)
     if result.returncode != 0:
         return None
     return parse_affinity(result.stdout)
+
+
+def build_flexible_residues_arg(parsed_mutations):
+    residues = []
+    seen = set()
+    for mut in parsed_mutations:
+        chain = str(mut.get("chain", "")).strip() or "A"
+        residue = mut.get("residue", None)
+        if residue is None:
+            continue
+        token = f"{chain}:{int(residue)}"
+        if token in seen:
+            continue
+        seen.add(token)
+        residues.append(token)
+    return ",".join(residues)
 
 
 def relax_structure_with_openmm(input_pdb, output_pdb, md_steps, restraint_k):
@@ -482,7 +535,8 @@ def filter_networks_by_target_protein(networks_df, target_protein):
         g1 = df["Node_1"].apply(extract_gene_from_node)
         g2 = df["Node_2"].apply(extract_gene_from_node)
 
-    mask = (g1 == target) & (g2 == target)
+    # Keep networks where the target appears in either node.
+    mask = (g1 == target) | (g2 == target)
     filtered = df[mask].copy()
 
     logger.info(
@@ -492,6 +546,16 @@ def filter_networks_by_target_protein(networks_df, target_protein):
         len(df),
     )
     return filtered
+
+
+def select_mutations_for_docking(parsed_mutations, target_protein):
+    target = str(target_protein or "").strip().lower()
+    if not target:
+        return parsed_mutations
+
+    # For mixed networks (for example, acrb + marr), only mutate the docking target
+    # on the receptor structure.
+    return [m for m in parsed_mutations if m.get("gene") == target]
 
 
 def append_disclaimer(readme_path, protein_name, ligand_name, mutation_network, wt_affinity, mut_affinity, ddg_score):
@@ -544,6 +608,7 @@ def main():
     md_restraint = float(snakemake.config.get("biophysics_md_restraint_k", 50.0))
     docking_exhaustiveness = int(snakemake.config.get("biophysics_exhaustiveness", EXHAUSTIVENESS))
     default_chain = "A"
+    fixed_center = resolve_docking_center(snakemake.config, docking_target)
 
     mutated_pdbs_dir.mkdir(parents=True, exist_ok=True)
     docking_report.parent.mkdir(parents=True, exist_ok=True)
@@ -612,6 +677,8 @@ def main():
             if parsed is not None:
                 parsed_mutations.append(parsed)
 
+        docking_mutations = select_mutations_for_docking(parsed_mutations, docking_target)
+
         if not parsed_mutations:
             results.append(
                 {
@@ -638,7 +705,33 @@ def main():
             )
             continue
 
-        center = pocket_center_from_mutations(reference_pdb, parsed_mutations)
+        if not docking_mutations:
+            results.append(
+                {
+                    "Node_1": node_1,
+                    "Node_2": node_2,
+                    "mutation_network": mutation_network,
+                    "wt_affinity": None,
+                    "mut_affinity": None,
+                    "delta_delta_g": None,
+                    "status": f"skipped_no_target_mutation:{docking_target}",
+                    "center_x": None,
+                    "center_y": None,
+                    "center_z": None,
+                }
+            )
+            append_disclaimer(
+                readme_path,
+                reference_pdb.stem,
+                ligand_path.name,
+                mutation_network,
+                "N/A",
+                "N/A",
+                "N/A",
+            )
+            continue
+
+        center = fixed_center
 
         wt_receptor_prefix = mutated_pdbs_dir / f"network_{idx + 1}_WT_receptor"
         wt_receptor_pdbqt = prepare_receptor_pdbqt(wt_structure_for_docking, center, wt_receptor_prefix)
@@ -656,7 +749,7 @@ def main():
         mut_affinity = None
         status = "ok"
         try:
-            apply_mutations_to_structure(reference_pdb, parsed_mutations, mutated_pdb)
+            apply_mutations_to_structure(reference_pdb, docking_mutations, mutated_pdb)
             structure_for_mut_docking = mutated_pdb
             if deep_relaxed_md:
                 mutated_relaxed = mutated_pdbs_dir / f"network_{idx + 1}_mutated_relaxed.pdb"
@@ -682,6 +775,7 @@ def main():
                 center,
                 mut_pose,
                 exhaustiveness=docking_exhaustiveness,
+                flex_residues=build_flexible_residues_arg(docking_mutations),
             )
         except Exception as exc:
             logger.warning("Mutation threading or mutant docking failed for %s: %s", mutation_network, exc)
