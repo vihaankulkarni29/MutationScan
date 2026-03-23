@@ -60,7 +60,8 @@ class VariantCaller:
         drug_mapping_path: Optional[Path] = None,
         enable_ml: bool = True,
         ml_models_dir: Optional[Path] = None,
-        antibiotic: str = "Ciprofloxacin"
+        antibiotic: str = "Ciprofloxacin",
+        min_identity_percent: float = 80.0,
     ):
         """
         Initialize VariantCaller.
@@ -76,6 +77,8 @@ class VariantCaller:
             enable_ml: If True, use Module 6 ML predictor for unknown mutations
             ml_models_dir: Optional path to ML model directory
             antibiotic: Antibiotic name passed to ML predictor (default: Ciprofloxacin)
+            min_identity_percent: Minimum global alignment identity (%) required
+                                to accept a query/reference comparison and call mutations.
 
         Raises:
             FileNotFoundError: If refs_dir doesn't exist
@@ -108,6 +111,7 @@ class VariantCaller:
         self.enable_ml = enable_ml
         self.ml_models_dir = Path(ml_models_dir) if ml_models_dir else None
         self.antibiotic = antibiotic
+        self.min_identity_percent = float(min_identity_percent)
         self._ml_predictor = None
         self._ml_predictor_error: Optional[Exception] = None
         
@@ -124,6 +128,7 @@ class VariantCaller:
         logger.info(f"Initialized VariantCaller with refs_dir: {self.refs_dir}")
         logger.info(f"Loaded {len(self.resistance_db)} genes in resistance database")
         logger.info(f"Loaded {len(self.drug_mapping)} gene-drug mappings")
+        logger.info(f"Minimum alignment identity filter: {self.min_identity_percent:.1f}%")
 
     def _get_blosum62(self):
         """
@@ -472,6 +477,16 @@ class VariantCaller:
             identity_percent = (identities / length) * 100 if length > 0 else 0
             
             logger.info(f"Alignment {accession}_{gene_name}: Score={score:.1f}, Identity={identity_percent:.1f}%")
+
+            if identity_percent < self.min_identity_percent:
+                logger.warning(
+                    "Skipping %s_%s due to low identity (%.1f%% < %.1f%%)",
+                    accession,
+                    gene_name,
+                    identity_percent,
+                    self.min_identity_percent,
+                )
+                return []
             
             # Call mutations using Residue Counter Algorithm
             mutations = []

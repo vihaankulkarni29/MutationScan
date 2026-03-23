@@ -54,9 +54,13 @@ logger.info(f"  Genomics Report: {mutations_csv}")
 # ---------------------------------------------------------
 logger.info("Step 1.5: Initializing VariantCaller for mutation detection...")
 
+min_identity_percent = float(snakemake.config.get("variant_min_identity_percent", 80.0))
+logger.info(f"  Minimum alignment identity filter: {min_identity_percent:.1f}%")
+
 caller = VariantCaller(
     refs_dir=refs_dir,
-    enable_ml=False
+    enable_ml=False,
+    min_identity_percent=min_identity_percent,
 )
 
 logger.info("Calling variants from extracted proteins...")

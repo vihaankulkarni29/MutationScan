@@ -133,9 +133,13 @@ logger.info(f"Extraction complete: {len(protein_files)} protein files generated"
 # ---------------------------------------------------------
 logger.info("Step 1.5: Initializing VariantCaller for mutation detection...")
 
+min_identity_percent = float(snakemake.config.get("variant_min_identity_percent", 80.0))
+logger.info(f"  Minimum alignment identity filter: {min_identity_percent:.1f}%")
+
 caller = VariantCaller(
     refs_dir=refs_dir,
-    enable_ml=False  # Disable ML for Phase 1 (can be enabled later in Phase 2-5)
+    enable_ml=False,  # Disable ML for Phase 1 (can be enabled later in Phase 2-5)
+    min_identity_percent=min_identity_percent,
 )
 
 logger.info("Calling variants from extracted proteins...")
