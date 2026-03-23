@@ -622,6 +622,44 @@ def fmt_number(value):
     return f"{value:.3f}"
 
 
+def interpret_ddg(ddg, protein_type="efflux_pump"):
+    if ddg is None:
+        return None
+
+    ptype = str(protein_type or "efflux_pump").strip().lower()
+    if ptype == "efflux_pump":
+        if abs(ddg) < 0.5:
+            return "NO_SIGNIFICANT_BINDING_CHANGE"
+        if ddg >= 1.0:
+            return "REDUCED_SUBSTRATE_AFFINITY"
+        if ddg <= -1.0:
+            return "INCREASED_SUBSTRATE_AFFINITY"
+        return "MODERATE_BINDING_SHIFT"
+
+    if abs(ddg) < 0.5:
+        return "NO_SIGNIFICANT_BINDING_CHANGE"
+    return "MODERATE_BINDING_SHIFT"
+
+
+def annotate_ddg_confidence(ddg):
+    if ddg is None:
+        return None, None
+
+    magnitude = abs(ddg)
+    if magnitude < 0.5:
+        return "LOW", "LOW_CONFIDENCE_NOISE"
+    if magnitude >= 1.0:
+        return "HIGH", "STRONG_DDG_SIGNAL"
+    return "MEDIUM", ""
+
+
+def infer_protein_type(docking_target):
+    target = str(docking_target or "").strip().lower()
+    if target in {"acrb", "oqxb"}:
+        return "efflux_pump"
+    return "efflux_pump"
+
+
 def main():
     RESULTS_DIR = Path(snakemake.params.out_dir)
     os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -643,6 +681,7 @@ def main():
     docking_seed = int(snakemake.config.get("biophysics_seed", DOCKING_SEED_DEFAULT))
     default_chain = "A"
     fixed_center = resolve_docking_center(snakemake.config, docking_target)
+    protein_type = infer_protein_type(docking_target)
 
     mutated_pdbs_dir.mkdir(parents=True, exist_ok=True)
     docking_report.parent.mkdir(parents=True, exist_ok=True)
@@ -680,6 +719,9 @@ def main():
             "wt_affinity",
             "mut_affinity",
             "delta_delta_g",
+            "confidence",
+            "confidence_flags",
+            "interpretation",
             "status",
             "center_x",
             "center_y",
@@ -717,6 +759,9 @@ def main():
                     "wt_affinity": None,
                     "mut_affinity": None,
                     "delta_delta_g": None,
+                    "confidence": None,
+                    "confidence_flags": None,
+                    "interpretation": None,
                     "status": "skipped_unparseable_mutations",
                     "center_x": None,
                     "center_y": None,
@@ -743,6 +788,9 @@ def main():
                     "wt_affinity": None,
                     "mut_affinity": None,
                     "delta_delta_g": None,
+                    "confidence": None,
+                    "confidence_flags": None,
+                    "interpretation": None,
                     "status": f"skipped_no_target_mutation:{docking_target}",
                     "center_x": None,
                     "center_y": None,
@@ -818,6 +866,13 @@ def main():
         if wt_affinity is not None and mut_affinity is not None:
             ddg = mut_affinity - wt_affinity
 
+        confidence = None
+        confidence_flags = None
+        interpretation = None
+        if status != "FAILED_QC":
+            confidence, confidence_flags = annotate_ddg_confidence(ddg)
+            interpretation = interpret_ddg(ddg, protein_type=protein_type)
+
         if status != "FAILED_QC" and wt_affinity is None:
             status = "wildtype_docking_failed"
         elif status != "FAILED_QC" and mut_affinity is None:
@@ -831,6 +886,9 @@ def main():
                 "wt_affinity": wt_affinity,
                 "mut_affinity": mut_affinity,
                 "delta_delta_g": ddg,
+                "confidence": confidence,
+                "confidence_flags": confidence_flags,
+                "interpretation": interpretation,
                 "status": status,
                 "center_x": center[0],
                 "center_y": center[1],
