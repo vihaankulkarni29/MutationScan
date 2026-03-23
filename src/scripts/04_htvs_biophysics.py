@@ -43,6 +43,9 @@ CIPRO_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/2764/SDF"
 BOX_SIZE = 25.0
 EXHAUSTIVENESS = 16
 MD_STEPS_DEFAULT = 5000
+DOCKING_SEED_DEFAULT = 42
+QC_CLASH_DISTANCE_ANGSTROM = 2.0
+QC_MAX_CLASH_PAIRS = 20
 
 # Default active-site centers for target proteins (x, y, z)
 TARGET_POCKET_CENTERS = {
@@ -393,7 +396,16 @@ def apply_mutations_to_structure(reference_pdb, parsed_mutations, mutated_pdb_ou
         PDBFile.writeFile(fixer.topology, fixer.positions, handle)
 
 
-def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose, exhaustiveness, flex_residues=None):
+def run_docking(
+    binary,
+    receptor_pdbqt,
+    ligand_pdbqt,
+    center,
+    out_pose,
+    exhaustiveness,
+    flex_residues=None,
+    seed=DOCKING_SEED_DEFAULT,
+):
     cmd = [
         binary,
         "--receptor",
@@ -414,16 +426,24 @@ def run_docking(binary, receptor_pdbqt, ligand_pdbqt, center, out_pose, exhausti
         str(BOX_SIZE),
         "--exhaustiveness",
         str(exhaustiveness),
+        "--seed",
+        str(seed),
         "--out",
         str(out_pose),
     ]
 
     # Enable flexible receptor sidechains for mutant docking when requested.
     if flex_residues:
-        cmd.extend(["--flex", str(flex_residues)])
+        cmd.extend(["--flexres", str(flex_residues)])
 
     result = run_cmd(cmd, f"docking {receptor_pdbqt.name}", allow_failure=True)
     if result.returncode != 0:
+        logger.warning(
+            "Docking failed for %s (exit=%s). stderr=%s",
+            receptor_pdbqt,
+            result.returncode,
+            (result.stderr or "").strip(),
+        )
         return None
     return parse_affinity(result.stdout)
 
@@ -444,50 +464,65 @@ def build_flexible_residues_arg(parsed_mutations):
     return ",".join(residues)
 
 
-def relax_structure_with_openmm(input_pdb, output_pdb, md_steps, restraint_k):
-    from openmm import CustomExternalForce, LangevinIntegrator, LocalEnergyMinimizer, unit
-    from openmm.app import ForceField, HBonds, Modeller, NoCutoff, PDBFile, Simulation
+def _parse_heavy_atoms_for_qc(pdb_path):
+    atoms = []
+    with open(pdb_path, "r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                continue
 
-    pdb = PDBFile(str(input_pdb))
-    forcefield = ForceField("amber14-all.xml", "amber14/tip3p.xml")
+            atom_name = line[12:16].strip().upper()
+            element = line[76:78].strip().upper() if len(line) >= 78 else ""
+            if element == "H" or atom_name.startswith("H"):
+                continue
 
-    modeller = Modeller(pdb.topology, pdb.positions)
-    modeller.addHydrogens(forcefield)
+            chain = line[21].strip()
+            resseq = line[22:26].strip()
+            try:
+                x = float(line[30:38])
+                y = float(line[38:46])
+                z = float(line[46:54])
+            except ValueError:
+                continue
 
-    system = forcefield.createSystem(
-        modeller.topology,
-        nonbondedMethod=NoCutoff,
-        constraints=HBonds,
-    )
+            atoms.append((chain, resseq, x, y, z))
+    return atoms
 
-    restraint = CustomExternalForce("k*((x-x0)^2 + (y-y0)^2 + (z-z0)^2)")
-    restraint.addGlobalParameter("k", float(restraint_k) * unit.kilojoule_per_mole / unit.nanometer**2)
-    restraint.addPerParticleParameter("x0")
-    restraint.addPerParticleParameter("y0")
-    restraint.addPerParticleParameter("z0")
 
-    for atom in modeller.topology.atoms():
-        if atom.name in {"CA", "N", "C", "O"}:
-            pos = modeller.positions[atom.index]
-            restraint.addParticle(atom.index, [pos.x, pos.y, pos.z])
+def basic_qc(mutated_pdb, clash_distance=QC_CLASH_DISTANCE_ANGSTROM, max_clash_pairs=QC_MAX_CLASH_PAIRS):
+    """Fast steric sanity check: fail if too many non-bonded heavy-atom close contacts are detected."""
+    atoms = _parse_heavy_atoms_for_qc(mutated_pdb)
+    if len(atoms) < 2:
+        return False, 0
 
-    system.addForce(restraint)
+    threshold_sq = float(clash_distance) * float(clash_distance)
+    clash_pairs = 0
 
-    integrator = LangevinIntegrator(
-        300 * unit.kelvin,
-        1.0 / unit.picosecond,
-        0.002 * unit.picoseconds,
-    )
-    simulation = Simulation(modeller.topology, system, integrator)
-    simulation.context.setPositions(modeller.positions)
+    for i in range(len(atoms) - 1):
+        chain_i, res_i, x1, y1, z1 = atoms[i]
+        for j in range(i + 1, len(atoms)):
+            chain_j, res_j, x2, y2, z2 = atoms[j]
 
-    LocalEnergyMinimizer.minimize(simulation.context)
-    if int(md_steps) > 0:
-        simulation.step(int(md_steps))
+            # Ignore likely bonded neighbors to reduce false positives.
+            if chain_i == chain_j:
+                try:
+                    ri = int(res_i)
+                    rj = int(res_j)
+                    if abs(ri - rj) <= 1:
+                        continue
+                except ValueError:
+                    if res_i == res_j:
+                        continue
 
-    state = simulation.context.getState(getPositions=True)
-    with open(output_pdb, "w", encoding="utf-8") as handle:
-        PDBFile.writeFile(modeller.topology, state.getPositions(), handle)
+            dx = x1 - x2
+            dy = y1 - y2
+            dz = z1 - z2
+            if (dx * dx + dy * dy + dz * dz) < threshold_sq:
+                clash_pairs += 1
+                if clash_pairs > int(max_clash_pairs):
+                    return False, clash_pairs
+
+    return True, clash_pairs
 
 
 def build_target_networks(networks_df, focus_mutation, focus_gene):
@@ -604,9 +639,8 @@ def main():
     focus_gene = str(snakemake.config.get("biophysics_focus_gene", "")).strip().lower()
     docking_target = str(snakemake.config.get("docking_target", "")).strip().lower()
     deep_relaxed_md = as_bool(snakemake.config.get("biophysics_deep_relaxed_md", False))
-    md_steps = int(snakemake.config.get("biophysics_md_steps", MD_STEPS_DEFAULT))
-    md_restraint = float(snakemake.config.get("biophysics_md_restraint_k", 50.0))
     docking_exhaustiveness = int(snakemake.config.get("biophysics_exhaustiveness", EXHAUSTIVENESS))
+    docking_seed = int(snakemake.config.get("biophysics_seed", DOCKING_SEED_DEFAULT))
     default_chain = "A"
     fixed_center = resolve_docking_center(snakemake.config, docking_target)
 
@@ -656,14 +690,9 @@ def main():
 
     wt_structure_for_docking = reference_pdb
     if deep_relaxed_md:
-        wt_relaxed = mutated_pdbs_dir / "WT_relaxed.pdb"
-        logger.info(
-            "Deep relaxed MD mode enabled. Running WT relaxation with steps=%s, restraint_k=%s",
-            md_steps,
-            md_restraint,
+        logger.warning(
+            "biophysics_deep_relaxed_md is enabled but OpenMM relaxation is disabled in MVBM mode; continuing without minimization."
         )
-        relax_structure_with_openmm(reference_pdb, wt_relaxed, md_steps=md_steps, restraint_k=md_restraint)
-        wt_structure_for_docking = wt_relaxed
 
     results = []
     for idx, row in df.iterrows():
@@ -743,6 +772,7 @@ def main():
             center,
             wt_pose,
             exhaustiveness=docking_exhaustiveness,
+            seed=docking_seed,
         )
 
         mutated_pdb = mutated_pdbs_dir / f"network_{idx + 1}_mutated.pdb"
@@ -750,33 +780,36 @@ def main():
         status = "ok"
         try:
             apply_mutations_to_structure(reference_pdb, docking_mutations, mutated_pdb)
-            structure_for_mut_docking = mutated_pdb
-            if deep_relaxed_md:
-                mutated_relaxed = mutated_pdbs_dir / f"network_{idx + 1}_mutated_relaxed.pdb"
-                relax_structure_with_openmm(
-                    mutated_pdb,
-                    mutated_relaxed,
-                    md_steps=md_steps,
-                    restraint_k=md_restraint,
+            qc_passed, clash_pairs = basic_qc(mutated_pdb)
+            if not qc_passed:
+                logger.warning(
+                    "Basic QC failed for %s: severe steric clashes detected (pairs=%s > %s). Skipping mutant docking.",
+                    mutation_network,
+                    clash_pairs,
+                    QC_MAX_CLASH_PAIRS,
                 )
-                structure_for_mut_docking = mutated_relaxed
+                status = "FAILED_QC"
+                mut_affinity = None
+            else:
+                structure_for_mut_docking = mutated_pdb
 
-            mut_receptor_prefix = mutated_pdbs_dir / f"network_{idx + 1}_MUT_receptor"
-            mut_receptor_pdbqt = prepare_receptor_pdbqt(
-                structure_for_mut_docking,
-                center,
-                mut_receptor_prefix,
-            )
-            mut_pose = mutated_pdbs_dir / f"network_{idx + 1}_MUT_docked.pdbqt"
-            mut_affinity = run_docking(
-                docking_binary,
-                mut_receptor_pdbqt,
-                ligand_pdbqt,
-                center,
-                mut_pose,
-                exhaustiveness=docking_exhaustiveness,
-                flex_residues=build_flexible_residues_arg(docking_mutations),
-            )
+                mut_receptor_prefix = mutated_pdbs_dir / f"network_{idx + 1}_MUT_receptor"
+                mut_receptor_pdbqt = prepare_receptor_pdbqt(
+                    structure_for_mut_docking,
+                    center,
+                    mut_receptor_prefix,
+                )
+                mut_pose = mutated_pdbs_dir / f"network_{idx + 1}_MUT_docked.pdbqt"
+                mut_affinity = run_docking(
+                    docking_binary,
+                    mut_receptor_pdbqt,
+                    ligand_pdbqt,
+                    center,
+                    mut_pose,
+                    exhaustiveness=docking_exhaustiveness,
+                    flex_residues=build_flexible_residues_arg(docking_mutations),
+                    seed=docking_seed,
+                )
         except Exception as exc:
             logger.warning("Mutation threading or mutant docking failed for %s: %s", mutation_network, exc)
             status = "mutant_failed_fallback"
@@ -785,8 +818,10 @@ def main():
         if wt_affinity is not None and mut_affinity is not None:
             ddg = mut_affinity - wt_affinity
 
-        if wt_affinity is None:
+        if status != "FAILED_QC" and wt_affinity is None:
             status = "wildtype_docking_failed"
+        elif status != "FAILED_QC" and mut_affinity is None:
+            status = "mutant_docking_failed"
 
         results.append(
             {
