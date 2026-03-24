@@ -1,45 +1,176 @@
-# MutationScan v2.1 ??
-**The Deterministic Genotype-to-Phenotype-to-Biophysics Engine for AMR Triage**
+# MutationScan
 
-MutationScan is an industry-grade, Snakemake-orchestrated bioinformatics pipeline designed to analyze Antimicrobial Resistance (AMR). It translates clinical genomic assemblies ($1D$) into structural thermodynamic data ($3D$) by identifying mutations, scoring their evolutionary and biochemical severity, mapping their epistatic networks, and performing High-Throughput Virtual Screening (HTVS) biophysics to calculate drug binding affinity loss ($\Delta\Delta G$).
+MutationScan is a Snakemake-orchestrated AMR analytics pipeline that transforms local bacterial genome assemblies into:
 
-Unlike black-box machine learning predictors, MutationScan is a **purely deterministic mathematical and physical engine**.
+1. Mutation call reports
+2. Biochemical epistasis network rankings
+3. Optional structure-guided docking deltas (WT vs mutant)
 
----
+The repository is structured for production use with deterministic workflow steps, job-scoped output directories, and strict separation of source code vs runtime state.
 
-## ?? Scientific Rigor & Methodology
+## What MutationScan Does
 
-MutationScan operates on four core scientific pillars:
+MutationScan executes a staged workflow:
 
-1. **Frameshift-Proof Extraction:** Bacterial assemblies are notoriously messy. MutationScan autonomously fetches wild-type references from UniProt and uses dynamic `tblastn` translation alignments to extract perfectly in-frame clinical target proteins.
-2. **Deterministic Biochemical Scoring (ControlScan):** Mutations are mathematically penalized using a composite score that normalizes **Grantham physicochemical distances** against **BLOSUM62 evolutionary probabilities**, avoiding reliance on noisy/missing transcriptomic data.
-3. **Composite Epistasis:** The pipeline maps co-occurring mutation networks using Jaccard-style frequencies weighted by the average ControlScan biochemical severity of the pair, identifying the most dangerous evolutionary pathways.
-4. **HTVS Soft-Core Dynamics:** To solve the "steric clash" problem of in-silico mutagenesis without requiring months of supercomputer Molecular Dynamics, Phase 4 utilizes **OpenMM L-BFGS Energy Minimization**. This applies a *Rigid-Backbone, Flexible-Sidechain Approximation* to relax the mutated pocket into a local energy minimum before using **SMINA** to dock the ligand. Results are rigorously reported as $\Delta\Delta G$ (Mutant vs. Wild-type) to isolate the exact thermodynamic cost of the mutation.
+1. Sequence extraction and variant calling from local `.fna` genomes
+2. Biochemical scoring and co-occurrence epistasis network generation
+3. Optional biophysics docking against a provided protein structure
 
----
+Current design principle:
 
-## ??? Pipeline Architecture (Snakemake DAG)
+- Local genomes are the input source (no built-in metadata download stage in the production DAG).
+- Every run is namespaced by `job_name` and writes to `data/output/{job_name}/`.
 
-The workflow is completely modular. Users can start from raw CSV metadata (triggering autonomous downloads) or provide their own local `.fna` assemblies.
+## Recent Updates (March 2026)
 
-* **Phase 1a: Acquisition (Optional)** - Resolves IDs, applies geographic/temporal filters, and idempotently downloads NCBI/BV-BRC assemblies.
-* **Phase 1b: Extraction & Calling** - Autonomously fetches UniProt wild-types, extracts sequences via `tblastn`, and calls variants.
-* **Phase 2 & 3: Biochemical Epistasis** - Applies ControlScan mathematics and generates publication-ready NetworkX co-occurrence plots.
-* **Phase 4: HTVS Biophysics (Optional)** - If a base PDB is provided, dynamically mutates the top 5 epistatic networks, minimizes energy, and runs thermodynamic docking.
+The current main branch includes several pipeline correctness and quality upgrades:
 
----
+- Variant-calling identity filter to suppress weak-homology mutation inflation.
+- MVBM docking refinements with fixed-pocket targeting and flexible-residue mutant docking.
+- Fast steric quality control with explicit `FAILED_QC` status for non-physical mutant models.
+- Confidence and interpretation annotations in biophysics outputs for easier triage.
 
-## ?? Quick Start Guide (Dockerized)
+These updates are now the documented baseline behavior for new runs.
 
-Because MutationScan relies on heavy cross-platform bioinformatics binaries (`tblastn`, `openmm`, `smina`), the entire engine runs inside an isolated Docker container. **It will run identically on Windows, Mac, or Linux.**
+## Production Workflow (Snakemake)
 
-### 1. Prerequisites & Setup
-Ensure you have [Docker](https://docs.docker.com/get-docker/) and `docker-compose` installed.
+The active workflow in [Snakefile](Snakefile) calls exactly these scripts:
+
+1. [src/scripts/02_extract_and_call.py](src/scripts/02_extract_and_call.py)
+2. [src/scripts/03_biochemical_epistasis.py](src/scripts/03_biochemical_epistasis.py)
+3. [src/scripts/04_htvs_biophysics.py](src/scripts/04_htvs_biophysics.py)
+
+No legacy acquisition script is used in the current production DAG.
+
+## Inputs and Outputs
+
+Required inputs:
+
+- Local genomes directory (default `data/local_genomes`)
+- Target gene list (default `config/acr_targets.txt`)
+- Optional reference PDB for Phase 3 biophysics (default `data/5o66.pdb` in config)
+- Optional ligand path from config (`ligand`)
+
+Primary outputs for a run:
+
+- `data/output/{job_name}/1_genomics_report.csv`
+- `data/output/{job_name}/2_epistasis_networks.csv`
+- `data/output/{job_name}/ControlScan_Networks/`
+- `data/output/{job_name}/3_biophysics_docking.csv`
+- `data/output/{job_name}/Mutated_Structures/`
+- `data/output/{job_name}/README_Biophysics.txt`
+
+## Configuration
+
+Edit [config/config.yaml](config/config.yaml) to control run behavior.
+
+Minimum important keys:
+
+- `job_name`: output namespace for this run
+- `local_genomes`: folder containing `.fna` files
+- `targets_file`: target genes list
+- `variant_min_identity_percent`: minimum alignment identity threshold for variant emission (default `80`)
+- `default_pdb`: structure file for biophysics stage
+- `ligand`: optional ligand file path for docking
+- `pocket_center_x`/`pocket_center_y`/`pocket_center_z`: optional override for docking pocket center (default AcrB center)
+- `exhaustiveness`: docking search exhaustiveness (default `16`)
+
+Example:
+
+```yaml
+job_name: "trial_001"
+local_genomes: "data/local_genomes"
+targets_file: "config/acr_targets.txt"
+variant_min_identity_percent: 80
+default_pdb: "data/5o66.pdb"
+ligand: "data/ligands/ligand.sdf"
+exhaustiveness: 16
+```
+
+Identity filtering note:
+
+- Alignments below `variant_min_identity_percent` are skipped before mutation emission.
+- If you want a broader but noisier search, reduce to `75`; for stricter calls, keep `80` or raise it.
+
+## Quick Start
+
+### Option A: Local environment
+
+Use the project Conda environment definition:
 
 ```bash
-git clone [https://github.com/vihaankulkarni29/MutationScan.git](https://github.com/vihaankulkarni29/MutationScan.git)
-cd MutationScan
-
-# Build the bioinformatics container
-docker-compose build
+conda env create -f environment.yml
+conda activate mutationscan
+pip install -e .
 ```
+
+Dry-run the DAG:
+
+```bash
+python -m snakemake -n --cores 1 --config job_name="smoke_test"
+```
+
+Run the workflow:
+
+```bash
+python -m snakemake --cores 4 --config job_name="run_2026_03_18"
+```
+
+### Option B: Docker
+
+```bash
+docker compose build
+docker compose run --rm mutationscan python -m snakemake -n --cores 1 --config job_name="docker_smoke"
+docker compose run --rm mutationscan python -m snakemake --cores 4 --config job_name="docker_run"
+```
+
+## CI/CD Notes
+
+Repository CI validates:
+
+- Unit tests
+- Snakemake DAG buildability
+
+Runtime data/state folders are intentionally quarantined via ignore rules, and `.snakemake/` is not tracked.
+
+## Scientific and Operational Disclaimers
+
+This pipeline is intended for research and engineering triage workflows.
+
+1. Not a clinical diagnostic device.
+2. Mutation-to-phenotype inference is model- and rule-dependent, not ground truth.
+3. Docking outputs are best-effort relative estimates, not absolute binding free-energy truth.
+4. Fast local docking does not fully model large conformational changes, explicit solvent, long-timescale dynamics, or complete thermodynamic integration.
+5. For high-confidence mechanistic conclusions, use full molecular dynamics and dedicated free-energy methods.
+
+## Repository Hygiene Policy
+
+Tracked assets should remain source/config/documentation only.
+
+Not shipped as production code or tracked outputs:
+
+- `.snakemake/` runtime state
+- Generated output under `data/output/*`
+- Downloaded genome payloads under `data/local_genomes/*`
+- Ad hoc local experiment files
+
+Keep placeholders only (`.gitkeep`) in runtime data folders.
+
+## Troubleshooting
+
+Common causes of failed runs:
+
+1. Missing `.fna` files in `local_genomes`
+2. Missing/incorrect target genes file
+3. Missing PDB when biophysics stage is enabled
+4. Missing external binaries in local environment (`tblastn`, docking dependencies)
+
+Recommended first check:
+
+```bash
+python -m snakemake -n --cores 1 --config job_name="debug_run"
+```
+
+## License
+
+See [LICENSE](LICENSE).
