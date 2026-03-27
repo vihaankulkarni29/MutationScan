@@ -36,9 +36,10 @@ These updates are now the documented baseline behavior for new runs.
 
 The active workflow in [Snakefile](Snakefile) calls exactly these scripts:
 
-1. [src/scripts/02_extract_and_call.py](src/scripts/02_extract_and_call.py)
-2. [src/scripts/03_biochemical_epistasis.py](src/scripts/03_biochemical_epistasis.py)
-3. [src/scripts/04_htvs_biophysics.py](src/scripts/04_htvs_biophysics.py)
+1. [src/scripts/02a_extract_proteins.py](src/scripts/02a_extract_proteins.py)
+2. [src/scripts/02b_call_variants.py](src/scripts/02b_call_variants.py)
+3. [src/scripts/03_biochemical_epistasis.py](src/scripts/03_biochemical_epistasis.py)
+4. [src/scripts/04_htvs_biophysics.py](src/scripts/04_htvs_biophysics.py)
 
 No legacy acquisition script is used in the current production DAG.
 
