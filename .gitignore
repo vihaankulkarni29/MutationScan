@@ -141,3 +141,7 @@ utility scripts/bvbrc-cli/
 
 # Local test scratch data
 data/test_variant_caller/
+
+# User-supplied reference proteins (organism-specific, not source)
+data/references/*
+!data/references/.gitkeep

@@ -1,33 +1,18 @@
-"""
-MutationScan: A Python-based bioinformatics pipeline for AMR gene detection and analysis.
+"""MutationScan: protein variant calling and descriptive mutation co-occurrence.
 
-This package provides automated analysis of bacterial genomes, including:
-- Genome downloading and processing
-- AMR gene screening
-- Protein sequence extraction
-- Pairwise sequence alignment
-- 3D biophysics calculations (ΔΔG predictions)
+Stages
+------
+1. ``references``   discover target genes from the reference proteins supplied
+2. ``extract``      tblastn translating alignment: genome DNA -> target proteins
+3. ``variants``     global alignment + gap-aware residue counter -> substitutions
+4. ``cooccurrence`` per-genome counts of which genes are mutated together
 
-Refactored v2.0: Modular src-layout architecture
-- core: Genome ingestion & gene detection
-- analysis: Variant calling & ML predictions
-- biophysics: 3D docking and binding affinity predictions
-- utils: Shared utilities
+No gene, genome, organism, drug or structure is hardcoded anywhere in this
+package. The targets of a run are whatever reference FASTA files the user
+supplies, and every output is a count or a measurement -- the tool reports what
+is in the data and interprets none of it.
 """
 
-__version__ = "2.0.0"
-__author__ = "MutationScan Team"
-__email__ = "contact@example.com"
+__version__ = "3.0.0"
 
-# Import subpackages
-from . import core
-from . import analysis
-from . import biophysics
-from . import utils
-
-__all__ = [
-    "core",
-    "analysis",
-    "biophysics",
-    "utils",
-]
+__all__ = ["__version__"]
