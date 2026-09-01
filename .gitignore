@@ -135,3 +135,9 @@ docker-compose.override.yml
 
 # CI/CD
 .github/workflows/*.backup
+
+# Vendored 35MB BV-BRC CLI (not source)
+utility scripts/bvbrc-cli/
+
+# Local test scratch data
+data/test_variant_caller/

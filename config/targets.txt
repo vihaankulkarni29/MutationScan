@@ -1,0 +1,2 @@
+# Add your target gene names below (one per line).
+# See targets.txt.example for format.

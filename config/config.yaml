@@ -1,5 +1,12 @@
 # MutationScan Core Configuration
 job_name: "default_run"
 local_genomes: "data/local_genomes"
-targets_file: "config/acr_targets.txt"
-default_pdb: "data/5o66.pdb"
+targets_file: "config/targets.txt"
+
+# Optional: folder of WT reference proteins ({gene}_WT.faa or {gene}.faa)
+reference_seed_dir: ""
+
+# Optional: UniProt taxonomy ID to auto-fetch missing references
+uniprot_taxid: ""
+
+variant_min_identity_percent: 80

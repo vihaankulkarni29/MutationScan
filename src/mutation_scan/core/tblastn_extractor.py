@@ -12,6 +12,7 @@ Workflow:
 
 import logging
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -27,6 +28,96 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 logger = logging.getLogger(__name__)
+
+_REF_EXTENSIONS = {".faa", ".fasta"}
+
+
+def gene_from_ref_stem(stem: str) -> str:
+    """Normalize a reference filename stem to a gene name."""
+    if stem.endswith("_WT"):
+        return stem[:-3]
+    return stem
+
+
+def resolve_reference(refs_dir: Path, gene: str) -> Optional[Path]:
+    """
+    Resolve a wild-type reference FASTA for a target gene (case-insensitive).
+
+    Accepted layouts: {gene}_WT.faa, {gene}.faa, {gene}_WT.fasta, {gene}.fasta
+    """
+    refs_dir = Path(refs_dir)
+    if not refs_dir.is_dir():
+        return None
+
+    gene_key = gene.strip().lower()
+    if not gene_key:
+        return None
+
+    for path in sorted(refs_dir.iterdir()):
+        if path.suffix.lower() not in _REF_EXTENSIONS:
+            continue
+        if not path.is_file() or path.stat().st_size == 0:
+            continue
+        if gene_from_ref_stem(path.stem).lower() == gene_key:
+            return path
+
+    return None
+
+
+def canonical_reference_path(refs_dir: Path, gene: str) -> Path:
+    """Target path when normalizing references into the run refs directory."""
+    return Path(refs_dir) / f"{gene}_WT.faa"
+
+
+def seed_references_from_dir(
+    refs_dir: Path,
+    seed_dir: Path,
+    target_genes: List[str],
+) -> int:
+    """
+    Copy missing references from a user-supplied seed directory into refs_dir.
+
+    Returns the number of genes seeded.
+    """
+    seed_dir = Path(seed_dir)
+    refs_dir = Path(refs_dir)
+    refs_dir.mkdir(parents=True, exist_ok=True)
+
+    if not str(seed_dir).strip() or not seed_dir.is_dir():
+        return 0
+
+    seeded = 0
+    for gene in target_genes:
+        if resolve_reference(refs_dir, gene) is not None:
+            continue
+
+        source = resolve_reference(seed_dir, gene)
+        if source is None:
+            continue
+
+        destination = canonical_reference_path(refs_dir, gene)
+        shutil.copy2(source, destination)
+        logger.info("Seeded reference for %s from %s", gene, source)
+        seeded += 1
+
+    return seeded
+
+
+def load_target_genes(targets_file: Path) -> List[str]:
+    """Load gene names from a targets file, ignoring blank lines and # comments."""
+    genes: List[str] = []
+    with open(targets_file, "r", encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            genes.append(stripped)
+    return genes
+
+
+def missing_reference_genes(refs_dir: Path, target_genes: List[str]) -> List[str]:
+    """Return target genes that do not have a resolvable reference in refs_dir."""
+    return [gene for gene in target_genes if resolve_reference(refs_dir, gene) is None]
 
 
 class TblastnSequenceExtractor:
@@ -130,23 +221,25 @@ class TblastnSequenceExtractor:
             logger.error(f"Genome file not found: {genome_fna}")
             return 0, 0
 
-        # Get list of reference proteins
-        ref_files = list(self.refs_dir.glob("*.faa"))
-        if not ref_files:
-            logger.warning(f"No reference protein files found in {self.refs_dir}")
-            return 0, 0
-
-        # Filter by target genes if specified
         if target_genes:
-            target_genes_lower = [g.lower() for g in target_genes]
-            ref_files = [
-                f for f in ref_files
-                if any(tg in f.stem.lower() for tg in target_genes_lower)
-            ]
+            ref_files = []
+            for gene in target_genes:
+                ref_path = resolve_reference(self.refs_dir, gene)
+                if ref_path is not None:
+                    ref_files.append(ref_path)
             if not ref_files:
                 logger.warning(
-                    f"No reference files match target genes: {target_genes}"
+                    "No reference files match target genes: %s", target_genes
                 )
+                return 0, 0
+        else:
+            ref_files = [
+                path
+                for path in sorted(self.refs_dir.iterdir())
+                if path.is_file() and path.suffix.lower() in _REF_EXTENSIONS
+            ]
+            if not ref_files:
+                logger.warning("No reference protein files found in %s", self.refs_dir)
                 return 0, 0
 
         success_count = 0
@@ -157,7 +250,7 @@ class TblastnSequenceExtractor:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         for ref_faa in ref_files:
-            gene_name = ref_faa.stem.replace("_WT", "")
+            gene_name = gene_from_ref_stem(ref_faa.stem)
 
             try:
                 # Run tblastn alignment
@@ -366,32 +459,42 @@ class TblastnSequenceExtractor:
         self.refs_dir.mkdir(parents=True, exist_ok=True)
         
         if not self.uniprot_taxid:
-            logger.info("No --uniprot-taxid provided. Relying strictly on local reference FASTA files in refs/ directory.")
+            logger.info(
+                "No uniprot_taxid provided. Using local reference FASTA files in %s.",
+                self.refs_dir,
+            )
             return
-        
-        logger.info(f"Checking references for {len(target_genes)} genes...")
+
+        logger.info("Checking references for %s genes...", len(target_genes))
         for gene in target_genes:
-            ref_path = self.refs_dir / f"{gene.lower()}.fasta"
-            if ref_path.exists():
-                logger.debug(f"Reference exists: {ref_path.name}")
+            if resolve_reference(self.refs_dir, gene) is not None:
+                logger.debug("Reference exists for %s", gene)
                 continue
-            
-            logger.info(f"Reference for {gene} missing. Auto-fetching from UniProt for TaxID {self.uniprot_taxid}...")
+
+            ref_path = canonical_reference_path(self.refs_dir, gene)
+            logger.info(
+                "Reference for %s missing. Auto-fetching from UniProt for TaxID %s...",
+                gene,
+                self.uniprot_taxid,
+            )
             try:
-                # Query UniProt for the reviewed (canonical) reference protein
                 query = f"gene:{gene}+AND+taxonomy_id:{self.uniprot_taxid}+AND+reviewed:true"
                 url = f"https://rest.uniprot.org/uniprotkb/search?query={urllib.parse.quote(query)}&format=fasta&size=1"
-                
-                req = urllib.request.Request(url, headers={'Accept': 'text/plain'})
+
+                req = urllib.request.Request(url, headers={"Accept": "text/plain"})
                 with urllib.request.urlopen(req, timeout=10) as response:
-                    fasta_data = response.read().decode('utf-8').strip()
-                
+                    fasta_data = response.read().decode("utf-8").strip()
+
                 if fasta_data:
-                    with open(ref_path, 'w') as f:
-                        f.write(fasta_data)
-                    logger.info(f"Successfully saved canonical reference for {gene} to {ref_path.name}")
+                    with open(ref_path, "w", encoding="utf-8") as handle:
+                        handle.write(fasta_data)
+                    logger.info("Saved canonical reference for %s to %s", gene, ref_path.name)
                 else:
-                    logger.warning(f"Could not find Reviewed UniProt reference for {gene} (TaxID: {self.uniprot_taxid}).")
+                    logger.warning(
+                        "No reviewed UniProt reference for %s (TaxID: %s).",
+                        gene,
+                        self.uniprot_taxid,
+                    )
                 
                 # UniProt rate limiting (be respectful)
                 time.sleep(0.5)
