@@ -1,7 +1,0 @@
-# One target gene name per line. Lines starting with # are ignored.
-# Provide matching wild-type references via reference_seed_dir or uniprot_taxid.
-#
-# Example:
-# gyrA
-# rpoB
-# efflux_transporter

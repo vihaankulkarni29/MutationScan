@@ -1,26 +1,10 @@
-"""Production entrypoint that delegates execution to Snakemake.
+"""``python -m mutation_scan`` -- the same program as the ``mutationscan`` command.
 
-Usage:
-    python -m mutation_scan [snakemake args]
+Kept as a one-line delegation so there is exactly one command-line implementation
+to maintain, and so the tool is usable without the console script being on PATH.
 """
 
-import shutil
-import subprocess
-import sys
-
-
-def main() -> int:
-    snakemake_bin = shutil.which("snakemake")
-    if not snakemake_bin:
-        sys.stderr.write(
-            "snakemake is not available on PATH. Run the pipeline with "
-            "`python -m snakemake ...` or install snakemake in the active environment.\n"
-        )
-        return 1
-
-    cmd = [snakemake_bin, *sys.argv[1:]]
-    return subprocess.call(cmd)
-
+from .cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())
