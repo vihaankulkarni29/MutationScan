@@ -1,13 +1,13 @@
 # MutationScan run configuration.
 #
 # Target genes are NOT listed here by default: they are discovered from the
-# filenames in references_dir. Drop acrB_WT.faa in there and acrB is a target.
+# filenames in references_dir. Drop geneA_WT.faa in there and geneA is a target.
 # Nothing about any gene, organism or drug is baked into the code.
 
 job_name: default_run
 
 # Inputs
-genomes_dir: data/local_genomes     # nucleotide assemblies, one *.fna per genome
+genomes_dir: data/genomes           # nucleotide assemblies, one *.fna per genome
 references_dir: data/references     # wild-type proteins, {gene}_WT.faa or {gene}.faa
 
 # Output: everything is written to {output_root}/{job_name}/

@@ -99,6 +99,15 @@ class Config:
         return self.run_dir / "mutations.csv"
 
     @property
+    def variant_qc_csv(self) -> Path:
+        """One row per (genome, gene) pair considered by variant calling.
+
+        Distinguishes "not mutated" from "not evaluated", and is what supplies
+        honest denominators to the co-occurrence stage.
+        """
+        return self.run_dir / "variant_qc.csv"
+
+    @property
     def cooccurrence_genes_csv(self) -> Path:
         return self.run_dir / "cooccurrence_genes.csv"
 
@@ -119,6 +128,7 @@ class Config:
         paths = [
             self.manifest_csv,
             self.mutations_csv,
+            self.variant_qc_csv,
             self.cooccurrence_genes_csv,
             self.cooccurrence_matrix_csv,
             self.run_summary_json,

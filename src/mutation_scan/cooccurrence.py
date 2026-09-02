@@ -36,6 +36,7 @@ __all__ = [
     "CooccurrenceResult",
     "cooccurrence",
     "eligibility_from_qc",
+    "load_result",
     "read_cooccurrence",
 ]
 
@@ -375,3 +376,36 @@ def read_cooccurrence(path: Path | str) -> pd.DataFrame:
         if column in frame.columns:
             frame[column] = frame[column].astype(str)
     return frame
+
+
+def load_result(
+    genes_csv: Path | str,
+    matrix_csv: Path | str,
+    variants_csv: Path | str | None = None,
+    qc: pd.DataFrame | None = None,
+) -> CooccurrenceResult:
+    """Rebuild a :class:`CooccurrenceResult` from files a previous stage wrote.
+
+    Lets a later step (the run summary) report on co-occurrence without recomputing
+    it, which is what keeps the Snakemake wrappers free of logic.
+    """
+    matrix = pd.read_csv(matrix_csv, index_col=0)
+    matrix.index = matrix.index.astype(str)
+    matrix.columns = matrix.columns.astype(str)
+
+    variants = (
+        read_cooccurrence(variants_csv)
+        if variants_csv is not None and Path(variants_csv).is_file()
+        else None
+    )
+    eligible = eligibility_from_qc(qc) if qc is not None else {}
+
+    return CooccurrenceResult(
+        genes=read_cooccurrence(genes_csv),
+        genes_matrix=matrix,
+        variants=variants,
+        gene_totals={gene: int(matrix.loc[gene, gene]) for gene in matrix.index},
+        eligible_per_gene={
+            gene: len(eligible.get(gene, set())) for gene in matrix.index
+        },
+    )

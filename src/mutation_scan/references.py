@@ -34,6 +34,7 @@ __all__ = [
     "discover_targets",
     "fetch_uniprot_reference",
     "gene_from_ref_stem",
+    "load_reference_set",
     "missing_reference_genes",
     "prepare_references",
     "resolve_reference",
@@ -250,6 +251,46 @@ def prepare_references(
         result.lengths[gene] = len(sequence)
         result.sources[gene] = origin
         logger.info("Reference ready: %s (%d aa, %s)", gene, len(sequence), origin)
+
+    return result
+
+
+#: Origins recorded in a prepared reference's FASTA header by prepare_references.
+_ORIGIN_PREFIXES = ("local:", "uniprot:")
+
+
+def _origin_from_description(description: str) -> str:
+    """Recover the ``local:``/``uniprot:`` origin token from a header line."""
+    for token in description.split():
+        if token.startswith(_ORIGIN_PREFIXES):
+            return token
+    return ""
+
+
+def load_reference_set(refs_dir: Path | str) -> ReferenceSet:
+    """Rebuild a :class:`ReferenceSet` from a run's prepared references directory.
+
+    :func:`prepare_references` normalizes every reference to ``{gene}_WT.faa`` and
+    records where it came from in the header, so a later stage can report on what
+    was actually used without re-resolving paths or re-fetching anything. That is
+    what keeps the Snakemake wrappers free of logic.
+
+    Nothing is reported as *missing* here: a gene with no file in *refs_dir* was
+    never prepared, so it is simply absent.
+    """
+    refs_dir = Path(refs_dir)
+    result = ReferenceSet(refs_dir=refs_dir)
+
+    for path in _reference_candidates(refs_dir):
+        gene = gene_from_ref_stem(path.stem)
+        try:
+            record = read_protein_sequence(path, fallback_id=gene)
+        except ValueError as exc:
+            logger.warning("Ignoring unreadable reference %s: %s", path.name, exc)
+            continue
+        result.genes.append(gene)
+        result.lengths[gene] = len(record.seq)
+        result.sources[gene] = _origin_from_description(record.description)
 
     return result
 
