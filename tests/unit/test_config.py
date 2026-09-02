@@ -64,11 +64,11 @@ def test_variant_level_adds_its_output(tmp_path):
 
 
 def test_targets_accept_list_or_string(tmp_path):
-    from_list = Config.from_mapping({"targets": ["acrB", " marR ", "acrB"]}, base_dir=tmp_path)
-    assert from_list.targets == ("acrB", "marR")
+    from_list = Config.from_mapping({"targets": ["geneA", " geneB ", "geneA"]}, base_dir=tmp_path)
+    assert from_list.targets == ("geneA", "geneB")
 
-    from_string = Config.from_mapping({"targets": "acrB, marR"}, base_dir=tmp_path)
-    assert from_string.targets == ("acrB", "marR")
+    from_string = Config.from_mapping({"targets": "geneA, geneB"}, base_dir=tmp_path)
+    assert from_string.targets == ("geneA", "geneB")
 
 
 def test_null_values_fall_back_to_defaults(tmp_path):

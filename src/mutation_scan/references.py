@@ -2,8 +2,8 @@
 
 This module is the reason MutationScan needs no gene list in its code: the
 targets of a run are *whatever reference proteins the user supplies*. Drop
-``acrB_WT.faa`` into the references directory and ``acrB`` becomes a target;
-drop ``rpoB.fasta`` in and so does ``rpoB``. Gene names are only ever read from
+``geneA_WT.faa`` into the references directory and ``geneA`` becomes a target;
+drop ``geneB.fasta`` in and so does ``geneB``. Gene names are only ever read from
 filenames, never assumed.
 
 References are normalized on the way into the run directory (one clean FASTA
@@ -49,7 +49,7 @@ _UNIPROT_PAUSE = 0.5  # be a polite API citizen between fetches
 
 
 def gene_from_ref_stem(stem: str) -> str:
-    """Normalize a reference filename stem to a gene name (``acrB_WT`` -> ``acrB``)."""
+    """Normalize a reference filename stem to a gene name (``geneA_WT`` -> ``geneA``)."""
     if stem.lower().endswith("_wt"):
         return stem[:-3]
     return stem

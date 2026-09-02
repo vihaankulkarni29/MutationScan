@@ -280,11 +280,11 @@ def test_an_unreadable_protein_is_recorded_as_an_error(run_dirs):
 
 def test_directory_scan_fallback_without_a_manifest(run_dirs):
     refs, proteins = run_dirs
-    put_protein(proteins, "562.112393", "alphaX", mutate(PROTEIN_ALPHA, (7, "W")))
+    put_protein(proteins, "9999.12345", "alphaX", mutate(PROTEIN_ALPHA, (7, "W")))
 
     result = call_variants(proteins, refs)
 
-    assert result.mutations["Accession"].tolist() == ["562.112393"]
+    assert result.mutations["Accession"].tolist() == ["9999.12345"]
     assert result.mutations["Gene"].tolist() == ["alphaX"]
 
 
@@ -349,14 +349,14 @@ def test_output_is_sorted_and_round_trips_through_csv(run_dirs, tmp_path):
 
 def test_numeric_accessions_survive_the_csv_round_trip(run_dirs, tmp_path):
     refs, proteins = run_dirs
-    put_protein(proteins, "562.112393", "alphaX", mutate(PROTEIN_ALPHA, (5, "W")))
+    put_protein(proteins, "9999.12345", "alphaX", mutate(PROTEIN_ALPHA, (5, "W")))
     mutations_csv = tmp_path / "mutations.csv"
 
     call_variants(
         proteins,
         refs,
-        manifest=manifest_for([("562.112393", "alphaX")]),
+        manifest=manifest_for([("9999.12345", "alphaX")]),
         mutations_csv=mutations_csv,
     )
 
-    assert read_mutations(mutations_csv)["Accession"].iloc[0] == "562.112393"
+    assert read_mutations(mutations_csv)["Accession"].iloc[0] == "9999.12345"

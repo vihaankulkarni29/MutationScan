@@ -57,12 +57,12 @@ def test_discover_genomes_on_missing_dir(tmp_path):
 
 
 def test_accession_keeps_dotted_names(tmp_path):
-    """BV-BRC style identifiers contain dots and must survive intact."""
-    path = write_genome(tmp_path, "562.112393", {"alphaX": PROTEIN_ALPHA})
+    """Genome identifiers often contain dots and must survive intact."""
+    path = write_genome(tmp_path, "9999.12345", {"alphaX": PROTEIN_ALPHA})
 
     assert discover_genomes(tmp_path) == [path]
-    assert path.stem == "562.112393"
-    assert protein_path(tmp_path, "562.112393", "alphaX").name == "562.112393_alphaX.faa"
+    assert path.stem == "9999.12345"
+    assert protein_path(tmp_path, "9999.12345", "alphaX").name == "9999.12345_alphaX.faa"
 
 
 # -- binary verification ----------------------------------------------------
@@ -222,12 +222,12 @@ def test_read_manifest_rejects_a_foreign_csv(tmp_path):
 
 def test_read_manifest_keeps_numeric_accessions_as_strings(tmp_path, references_dir, fake_tblastn):
     refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX"])
-    write_genome(tmp_path / "genomes", "562.112393", {"alphaX": PROTEIN_ALPHA})
+    write_genome(tmp_path / "genomes", "9999.12345", {"alphaX": PROTEIN_ALPHA})
     manifest_csv = tmp_path / "manifest.csv"
 
     extract(tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs, manifest_csv=manifest_csv)
 
-    assert read_manifest(manifest_csv)["Accession"].iloc[0] == "562.112393"
+    assert read_manifest(manifest_csv)["Accession"].iloc[0] == "9999.12345"
 
 
 # -- real tblastn -----------------------------------------------------------

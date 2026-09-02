@@ -1,45 +1,46 @@
-name: MutationScan CI
+name: tests
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
-  build-and-test:
+  test:
     runs-on: ubuntu-latest
-    
-    # Crucial: forces every step to use the Conda environment
+
+    # Every step runs inside the conda environment.
     defaults:
       run:
         shell: bash -el {0}
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    - name: Set up Conda Environment
-      uses: conda-incubator/setup-miniconda@v3
-      with:
-        activate-environment: mutationscan
-        environment-file: environment.yml
-        auto-activate: true
-        miniforge-variant: Miniforge3
-        use-mamba: true
+      - name: Set up conda environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: mutationscan
+          environment-file: environment.yml
+          miniforge-version: latest
+          use-mamba: true
 
-    - name: Install Package
-      run: |
-        # Installs MutationScan so the core logic is importable by pytest
-        pip install -e .
+      - name: Install package
+        run: pip install --no-deps -e .
 
-    - name: Run Core Unit Tests
-      run: |
-        # Using python -m pytest ensures it uses the Conda environment's pytest
-        python -m pytest tests/unit/ -v
+      - name: Check tblastn is available
+        run: tblastn -version
 
-    - name: Validate Snakemake DAG (Dry-Run)
-      run: |
-        # Override the input_csv requirement by forcing the local_genomes route.
-        # This proves the DAG compiles without needing actual biological data files.
-        snakemake -n --cores 1 --config local_genomes="data/genomes"
+      # The whole suite, not just unit/: the integration tests are the ones that
+      # prove the CLI and the workflow actually produce the documented outputs.
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+      - name: Validate the Snakemake DAG
+        # Needs no biological data -- it only proves the workflow compiles and
+        # that every rule's paths agree with what Config.outputs() declares.
+        run: snakemake -n --cores 1
+
+      - name: Check the shipped config resolves
+        run: mutationscan config-check --config config/config.yaml --json

@@ -328,9 +328,9 @@ def test_foreign_mutations_table_is_rejected():
 
 def test_numeric_accessions_are_not_coerced():
     mutations = mutations_frame(
-        [("562.112393", "alphaX", "A1V"), ("562.112393", "betaQ", "C2D")]
+        [("9999.12345", "alphaX", "A1V"), ("9999.12345", "betaQ", "C2D")]
     )
-    qc = qc_frame([("562.112393", "alphaX"), ("562.112393", "betaQ")])
+    qc = qc_frame([("9999.12345", "alphaX"), ("9999.12345", "betaQ")])
 
     assert int(cooccurrence(mutations, qc).genes.iloc[0]["N_Both"]) == 1
 
