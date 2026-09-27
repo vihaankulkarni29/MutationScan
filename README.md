@@ -13,7 +13,7 @@ nothing to reconfigure and nothing in the code to edit.
 
 ## What it does
 
-Three stages, in order.
+Five stages, in order.
 
 **1. Extract.** For every (genome, gene) pair, `tblastn` aligns the reference
 protein against the six-frame translation of the genome and the best hit is
@@ -32,7 +32,18 @@ which identity alone will happily score as near-perfect.
 are mutated. The denominator is only those genomes where **both genes were
 actually evaluated**, so "gene B is not mutated here" is never confused with
 "gene B was never observed here". A pair with no genome in common is omitted
-entirely rather than reported as zero.
+entirely rather than reported as zero. Counts are descriptive only — no p-values
+or enrichment statistics at this stage.
+
+**4. Epistasis.** For every pair of mutations that co-occur in at least one
+genome, Fisher's exact test probes whether they appear together more (or less)
+often than chance. Benjamini–Hochberg FDR correction is applied across all
+tested pairs, and significant pairs are classified as *positive* (enriched
+together), *negative* (mutually exclusive), or *neutral*. Pairs are ranked by
+FDR-adjusted p-value, then by composite biochemical severity
+(BLOSUM62 + charge + hydropathy + volume), then by co-occurrence count. A
+per-genome **mutation map** is also written so you can see every mutation in
+every genome at a glance.
 
 ---
 
@@ -91,6 +102,16 @@ mutationscan config-check --config config/config.yaml
 | `--threads 8` | concurrent `tblastn` processes |
 | `--config FILE` | start from a YAML config; flags override it |
 
+The epistasis stage runs automatically at the end of `mutationscan run`. To
+run it separately on an existing mutations table:
+
+```bash
+mutationscan epistasis --mutations data/output/my_run/mutations.csv \
+                      --qc data/output/my_run/variant_qc.csv \
+                      --out data/output/my_run \
+                      --fdr-threshold 0.05 --min-count 1 --threads 4
+```
+
 ## Configuration
 
 Everything above can live in [config/config.yaml](config/config.yaml) instead.
@@ -115,6 +136,11 @@ threads: 4
 cooccurrence:
   levels: [gene]                    # add "variant" for {gene}:{mutation} pairs
   min_count: 1
+
+epistasis:
+  fdr_threshold: 0.05             # Benjamini-Hochberg q-value cutoff
+  min_count: 1                    # require >= this many co-occurring genomes
+  threads: 1                       # parallel pairwise Fisher tests
 ```
 
 Unknown keys are rejected with a message naming the valid ones, so a typo fails
@@ -132,8 +158,32 @@ All under `data/output/{job_name}/`:
 | `cooccurrence_genes.csv` | One row per gene pair: `N_Both`, `N_A`, `N_B`, `N_Eligible`, and the two plain fractions. |
 | `cooccurrence_genes_matrix.csv` | The same counts as a gene × gene matrix; the diagonal is the genomes mutating that gene. |
 | `cooccurrence_variants.csv` | The same at `gene:mutation` resolution. Only written when you ask for the `variant` level. |
+| `genome_mutation_map.csv` | One row per genome with all its mutations listed (`gene:mut | gene:mut …`). Written by the epistasis stage. |
+| `mutation_severity.csv` | Per-mutation biochemical severity (BLOSUM62, charge, hydropathy, volume, composite score). |
+| `epistasis_networks.csv` | Ranked epistatic pairs: Fisher's exact p-value, BH-adjusted q-value, odds ratio, sign (positive/negative/neutral), and composite pair severity. |
 | `run_summary.json` | Versions, settings, per-stage status counts, and the numerator and denominator behind every count. Attach this to a manuscript. |
 | `refs/`, `proteins/` | The exact reference used for every call, and every protein extracted. |
+
+## Epistasis output
+
+`epistasis_networks.csv` is the main statistical output. Each row is an unordered
+pair of mutations. Read the columns together:
+
+- `N_Both`, `N_A_only`, `N_B_only`, `N_Neither`, `N_Eligible` — the 2×2 table and
+  its denominator (only genomes where **both** mutations were evaluated).
+- `Observed` vs `Expected` — how many co-occurrences you saw vs the null model.
+- `Odds_Ratio` — enrichment direction. `>1` means they co-occur more than expected,
+  `<1` means they exclude each other, `inf` means a structural zero (handled
+  gracefully).
+- `P_value` — Fisher's exact test on the 2×2 table.
+- `Q_value` — Benjamini–Hochberg FDR-adjusted p-value.
+- `Sign` — `positive` (enriched, q < threshold), `negative` (excluded, q < threshold),
+  or `neutral` (not significant).
+- `Pair_Severity` — average biochemical severity of the two substitutions, used
+  only for ranking ties.
+
+Pairs are sorted by `Q_value` ascending (most significant first), then severity
+descending, then `N_Both` descending.
 
 **Read `N_Eligible` before comparing two pairs.** Different pairs can have
 different denominators — that is the honest behaviour, not a bug, and it is why
@@ -145,14 +195,8 @@ Co-occurrence here is **a descriptive count and nothing more**. When one protein
 is mutated, was another protein also mutated in that same genome? That is the
 whole question, and the answer is a number.
 
-There is no p-value, no enrichment test, no odds ratio, no severity score, no
-network ranking and no causal claim anywhere in the output. Two genes appearing
-together often may reflect shared ancestry, sampling bias in how the cohort was
-assembled, population structure, or nothing at all. Distinguishing those is your
-work, not the tool's.
-
 It also does not predict phenotype, map mutations to drugs, model structure or
-estimate binding. It reports what the alignment says.
+estimate binding. It reports what the alignment says and counts what it sees.
 
 ## Snakemake
 
