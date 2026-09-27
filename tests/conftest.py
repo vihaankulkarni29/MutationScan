@@ -14,10 +14,26 @@ import pytest
 # One codon per residue -- enough to build a synthetic genome that tblastn can
 # translate back to exactly the protein we started from.
 _CODONS = {
-    "A": "GCT", "R": "CGT", "N": "AAT", "D": "GAT", "C": "TGT",
-    "Q": "CAA", "E": "GAA", "G": "GGT", "H": "CAT", "I": "ATT",
-    "L": "CTT", "K": "AAA", "M": "ATG", "F": "TTT", "P": "CCT",
-    "S": "TCT", "T": "ACT", "W": "TGG", "Y": "TAT", "V": "GTT",
+    "A": "GCT",
+    "R": "CGT",
+    "N": "AAT",
+    "D": "GAT",
+    "C": "TGT",
+    "Q": "CAA",
+    "E": "GAA",
+    "G": "GGT",
+    "H": "CAT",
+    "I": "ATT",
+    "L": "CTT",
+    "K": "AAA",
+    "M": "ATG",
+    "F": "TTT",
+    "P": "CCT",
+    "S": "TCT",
+    "T": "ACT",
+    "W": "TGG",
+    "Y": "TAT",
+    "V": "GTT",
     "*": "TAA",
 }
 

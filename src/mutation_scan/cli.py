@@ -18,20 +18,40 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Optional, Sequence
 
 from . import __version__
 from .config import Config, ConfigError, load_config
 from .cooccurrence import cooccurrence
-from .extract import TblastnError, extract, verify_tblastn
-from .references import discover_targets, prepare_references
+from .diagnostics import diagnose_empty_extraction, diagnose_empty_variants
+from .epistasis import epistasis_networks
+from .extract import STATUS_EXTRACTED, extract
+from .preflight import preflight
+from .references import prepare_references
 from .summary import write_run_summary
-from .variants import call_variants
+from .variants import VARIANT_STATUS_CALLED, call_variants
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_parser", "main", "run"]
+__all__ = [
+    "EXIT_EMPTY_RESULT",
+    "EXIT_INPUTS_MISSING",
+    "EXIT_INTERRUPTED",
+    "EXIT_OK",
+    "EXIT_USAGE",
+    "build_parser",
+    "main",
+    "run",
+]
+
+#: Exit codes. A caller scripting this tool can branch on these: 2 means the run
+#: never started, 3 means it started and found nothing.
+EXIT_OK = 0
+EXIT_INPUTS_MISSING = 1  # config-check only: config valid, data absent
+EXIT_USAGE = 2  # bad usage, bad config, bad environment, failed preflight
+EXIT_EMPTY_RESULT = 3  # the run completed but produced no usable result
+EXIT_INTERRUPTED = 130
 
 _LOG_FORMAT = "%(asctime)s %(levelname)-7s %(message)s"
 _LOG_DATEFMT = "%H:%M:%S"
@@ -39,12 +59,10 @@ _LOG_DATEFMT = "%H:%M:%S"
 
 def _configure_logging(verbose: bool = False, quiet: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.WARNING if quiet else logging.INFO
-    logging.basicConfig(
-        level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT, stream=sys.stderr
-    )
+    logging.basicConfig(level=level, format=_LOG_FORMAT, datefmt=_LOG_DATEFMT, stream=sys.stderr)
 
 
-def _split_list(value: Optional[str]) -> Optional[tuple[str, ...]]:
+def _split_list(value: str | None) -> tuple[str, ...] | None:
     """``"a,b"`` or ``"a b"`` -> ``("a", "b")``. ``None`` stays ``None``."""
     if value is None:
         return None
@@ -80,7 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--references", metavar="DIR", help="directory of reference proteins; defines the targets"
     )
-    run_parser.add_argument("--out", metavar="DIR", help="output root; results go in <out>/<job-name>")
+    run_parser.add_argument(
+        "--out", metavar="DIR", help="output root; results go in <out>/<job-name>"
+    )
     run_parser.add_argument("--job-name", metavar="NAME", help="subfolder name for this run")
     run_parser.add_argument(
         "--targets",
@@ -110,6 +130,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--config", metavar="FILE", help="YAML config to start from; flags override it"
     )
+    run_parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help=(
+            "exit 0 even when a stage produces nothing. Without this a run that "
+            "extracts no protein, or passes no pair through the QC gates, exits 3"
+        ),
+    )
     run_parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     run_parser.add_argument("-q", "--quiet", action="store_true", help="warnings and errors only")
 
@@ -118,6 +146,40 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_parser.add_argument("--config", metavar="FILE", default="config/config.yaml")
     check_parser.add_argument("--json", action="store_true", help="machine-readable output")
+
+    epi_parser = subparsers.add_parser(
+        "epistasis",
+        help=(
+            "epistasis analysis: genome mutation map + ranked epistatic networks "
+            "from an existing mutations table"
+        ),
+    )
+    epi_parser.add_argument(
+        "--mutations", metavar="CSV", required=True, help="path to mutations.csv"
+    )
+    epi_parser.add_argument(
+        "--qc", metavar="CSV", help="path to variant_qc.csv (optional but recommended)"
+    )
+    epi_parser.add_argument(
+        "--out", metavar="DIR", required=True, help="output directory for epistasis results"
+    )
+    epi_parser.add_argument(
+        "--fdr-threshold",
+        type=float,
+        metavar="PCT",
+        default=0.05,
+        help="FDR significance threshold (default: 0.05)",
+    )
+    epi_parser.add_argument(
+        "--min-count",
+        type=int,
+        metavar="N",
+        default=1,
+        help="minimum co-occurrence count to retain a pair (default: 1)",
+    )
+    epi_parser.add_argument("--threads", type=int, metavar="N", default=1)
+    epi_parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    epi_parser.add_argument("-q", "--quiet", action="store_true", help="warnings and errors only")
 
     return parser
 
@@ -132,7 +194,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     levels = _split_list(getattr(args, "cooccurrence_level", None))
     cooccurrence_config = config.cooccurrence
     if levels is not None or args.min_count is not None:
-        from .config import CooccurrenceConfig, VALID_COOCCURRENCE_LEVELS
+        from .config import VALID_COOCCURRENCE_LEVELS, CooccurrenceConfig
 
         chosen = levels if levels is not None else cooccurrence_config.levels
         unknown = [level for level in chosen if level not in VALID_COOCCURRENCE_LEVELS]
@@ -151,9 +213,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     return config.with_overrides(
         job_name=args.job_name,
         genomes_dir=Path(args.genomes).expanduser().resolve() if args.genomes else None,
-        references_dir=(
-            Path(args.references).expanduser().resolve() if args.references else None
-        ),
+        references_dir=(Path(args.references).expanduser().resolve() if args.references else None),
         output_root=Path(args.out).expanduser().resolve() if args.out else None,
         targets=_split_list(args.targets),
         uniprot_taxid=args.taxid,
@@ -164,32 +224,40 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     )
 
 
-def run(config: Config) -> int:
+def _report_empty(lines: Sequence[str], allow_empty: bool) -> int:
+    """Log an empty-result diagnostic and return the exit code it warrants."""
+    log = logger.warning if allow_empty else logger.error
+    for line in lines:
+        log("%s", line)
+    if allow_empty:
+        logger.warning("Continuing anyway: --allow-empty was given.")
+        return EXIT_OK
+    logger.error("Pass --allow-empty to accept an empty result as success.")
+    return EXIT_EMPTY_RESULT
+
+
+def run(config: Config, allow_empty: bool = False) -> int:
     """Execute all four stages in order. Returns a process exit code."""
     config.require_inputs()
-    config.run_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("MutationScan %s -- run '%s'", __version__, config.job_name)
     logger.info("  genomes:    %s", config.genomes_dir)
     logger.info("  references: %s", config.references_dir)
     logger.info("  output:     %s", config.run_dir)
 
-    try:
-        tblastn_version = verify_tblastn(config.tblastn_binary)
-    except TblastnError as exc:
-        logger.error("%s", exc)
-        return 2
+    # Validate everything before spending a single alignment on it. A swapped
+    # --genomes/--references pair costs seconds here and an hour without this.
+    report = preflight(config)
+    report.log()
+    if not report.ok:
+        logger.error("Preflight found %d problem(s); nothing was run.", len(report.errors))
+        return EXIT_USAGE
+
+    config.run_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Targets come from the reference filenames -- this is the only place the
     #    gene list is decided, and it is decided by the user's own directory.
-    targets = discover_targets(config.references_dir, config.targets)
-    if not targets:
-        logger.error(
-            "No reference proteins found in %s. Add <gene>_WT.faa files (one per "
-            "target protein); each filename becomes a target.",
-            config.references_dir,
-        )
-        return 2
+    targets = report.targets
     logger.info("Targets (%d): %s", len(targets), ", ".join(targets))
 
     references = prepare_references(
@@ -202,7 +270,7 @@ def run(config: Config) -> int:
             ", ".join(references.missing),
             config.references_dir,
         )
-        return 2
+        return EXIT_USAGE
 
     # 2. Extract every target protein from every genome.
     manifest = extract(
@@ -215,6 +283,16 @@ def run(config: Config) -> int:
         threads=config.threads,
     )
 
+    extracted = (
+        int((manifest["Status"] == STATUS_EXTRACTED).sum())
+        if not manifest.empty and "Status" in manifest.columns
+        else 0
+    )
+    if extracted == 0:
+        code = _report_empty(diagnose_empty_extraction(manifest, config), allow_empty)
+        if code != EXIT_OK:
+            return code
+
     # 3. Call substitutions against the reference.
     variants = call_variants(
         config.proteins_dir,
@@ -226,7 +304,21 @@ def run(config: Config) -> int:
         qc_csv=config.variant_qc_csv,
     )
 
+    called = (
+        int((variants.qc["Status"] == VARIANT_STATUS_CALLED).sum())
+        if not variants.qc.empty and "Status" in variants.qc.columns
+        else 0
+    )
+    if called == 0:
+        code = _report_empty(diagnose_empty_variants(variants.qc, config), allow_empty)
+        if code != EXIT_OK:
+            return code
+
     # 4. Count co-occurrence. Descriptive only.
+    #
+    #    No emptiness gate here on purpose: a single-target cohort yields zero
+    #    pairs, and so does a cohort where nothing happens to be mutated. Both
+    #    are legitimate results, not failures.
     counts = cooccurrence(
         variants.mutations,
         variants.qc,
@@ -235,10 +327,19 @@ def run(config: Config) -> int:
         genes_csv=config.cooccurrence_genes_csv,
         matrix_csv=config.cooccurrence_matrix_csv,
         variants_csv=(
-            config.cooccurrence_variants_csv
-            if "variant" in config.cooccurrence.levels
-            else None
+            config.cooccurrence_variants_csv if "variant" in config.cooccurrence.levels else None
         ),
+    )
+
+    # 5. Epistasis -- genome mutation maps + statistical pair networks.
+    #    Only runs when there are at least two mutations to compare.
+    epistasis_networks(
+        mutations_csv=config.mutations_csv,
+        qc_csv=config.variant_qc_csv,
+        output_dir=config.run_dir,
+        fdr_threshold=config.epistasis.fdr_threshold,
+        min_count=config.epistasis.min_count,
+        threads=config.epistasis.threads,
     )
 
     write_run_summary(
@@ -248,63 +349,113 @@ def run(config: Config) -> int:
         qc=variants.qc,
         mutations=variants.mutations,
         cooccurrence=counts,
-        tblastn_version=tblastn_version,
+        tblastn_version=report.tblastn_version,
     )
 
     logger.info("Done. Results in %s", config.run_dir)
-    return 0
+    return EXIT_OK
 
 
 def _config_check(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    inputs_present = {
+        "genomes_dir": config.genomes_dir.is_dir(),
+        "references_dir": config.references_dir.is_dir(),
+    }
+
+    # Only worth validating contents once both directories exist -- otherwise
+    # preflight would just restate what inputs_present already says.
+    report = preflight(config) if all(inputs_present.values()) else None
+
     layout = {
         "config_file": str(Path(args.config).resolve()),
         "settings": config.to_dict(),
         "run_dir": str(config.run_dir),
         "expected_outputs": [str(path) for path in config.outputs()],
-        "inputs_present": {
-            "genomes_dir": config.genomes_dir.is_dir(),
-            "references_dir": config.references_dir.is_dir(),
+        "inputs_present": inputs_present,
+        "preflight": {
+            "ran": report is not None,
+            "ok": report.ok if report else False,
+            "errors": list(report.errors) if report else [],
+            "warnings": list(report.warnings) if report else [],
+            "genomes": report.n_genomes if report else 0,
+            "references": report.n_references if report else 0,
+            "targets": list(report.targets) if report else [],
+            "tblastn": report.tblastn_version if report else "",
         },
     }
 
+    ready = all(inputs_present.values()) and report is not None and report.ok
+
     if args.json:
         print(json.dumps(layout, indent=2))
-        return 0
+        return EXIT_OK if ready else EXIT_INPUTS_MISSING
 
     print(f"config: {layout['config_file']}  (valid)")
     print(f"run dir: {config.run_dir}")
-    for label, present in layout["inputs_present"].items():
+    for label, present in inputs_present.items():
         path = getattr(config, label)
         print(f"  {label}: {path} {'[found]' if present else '[MISSING]'}")
-    if config.references_dir.is_dir():
-        targets = discover_targets(config.references_dir, config.targets)
-        print(f"  targets ({len(targets)}): {', '.join(targets) if targets else '(none found)'}")
+
+    if report is not None:
+        print(f"  genomes: {report.n_genomes}")
+        print(
+            f"  targets ({len(report.targets)}): "
+            f"{', '.join(report.targets) if report.targets else '(none found)'}"
+        )
+        if report.tblastn_version:
+            print(f"  tblastn: {report.tblastn_version}")
+        for warning in report.warnings:
+            print(f"  WARNING: {warning}")
+        for error in report.errors:
+            print(f"  ERROR: {error}")
+
     print("expected outputs:")
     for path in config.outputs():
         print(f"  {path}")
-    return 0 if all(layout["inputs_present"].values()) else 1
+
+    print("ready to run" if ready else "NOT ready to run")
+    return EXIT_OK if ready else EXIT_INPUTS_MISSING
+
+
+def _run_epistasis(args: argparse.Namespace) -> int:
+    _configure_logging(verbose=getattr(args, "verbose", False), quiet=getattr(args, "quiet", False))
+    try:
+        epistasis_networks(
+            mutations_csv=args.mutations,
+            qc_csv=args.qc,
+            output_dir=args.out,
+            fdr_threshold=args.fdr_threshold,
+            min_count=args.min_count,
+            threads=args.threads,
+        )
+    except (ValueError, OSError) as exc:
+        logger.error("Epistasis failed: %s", exc)
+        return EXIT_USAGE
+
+    logger.info("Results in %s", args.out)
+    return EXIT_OK
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    _configure_logging(
-        verbose=getattr(args, "verbose", False), quiet=getattr(args, "quiet", False)
-    )
+    _configure_logging(verbose=getattr(args, "verbose", False), quiet=getattr(args, "quiet", False))
 
     try:
         if args.command == "run":
-            return run(_config_from_args(args))
+            return run(_config_from_args(args), allow_empty=args.allow_empty)
         if args.command == "config-check":
             return _config_check(args)
+        if args.command == "epistasis":
+            return _run_epistasis(args)
     except ConfigError as exc:
         logger.error("Configuration error: %s", exc)
-        return 2
+        return EXIT_USAGE
     except KeyboardInterrupt:  # pragma: no cover - interactive
         logger.warning("Interrupted")
-        return 130
+        return EXIT_INTERRUPTED
 
-    return 2  # pragma: no cover - argparse enforces a command
+    return EXIT_USAGE  # pragma: no cover - argparse enforces a command
 
 
 if __name__ == "__main__":  # pragma: no cover

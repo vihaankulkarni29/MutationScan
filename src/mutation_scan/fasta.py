@@ -13,6 +13,7 @@ import io
 import logging
 import re
 from pathlib import Path
+from typing import cast
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -21,6 +22,8 @@ from Bio.SeqRecord import SeqRecord
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "looks_like_nucleotide",
+    "read_first_record_sequence",
     "read_protein_sequence",
     "sanitize_protein_sequence",
     "write_protein_record",
@@ -31,6 +34,20 @@ __all__ = [
 _PROTEIN_ALPHABET = re.compile(r"[ACDEFGHIKLMNPQRSTVWYBXZJUO*]+")
 
 _WHITESPACE = re.compile(r"\s+")
+
+#: Unambiguous DNA/RNA symbols. Deliberately excludes the IUPAC ambiguity codes
+#: R/Y/S/W/K/M/B/D/H/V, every one of which is also an amino-acid letter --
+#: counting them as nucleotide evidence is what makes a naive sniffer call a
+#: protein a genome.
+_NUCLEOTIDE_SYMBOLS = frozenset("ACGTUN")
+
+#: Below this length the composition ratio is noise: a 20-residue peptide of
+#: alanine and cysteine is indistinguishable from a short DNA fragment.
+NUCLEOTIDE_SNIFF_MIN_LENGTH = 50
+
+#: Real assemblies sit far above this; real proteins far below. The gap between
+#: the two populations is wide enough that the exact cut-off does not matter.
+NUCLEOTIDE_SNIFF_THRESHOLD = 0.9
 
 
 def sanitize_protein_sequence(text: str) -> str:
@@ -44,6 +61,61 @@ def sanitize_protein_sequence(text: str) -> str:
     if sequence.endswith("*"):
         sequence = sequence[:-1]
     return sequence
+
+
+def looks_like_nucleotide(sequence: str) -> bool:
+    """True when *sequence* is composed almost entirely of A/C/G/T/U/N.
+
+    Used to catch the most common way of misusing this tool: putting protein
+    FASTA in the genomes directory, nucleotide FASTA in the references
+    directory, or swapping the two outright. Left to itself that mistake costs a
+    full ``tblastn`` sweep and produces a run where every pair is ``no_hit``,
+    with nothing in the output saying why.
+
+    Sequences shorter than :data:`NUCLEOTIDE_SNIFF_MIN_LENGTH` return ``False``:
+    the ratio is not informative at that length, and a false "this is a genome"
+    is worse than no opinion.
+    """
+    residues = sanitize_protein_sequence(sequence)
+    if len(residues) < NUCLEOTIDE_SNIFF_MIN_LENGTH:
+        return False
+    matches = sum(1 for residue in residues if residue in _NUCLEOTIDE_SYMBOLS)
+    return matches / len(residues) >= NUCLEOTIDE_SNIFF_THRESHOLD
+
+
+def read_first_record_sequence(path: Path | str, max_residues: int = 4000) -> str:
+    """Residues of the first record in a FASTA file, up to *max_residues*.
+
+    Deliberately not :func:`read_protein_sequence`, which insists on exactly one
+    record: a genome assembly is many contigs, and validating one costs nothing
+    only if we stop reading after the first. Streams line by line and stops at
+    the second header or the residue cap, so cost is bounded on a 5 Mb assembly.
+
+    Returns an empty string when the file has no residues. Raises nothing --
+    callers decide whether an unreadable file is fatal.
+    """
+    path = Path(path)
+    collected: list[str] = []
+    total = 0
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(">"):
+                    if collected:
+                        break  # second record: the first one is complete
+                    continue
+                collected.append(line)
+                total += len(line)
+                if total >= max_residues:
+                    break
+    except OSError as exc:
+        logger.debug("Could not read %s: %s", path, exc)
+        return ""
+
+    return sanitize_protein_sequence("".join(collected))[:max_residues]
 
 
 def read_protein_sequence(path: Path | str, fallback_id: str = "sequence") -> SeqRecord:
@@ -76,7 +148,7 @@ def read_protein_sequence(path: Path | str, fallback_id: str = "sequence") -> Se
             if not cleaned:
                 raise ValueError(f"FASTA record has no residues: {path}")
             record.seq = Seq(cleaned)
-            return record
+            return cast(SeqRecord, record)
 
         # It claims to be FASTA but no dialect accepted it -- most often two or
         # more records where exactly one is expected. Say so rather than guess.

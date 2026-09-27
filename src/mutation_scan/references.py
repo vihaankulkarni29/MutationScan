@@ -19,9 +19,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import cast
 
 from .fasta import read_protein_sequence, sanitize_protein_sequence, write_protein_record
 
@@ -72,7 +73,7 @@ def _reference_candidates(directory: Path) -> list[Path]:
     return candidates
 
 
-def resolve_reference(refs_dir: Path | str, gene: str) -> Optional[Path]:
+def resolve_reference(refs_dir: Path | str, gene: str) -> Path | None:
     """Find the reference file for *gene*, case-insensitively.
 
     Accepts ``{gene}_WT.faa``, ``{gene}.faa`` and the ``.fasta``/``.fa``/``.fas``
@@ -128,7 +129,7 @@ def missing_reference_genes(refs_dir: Path | str, genes: Iterable[str]) -> list[
     return [gene for gene in genes if resolve_reference(refs_dir, gene) is None]
 
 
-def fetch_uniprot_reference(gene: str, taxid: str) -> Optional[str]:
+def fetch_uniprot_reference(gene: str, taxid: str) -> str | None:
     """Fetch one reviewed UniProt protein FASTA for *gene* in *taxid*.
 
     Returns the raw FASTA text, or ``None`` if nothing matched or the request
@@ -136,9 +137,8 @@ def fetch_uniprot_reference(gene: str, taxid: str) -> Optional[str]:
     reported as a missing target, which the caller surfaces to the user.
     """
     query = f"gene:{gene} AND taxonomy_id:{taxid} AND reviewed:true"
-    url = (
-        f"{_UNIPROT_SEARCH}?"
-        + urllib.parse.urlencode({"query": query, "format": "fasta", "size": "1"})
+    url = f"{_UNIPROT_SEARCH}?" + urllib.parse.urlencode(
+        {"query": query, "format": "fasta", "size": "1"}
     )
 
     try:
@@ -146,7 +146,13 @@ def fetch_uniprot_reference(gene: str, taxid: str) -> Optional[str]:
         with urllib.request.urlopen(request, timeout=_UNIPROT_TIMEOUT) as response:
             text = response.read().decode("utf-8").strip()
     except urllib.error.HTTPError as exc:
-        logger.error("UniProt HTTP %s fetching %s (taxid %s): %s", exc.code, gene, taxid, exc.reason)
+        logger.error(
+            "UniProt HTTP %s fetching %s (taxid %s): %s",
+            exc.code,
+            gene,
+            taxid,
+            exc.reason,
+        )
         return None
     except urllib.error.URLError as exc:
         logger.error("UniProt unreachable while fetching %s: %s", gene, exc.reason)
@@ -158,7 +164,7 @@ def fetch_uniprot_reference(gene: str, taxid: str) -> Optional[str]:
     if not text:
         logger.warning("No reviewed UniProt entry for gene %s in taxid %s", gene, taxid)
         return None
-    return text
+    return cast(str, text)
 
 
 @dataclass
@@ -204,12 +210,16 @@ def prepare_references(
     for gene in targets:
         source = resolve_reference(references_dir, gene)
         origin = f"local:{source.name}" if source is not None else ""
-        fasta_text: Optional[str] = None
+        fasta_text: str | None = None
 
         if source is None and uniprot_taxid:
             if fetched_any:
                 time.sleep(_UNIPROT_PAUSE)
-            logger.info("No local reference for %s; querying UniProt (taxid %s)", gene, uniprot_taxid)
+            logger.info(
+                "No local reference for %s; querying UniProt (taxid %s)",
+                gene,
+                uniprot_taxid,
+            )
             fasta_text = fetch_uniprot_reference(gene, uniprot_taxid)
             fetched_any = True
             if fasta_text:
@@ -289,7 +299,7 @@ def load_reference_set(refs_dir: Path | str) -> ReferenceSet:
             logger.warning("Ignoring unreadable reference %s: %s", path.name, exc)
             continue
         result.genes.append(gene)
-        result.lengths[gene] = len(record.seq)
+        result.lengths[gene] = len(str(record.seq))
         result.sources[gene] = _origin_from_description(record.description)
 
     return result

@@ -34,3 +34,9 @@ threads: 4
 cooccurrence:
   levels: [gene]      # add "variant" for {gene}:{mutation}-level pairs
   min_count: 1        # drop pairs seen together in fewer than this many genomes
+
+# Epistasis: statistical pair testing (Fisher exact + BH FDR) + genome maps.
+epistasis:
+  fdr_threshold: 0.05   # Benjamini-Hochberg q-value cutoff
+  min_count: 1          # require at least this many co-occurring genomes
+  threads: 1            # parallel pairwise tests

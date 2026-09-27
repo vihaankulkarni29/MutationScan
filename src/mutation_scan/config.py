@@ -13,15 +13,17 @@ CLI and the Snakemake workflow cannot drift apart.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 __all__ = [
     "Config",
     "CooccurrenceConfig",
+    "EpistasisConfig",
     "ConfigError",
     "VALID_COOCCURRENCE_LEVELS",
     "load_config",
@@ -47,6 +49,7 @@ _DEFAULTS: dict[str, Any] = {
     "tblastn_binary": "tblastn",
     "threads": 1,
     "cooccurrence": {"levels": ["gene"], "min_count": 1},
+    "epistasis": {"fdr_threshold": 0.05, "min_count": 1, "threads": 1},
 }
 
 
@@ -56,6 +59,15 @@ class CooccurrenceConfig:
 
     levels: tuple[str, ...] = ("gene",)
     min_count: int = 1
+
+
+@dataclass(frozen=True)
+class EpistasisConfig:
+    """Settings for the epistasis stage."""
+
+    fdr_threshold: float = 0.05
+    min_count: int = 1
+    threads: int = 1
 
 
 @dataclass(frozen=True)
@@ -73,6 +85,7 @@ class Config:
     tblastn_binary: str
     threads: int
     cooccurrence: CooccurrenceConfig
+    epistasis: EpistasisConfig
 
     # -- derived run layout -------------------------------------------------
     # One folder per run; nothing else writes outside it.
@@ -120,6 +133,18 @@ class Config:
         return self.run_dir / "cooccurrence_variants.csv"
 
     @property
+    def genome_mutation_map_csv(self) -> Path:
+        return self.run_dir / "genome_mutation_map.csv"
+
+    @property
+    def mutation_severity_csv(self) -> Path:
+        return self.run_dir / "mutation_severity.csv"
+
+    @property
+    def epistasis_networks_csv(self) -> Path:
+        return self.run_dir / "epistasis_networks.csv"
+
+    @property
     def run_summary_json(self) -> Path:
         return self.run_dir / "run_summary.json"
 
@@ -131,6 +156,9 @@ class Config:
             self.variant_qc_csv,
             self.cooccurrence_genes_csv,
             self.cooccurrence_matrix_csv,
+            self.genome_mutation_map_csv,
+            self.mutation_severity_csv,
+            self.epistasis_networks_csv,
             self.run_summary_json,
         ]
         if "variant" in self.cooccurrence.levels:
@@ -144,7 +172,7 @@ class Config:
         cls,
         mapping: Mapping[str, Any] | None,
         base_dir: Path | str | None = None,
-    ) -> "Config":
+    ) -> Config:
         """Build a config from a plain mapping (YAML contents, CLI args, ...).
 
         Relative paths are resolved against ``base_dir`` (default: the current
@@ -171,6 +199,18 @@ class Config:
                 f"Valid keys: {', '.join(sorted(_DEFAULTS['cooccurrence']))}."
             )
         raw["cooccurrence"].update(cooccurrence_raw)
+
+        epistasis_raw = supplied.pop("epistasis", None) or {}
+        if not isinstance(epistasis_raw, Mapping):
+            raise ConfigError("'epistasis' must be a mapping of fdr_threshold/min_count/threads.")
+        unknown_ep = sorted(set(epistasis_raw) - set(_DEFAULTS["epistasis"]))
+        if unknown_ep:
+            raise ConfigError(
+                f"Unknown epistasis key(s): {', '.join(unknown_ep)}. "
+                f"Valid keys: {', '.join(sorted(_DEFAULTS['epistasis']))}."
+            )
+        raw["epistasis"].update(epistasis_raw)
+
         # Drop keys explicitly set to null so YAML blanks fall back to defaults.
         raw.update({k: v for k, v in supplied.items() if v is not None})
 
@@ -187,9 +227,7 @@ class Config:
         if not job_name:
             raise ConfigError("'job_name' must not be empty.")
         if Path(job_name).name != job_name or job_name in {".", ".."}:
-            raise ConfigError(
-                f"'job_name' must be a single folder name, got {job_name!r}."
-            )
+            raise ConfigError(f"'job_name' must be a single folder name, got {job_name!r}.")
 
         config = cls(
             job_name=job_name,
@@ -206,10 +244,17 @@ class Config:
                 levels=_clean_levels(raw["cooccurrence"]["levels"]),
                 min_count=_positive_int(raw["cooccurrence"]["min_count"], "cooccurrence.min_count"),
             ),
+            epistasis=EpistasisConfig(
+                fdr_threshold=_percent(
+                    raw["epistasis"]["fdr_threshold"], "epistasis.fdr_threshold"
+                ),
+                min_count=_positive_int(raw["epistasis"]["min_count"], "epistasis.min_count"),
+                threads=_positive_int(raw["epistasis"]["threads"], "epistasis.threads"),
+            ),
         )
         return config
 
-    def with_overrides(self, **overrides: Any) -> "Config":
+    def with_overrides(self, **overrides: Any) -> Config:
         """Return a copy with fields replaced (used by the CLI)."""
         return replace(self, **{k: v for k, v in overrides.items() if v is not None})
 
@@ -244,6 +289,11 @@ class Config:
             "cooccurrence": {
                 "levels": list(self.cooccurrence.levels),
                 "min_count": self.cooccurrence.min_count,
+            },
+            "epistasis": {
+                "fdr_threshold": self.epistasis.fdr_threshold,
+                "min_count": self.epistasis.min_count,
+                "threads": self.epistasis.threads,
             },
         }
 
@@ -292,7 +342,7 @@ def _positive_int(value: Any, label: str) -> int:
 
 def _clean_targets(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
-        items: Iterable[Any] = [part for part in value.replace(",", " ").split()]
+        items: Iterable[Any] = list(value.replace(",", " ").split())
     elif isinstance(value, Iterable):
         items = value
     else:
@@ -332,4 +382,4 @@ def _clean_levels(value: Any) -> tuple[str, ...]:
     if not cleaned:
         raise ConfigError("'cooccurrence.levels' must list at least one level.")
     # Stable, predictable ordering regardless of how the user wrote it.
-    return tuple(l for l in VALID_COOCCURRENCE_LEVELS if l in cleaned)
+    return tuple(gene for gene in VALID_COOCCURRENCE_LEVELS if gene in cleaned)

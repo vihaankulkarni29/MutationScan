@@ -6,6 +6,7 @@ Stages
 2. ``extract``      tblastn translating alignment: genome DNA -> target proteins
 3. ``variants``     global alignment + gap-aware residue counter -> substitutions
 4. ``cooccurrence`` per-genome counts of which genes are mutated together
+5. ``epistasis``    genome mutation maps + statistical epistasis networks
 
 No gene, genome, organism, drug or structure is hardcoded anywhere in this
 package. The targets of a run are whatever reference FASTA files the user

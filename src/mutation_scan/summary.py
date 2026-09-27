@@ -17,7 +17,7 @@ import platform
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["build_run_summary", "write_run_summary"]
 
 
-def _status_counts(frame: Optional[pd.DataFrame]) -> dict[str, int]:
+def _status_counts(frame: pd.DataFrame | None) -> dict[str, int]:
     """``{status: n}`` for any table carrying a Status column."""
     if frame is None or frame.empty or "Status" not in frame.columns:
         return {}
@@ -41,19 +41,32 @@ def _status_counts(frame: Optional[pd.DataFrame]) -> dict[str, int]:
     return {str(status): int(count) for status, count in counts.items()}
 
 
-def _n_unique(frame: Optional[pd.DataFrame], column: str) -> int:
+def _n_unique(frame: pd.DataFrame | None, column: str) -> int:
     if frame is None or frame.empty or column not in frame.columns:
         return 0
     return int(frame[column].nunique())
 
 
+def _n_rows(path: Path | str | None) -> int:
+    """Count data rows in a CSV, returning 0 if the file is absent or empty."""
+    if path is None:
+        return 0
+    p = Path(path)
+    if not p.is_file():
+        return 0
+    try:
+        return max(0, int(len(pd.read_csv(p, usecols=range(1)))) - 1)
+    except (ValueError, pd.errors.EmptyDataError):
+        return 0
+
+
 def build_run_summary(
     config: Config,
-    references: Optional[ReferenceSet] = None,
-    manifest: Optional[pd.DataFrame] = None,
-    qc: Optional[pd.DataFrame] = None,
-    mutations: Optional[pd.DataFrame] = None,
-    cooccurrence: Optional[CooccurrenceResult] = None,
+    references: ReferenceSet | None = None,
+    manifest: pd.DataFrame | None = None,
+    qc: pd.DataFrame | None = None,
+    mutations: pd.DataFrame | None = None,
+    cooccurrence: CooccurrenceResult | None = None,
     tblastn_version: str = "",
 ) -> dict[str, Any]:
     """Assemble the provenance record for one run.
@@ -117,6 +130,14 @@ def build_run_summary(
             # These are the numerators and denominators behind every pair count.
             "mutated_per_gene": dict(cooccurrence.gene_totals) if cooccurrence else {},
             "eligible_per_gene": dict(cooccurrence.eligible_per_gene) if cooccurrence else {},
+        },
+        "epistasis": {
+            "fdr_threshold": config.epistasis.fdr_threshold,
+            "min_count": config.epistasis.min_count,
+            "threads": config.epistasis.threads,
+            "genome_map_rows": _n_rows(config.genome_mutation_map_csv),
+            "severity_rows": _n_rows(config.mutation_severity_csv),
+            "network_pairs": _n_rows(config.epistasis_networks_csv),
         },
         "outputs": [str(path) for path in config.outputs()],
         "note": (

@@ -25,9 +25,9 @@ says, and nothing more.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Optional, Sequence
 
 import pandas as pd
 from Bio.Align import PairwiseAligner, substitution_matrices
@@ -185,7 +185,7 @@ def compare_sequences(
     mutations: list[tuple[str, int, str]] = []
     position = 0  # becomes 1 at the first non-gap reference column
 
-    for ref_aa, query_aa in zip(aligned_ref, aligned_query):
+    for ref_aa, query_aa in zip(aligned_ref, aligned_query, strict=False):
         if ref_aa != GAP:
             position += 1
             if query_aa != GAP:
@@ -244,17 +244,15 @@ def _pairs_from_directory(proteins_dir: Path) -> Iterator[tuple[str, str, Path]]
     underscore is still handled correctly.
     """
     for path in sorted(proteins_dir.glob("*.faa")):
-        gene: Optional[str] = None
-        accession: Optional[str] = None
+        gene: str | None = None
+        accession: str | None = None
         try:
             record = read_protein_sequence(path)
         except ValueError:
             record = None
         if record is not None:
             tokens = dict(
-                token.split("=", 1)
-                for token in record.description.split()
-                if token.count("=") == 1
+                token.split("=", 1) for token in record.description.split() if token.count("=") == 1
             )
             gene = tokens.get("gene")
             accession = tokens.get("accession")
@@ -277,7 +275,7 @@ def _qc_row(
     accession: str,
     gene: str,
     status: str,
-    comparison: Optional[Comparison] = None,
+    comparison: Comparison | None = None,
     n_mutations: int = 0,
     detail: str = "",
 ) -> dict:
@@ -335,16 +333,17 @@ def call_variants(
         pairs = list(_pairs_from_directory(proteins_dir))
 
     logger.info(
-        "Calling variants for %d (genome, gene) pair(s); gates: identity >= %.1f%%, coverage >= %.1f%%",
+        "Calling variants for %d (genome, gene) pair(s); "
+        "gates: identity >= %.1f%%, coverage >= %.1f%%",
         len(pairs),
         min_identity_percent,
         min_coverage_percent,
     )
 
     # Resolve and load each reference once, not once per genome.
-    reference_cache: dict[str, Optional[str]] = {}
+    reference_cache: dict[str, str | None] = {}
 
-    def reference_for(gene: str) -> Optional[str]:
+    def reference_for(gene: str) -> str | None:
         if gene not in reference_cache:
             path = resolve_reference(refs_dir, gene)
             if path is None:
@@ -373,7 +372,9 @@ def call_variants(
         if not faa_path.is_file():
             qc_rows.append(
                 _qc_row(
-                    accession, gene, VARIANT_STATUS_MISSING_PROTEIN,
+                    accession,
+                    gene,
+                    VARIANT_STATUS_MISSING_PROTEIN,
                     detail=f"missing {faa_path.name}",
                 )
             )
@@ -390,7 +391,10 @@ def call_variants(
         if comparison.identity_pct < min_identity_percent:
             qc_rows.append(
                 _qc_row(
-                    accession, gene, VARIANT_STATUS_LOW_IDENTITY, comparison,
+                    accession,
+                    gene,
+                    VARIANT_STATUS_LOW_IDENTITY,
+                    comparison,
                     detail=f"identity {comparison.identity_pct:.2f}% < {min_identity_percent:.2f}%",
                 )
             )
@@ -399,7 +403,10 @@ def call_variants(
         if comparison.coverage_pct < min_coverage_percent:
             qc_rows.append(
                 _qc_row(
-                    accession, gene, VARIANT_STATUS_LOW_COVERAGE, comparison,
+                    accession,
+                    gene,
+                    VARIANT_STATUS_LOW_COVERAGE,
+                    comparison,
                     detail=f"coverage {comparison.coverage_pct:.2f}% < {min_coverage_percent:.2f}%",
                 )
             )
@@ -421,7 +428,10 @@ def call_variants(
 
         qc_rows.append(
             _qc_row(
-                accession, gene, VARIANT_STATUS_CALLED, comparison,
+                accession,
+                gene,
+                VARIANT_STATUS_CALLED,
+                comparison,
                 n_mutations=len(comparison.mutations),
             )
         )
@@ -480,12 +490,8 @@ def read_variant_qc(qc_csv: Path | str) -> pd.DataFrame:
 
 def read_mutations(mutations_csv: Path | str) -> pd.DataFrame:
     """Read a mutations table, keeping accessions and genes as strings."""
-    mutations = pd.read_csv(
-        mutations_csv, dtype={"Accession": str, "Gene": str, "Mutation": str}
-    )
-    missing = [
-        column for column in ("Accession", "Gene", "Mutation") if column not in mutations
-    ]
+    mutations = pd.read_csv(mutations_csv, dtype={"Accession": str, "Gene": str, "Mutation": str})
+    missing = [column for column in ("Accession", "Gene", "Mutation") if column not in mutations]
     if missing:
         raise ValueError(
             f"Mutations file {mutations_csv} is missing column(s): {', '.join(missing)}"

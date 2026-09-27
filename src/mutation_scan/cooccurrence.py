@@ -19,10 +19,10 @@ half that has it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
-from typing import Iterable, Mapping, Optional, Sequence
 
 import pandas as pd
 
@@ -83,7 +83,7 @@ class CooccurrenceResult:
 
     genes: pd.DataFrame
     genes_matrix: pd.DataFrame
-    variants: Optional[pd.DataFrame] = None
+    variants: pd.DataFrame | None = None
     gene_totals: dict[str, int] = field(default_factory=dict)
     eligible_per_gene: dict[str, int] = field(default_factory=dict)
 
@@ -105,9 +105,7 @@ def eligibility_from_qc(qc: pd.DataFrame) -> dict[str, set[str]]:
     if qc is None or qc.empty:
         return {}
 
-    missing = [
-        column for column in ("Accession", "Gene", "Status") if column not in qc.columns
-    ]
+    missing = [column for column in ("Accession", "Gene", "Status") if column not in qc.columns]
     if missing:
         raise ValueError(f"Variant QC is missing column(s): {', '.join(missing)}")
 
@@ -118,9 +116,7 @@ def eligibility_from_qc(qc: pd.DataFrame) -> dict[str, set[str]]:
     return eligible
 
 
-def _mutated_sets(
-    mutations: pd.DataFrame, key: str
-) -> dict[str, set[str]]:
+def _mutated_sets(mutations: pd.DataFrame, key: str) -> dict[str, set[str]]:
     """``{key value: {accession where it is mutated}}``."""
     if mutations.empty:
         return {}
@@ -136,7 +132,7 @@ def _pair_row(
     mutated_a: set[str],
     mutated_b: set[str],
     eligible: set[str],
-) -> Optional[dict]:
+) -> dict | None:
     """Counts for one unordered pair, restricted to the shared denominator."""
     if not eligible:
         return None
@@ -168,9 +164,7 @@ def _gene_pairs(
             gene_a, gene_b, mutated.get(gene_a, set()), mutated.get(gene_b, set()), shared
         )
         if counts is None:
-            logger.debug(
-                "%s/%s: no genome evaluated both genes; pair omitted", gene_a, gene_b
-            )
+            logger.debug("%s/%s: no genome evaluated both genes; pair omitted", gene_a, gene_b)
             continue
         if counts["N_Both"] < min_count:
             continue
@@ -202,7 +196,7 @@ def _variant_pairs(
         _variant=mutations["Gene"].astype(str) + ":" + mutations["Mutation"].astype(str)
     )
     mutated = _mutated_sets(labelled, "_variant")
-    gene_of = dict(zip(labelled["_variant"], labelled["Gene"].astype(str)))
+    gene_of = dict(zip(labelled["_variant"], labelled["Gene"].astype(str), strict=False))
 
     rows = []
     for variant_a, variant_b in combinations(sorted(mutated), 2):
@@ -315,9 +309,7 @@ def cooccurrence(
         else pd.DataFrame(columns=list(GENE_COLUMNS))
     )
     matrix = _matrix(mutated_by_gene, eligible, genes)
-    variants_long = (
-        _variant_pairs(mutations, eligible, min_count) if "variant" in levels else None
-    )
+    variants_long = _variant_pairs(mutations, eligible, min_count) if "variant" in levels else None
 
     result = CooccurrenceResult(
         genes=genes_long,
@@ -405,7 +397,5 @@ def load_result(
         genes_matrix=matrix,
         variants=variants,
         gene_totals={gene: int(matrix.loc[gene, gene]) for gene in matrix.index},
-        eligible_per_gene={
-            gene: len(eligible.get(gene, set())) for gene in matrix.index
-        },
+        eligible_per_gene={gene: len(eligible.get(gene, set())) for gene in matrix.index},
     )

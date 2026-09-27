@@ -197,14 +197,16 @@ def test_min_count_filters_the_long_table_but_not_the_matrix():
 def test_pairs_are_unordered_and_sorted_by_count():
     mutations = mutations_frame(
         [
-            ("g1", "alphaX", "A1V"), ("g1", "betaQ", "C2D"), ("g1", "gammaZ", "E3K"),
-            ("g2", "alphaX", "A1V"), ("g2", "gammaZ", "E3K"),
-            ("g3", "alphaX", "A1V"), ("g3", "gammaZ", "E3K"),
+            ("g1", "alphaX", "A1V"),
+            ("g1", "betaQ", "C2D"),
+            ("g1", "gammaZ", "E3K"),
+            ("g2", "alphaX", "A1V"),
+            ("g2", "gammaZ", "E3K"),
+            ("g3", "alphaX", "A1V"),
+            ("g3", "gammaZ", "E3K"),
         ]
     )
-    qc = qc_frame(
-        [(g, gene) for g in ("g1", "g2", "g3") for gene in ("alphaX", "betaQ", "gammaZ")]
-    )
+    qc = qc_frame([(g, gene) for g in ("g1", "g2", "g3") for gene in ("alphaX", "betaQ", "gammaZ")])
 
     genes = cooccurrence(mutations, qc).genes
 
@@ -240,8 +242,10 @@ def test_variant_level_is_off_unless_requested():
 def test_variant_pairs_are_labelled_gene_colon_mutation():
     mutations = mutations_frame(
         [
-            ("g1", "alphaX", "A1V"), ("g1", "betaQ", "C2D"),
-            ("g2", "alphaX", "A1V"), ("g2", "betaQ", "C2D"),
+            ("g1", "alphaX", "A1V"),
+            ("g1", "betaQ", "C2D"),
+            ("g2", "alphaX", "A1V"),
+            ("g2", "betaQ", "C2D"),
             ("g3", "alphaX", "K9R"),
         ]
     )
@@ -327,9 +331,7 @@ def test_foreign_mutations_table_is_rejected():
 
 
 def test_numeric_accessions_are_not_coerced():
-    mutations = mutations_frame(
-        [("9999.12345", "alphaX", "A1V"), ("9999.12345", "betaQ", "C2D")]
-    )
+    mutations = mutations_frame([("9999.12345", "alphaX", "A1V"), ("9999.12345", "betaQ", "C2D")])
     qc = qc_frame([("9999.12345", "alphaX"), ("9999.12345", "betaQ")])
 
     assert int(cooccurrence(mutations, qc).genes.iloc[0]["N_Both"]) == 1
@@ -363,6 +365,4 @@ def test_no_inference_columns_are_emitted():
     columns = set(result.genes.columns) | set(result.variants.columns)
 
     forbidden = ("p_value", "pvalue", "odds", "enrich", "severity", "score", "significan")
-    assert not [
-        column for column in columns if any(word in column.lower() for word in forbidden)
-    ]
+    assert not [column for column in columns if any(word in column.lower() for word in forbidden)]

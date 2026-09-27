@@ -57,12 +57,8 @@ def _write_cohort(root):
     references.mkdir(parents=True)
     genomes.mkdir(parents=True)
 
-    (references / "alphaX_WT.faa").write_text(
-        f">alphaX\n{PROTEIN_ALPHA}\n", encoding="utf-8"
-    )
-    (references / "betaQ_WT.faa").write_text(
-        f">betaQ\n{PROTEIN_BETA}\n", encoding="utf-8"
-    )
+    (references / "alphaX_WT.faa").write_text(f">alphaX\n{PROTEIN_ALPHA}\n", encoding="utf-8")
+    (references / "betaQ_WT.faa").write_text(f">betaQ\n{PROTEIN_BETA}\n", encoding="utf-8")
 
     alpha_mutant = mutate(PROTEIN_ALPHA, (8, "L"))
     beta_mutant = mutate(PROTEIN_BETA, (5, "A"))
@@ -102,12 +98,18 @@ def completed_run(tmp_path_factory):
     exit_code = cli.main(
         [
             "run",
-            "--genomes", str(genomes),
-            "--references", str(references),
-            "--out", str(out),
-            "--job-name", "integration",
-            "--cooccurrence-level", "gene,variant",
-            "--threads", "2",
+            "--genomes",
+            str(genomes),
+            "--references",
+            str(references),
+            "--out",
+            str(out),
+            "--job-name",
+            "integration",
+            "--cooccurrence-level",
+            "gene,variant",
+            "--threads",
+            "2",
         ]
     )
     assert exit_code == 0
@@ -161,9 +163,7 @@ def test_a_genome_without_the_targets_is_recorded_not_dropped(completed_run):
 @requires_tblastn
 def test_planted_substitutions_are_called_at_their_reference_positions(completed_run):
     mutations = read_mutations(completed_run.mutations_csv)
-    found = {
-        (row.Accession, row.Gene, row.Mutation) for row in mutations.itertuples()
-    }
+    found = {(row.Accession, row.Gene, row.Mutation) for row in mutations.itertuples()}
 
     assert ("GEN002", "alphaX", ALPHA_MUTATION) in found
     assert ("GEN003", "alphaX", ALPHA_MUTATION) in found
@@ -216,9 +216,7 @@ def test_the_matrix_diagonal_counts_mutated_genomes(completed_run):
 @requires_tblastn
 def test_variant_level_pairs_use_the_gene_level_denominator(completed_run):
     variants = read_cooccurrence(completed_run.cooccurrence_variants_csv)
-    labels = {
-        frozenset((row.Variant_A, row.Variant_B)): row for row in variants.itertuples()
-    }
+    labels = {frozenset((row.Variant_A, row.Variant_B)): row for row in variants.itertuples()}
 
     pair = labels[frozenset((f"alphaX:{ALPHA_MUTATION}", f"betaQ:{BETA_MUTATION}"))]
     assert int(pair.N_Both) == 1
@@ -243,10 +241,11 @@ def test_the_run_summary_records_provenance_without_inference(completed_run):
     assert summary["cooccurrence"]["mutated_per_gene"] == {"alphaX": 2, "betaQ": 1}
     assert summary["cooccurrence"]["eligible_per_gene"] == {"alphaX": 3, "betaQ": 3}
 
-    # No p-values, no scores, no severities -- anywhere in the provenance record.
-    text = json.dumps(summary).lower()
+    # Co-occurrence is descriptive only: no p-values, odds, enrichment scores
+    # or severities in the cooccurrence section of the provenance record.
+    cooccurrence_text = json.dumps(summary["cooccurrence"]).lower()
     for forbidden in ("p_value", "pvalue", "odds", "enrich", "severity", "significan"):
-        assert forbidden not in text
+        assert forbidden not in cooccurrence_text
 
 
 @requires_tblastn
@@ -256,11 +255,16 @@ def test_the_run_is_reproducible_when_repeated(completed_run, tmp_path):
     exit_code = cli.main(
         [
             "run",
-            "--genomes", str(completed_run.genomes_dir),
-            "--references", str(completed_run.references_dir),
-            "--out", str(second),
-            "--job-name", "integration",
-            "--cooccurrence-level", "gene,variant",
+            "--genomes",
+            str(completed_run.genomes_dir),
+            "--references",
+            str(completed_run.references_dir),
+            "--out",
+            str(second),
+            "--job-name",
+            "integration",
+            "--cooccurrence-level",
+            "gene,variant",
         ]
     )
     assert exit_code == 0
@@ -340,9 +344,12 @@ def test_a_references_directory_with_no_proteins_is_a_clean_failure(tmp_path):
     exit_code = cli.main(
         [
             "run",
-            "--genomes", str(tmp_path / "genomes"),
-            "--references", str(tmp_path / "empty_refs"),
-            "--out", str(tmp_path / "output"),
+            "--genomes",
+            str(tmp_path / "genomes"),
+            "--references",
+            str(tmp_path / "empty_refs"),
+            "--out",
+            str(tmp_path / "output"),
         ]
     )
     assert exit_code == 2  # told what to do, not a traceback
@@ -354,9 +361,12 @@ def test_a_missing_genomes_directory_is_a_clean_failure(tmp_path):
     exit_code = cli.main(
         [
             "run",
-            "--genomes", str(tmp_path / "nowhere"),
-            "--references", str(tmp_path / "refs"),
-            "--out", str(tmp_path / "output"),
+            "--genomes",
+            str(tmp_path / "nowhere"),
+            "--references",
+            str(tmp_path / "refs"),
+            "--out",
+            str(tmp_path / "output"),
         ]
     )
     assert exit_code == 2

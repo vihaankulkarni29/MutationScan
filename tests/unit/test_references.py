@@ -181,7 +181,9 @@ def test_prepare_references_fetches_missing_targets_when_taxid_is_set(tmp_path, 
     assert calls == [("betaQ", "9999")]
     assert result.genes == ["betaQ"]
     assert result.sources["betaQ"] == "uniprot:9999"
-    assert "".join((refs_out / "betaQ_WT.faa").read_text(encoding="utf-8").splitlines()[1:]) == SEQ_B
+    assert (
+        "".join((refs_out / "betaQ_WT.faa").read_text(encoding="utf-8").splitlines()[1:]) == SEQ_B
+    )
 
 
 def test_prepare_references_prefers_local_over_fetching(tmp_path, monkeypatch):
@@ -201,7 +203,9 @@ def test_prepare_references_prefers_local_over_fetching(tmp_path, monkeypatch):
 def test_prepare_references_marks_a_failed_fetch_as_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("mutation_scan.references.fetch_uniprot_reference", lambda g, t: None)
 
-    result = prepare_references(tmp_path / "references", tmp_path / "refs", ["betaQ"], uniprot_taxid="1")
+    result = prepare_references(
+        tmp_path / "references", tmp_path / "refs", ["betaQ"], uniprot_taxid="1"
+    )
 
     assert result.genes == []
     assert result.missing == ["betaQ"]

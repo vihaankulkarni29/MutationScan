@@ -129,7 +129,10 @@ def test_manifest_has_one_row_per_genome_gene_pair(tmp_path, references_dir, fak
         write_genome(tmp_path / "genomes", accession, {"alphaX": PROTEIN_ALPHA})
 
     manifest = extract(
-        tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs,
+        tmp_path / "genomes",
+        refs.refs_dir,
+        tmp_path / "proteins",
+        refs,
         manifest_csv=tmp_path / "extraction_manifest.csv",
     )
 
@@ -139,9 +142,12 @@ def test_manifest_has_one_row_per_genome_gene_pair(tmp_path, references_dir, fak
     assert set(manifest["Gene"]) == {"alphaX", "betaQ"}
     # Deterministic ordering.
     assert manifest[["Accession", "Gene"]].values.tolist() == [
-        ["g1", "alphaX"], ["g1", "betaQ"],
-        ["g2", "alphaX"], ["g2", "betaQ"],
-        ["g3", "alphaX"], ["g3", "betaQ"],
+        ["g1", "alphaX"],
+        ["g1", "betaQ"],
+        ["g2", "alphaX"],
+        ["g2", "betaQ"],
+        ["g3", "alphaX"],
+        ["g3", "betaQ"],
     ]
 
 
@@ -187,12 +193,17 @@ def test_internal_stops_are_counted(tmp_path, references_dir, fake_tblastn):
     assert int(manifest.iloc[0]["Internal_Stops"]) == 2
 
 
-def test_empty_inputs_yield_an_empty_but_well_formed_manifest(tmp_path, references_dir, fake_tblastn):
+def test_empty_inputs_yield_an_empty_but_well_formed_manifest(
+    tmp_path, references_dir, fake_tblastn
+):
     refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX"])
     (tmp_path / "genomes").mkdir()
 
     manifest = extract(
-        tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs,
+        tmp_path / "genomes",
+        refs.refs_dir,
+        tmp_path / "proteins",
+        refs,
         manifest_csv=tmp_path / "manifest.csv",
     )
 
@@ -225,7 +236,13 @@ def test_read_manifest_keeps_numeric_accessions_as_strings(tmp_path, references_
     write_genome(tmp_path / "genomes", "9999.12345", {"alphaX": PROTEIN_ALPHA})
     manifest_csv = tmp_path / "manifest.csv"
 
-    extract(tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs, manifest_csv=manifest_csv)
+    extract(
+        tmp_path / "genomes",
+        refs.refs_dir,
+        tmp_path / "proteins",
+        refs,
+        manifest_csv=manifest_csv,
+    )
 
     assert read_manifest(manifest_csv)["Accession"].iloc[0] == "9999.12345"
 
@@ -241,7 +258,10 @@ def test_real_tblastn_recovers_the_embedded_protein(tmp_path, references_dir):
     write_genome(tmp_path / "genomes", "g1", {"alphaX": variant, "betaQ": PROTEIN_BETA})
 
     manifest = extract(
-        tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs,
+        tmp_path / "genomes",
+        refs.refs_dir,
+        tmp_path / "proteins",
+        refs,
         manifest_csv=tmp_path / "manifest.csv",
     )
 
@@ -265,7 +285,7 @@ def test_real_tblastn_reports_no_hit_for_an_absent_gene(tmp_path, references_dir
     write_genome(tmp_path / "genomes", "g1", {"alphaX": PROTEIN_ALPHA})  # no betaQ
 
     manifest = extract(tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs)
-    status = dict(zip(manifest["Gene"], manifest["Status"]))
+    status = dict(zip(manifest["Gene"], manifest["Status"], strict=False))
 
     assert status["alphaX"] == STATUS_EXTRACTED
     assert status["betaQ"] == STATUS_NO_HIT

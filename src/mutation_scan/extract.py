@@ -18,10 +18,10 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
 
 import pandas as pd
 
@@ -101,9 +101,7 @@ def verify_tblastn(binary: str = "tblastn") -> str:
         )
 
     try:
-        result = subprocess.run(
-            [binary, "-version"], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run([binary, "-version"], capture_output=True, text=True, timeout=30)
     except OSError as exc:
         raise TblastnError(f"Could not execute {binary!r}: {exc}") from exc
     except subprocess.TimeoutExpired as exc:
@@ -130,9 +128,7 @@ def discover_genomes(genomes_dir: Path | str) -> list[Path]:
     return sorted(
         path
         for path in genomes_dir.iterdir()
-        if path.is_file()
-        and path.suffix.lower() in GENOME_EXTENSIONS
-        and path.stat().st_size > 0
+        if path.is_file() and path.suffix.lower() in GENOME_EXTENSIONS and path.stat().st_size > 0
     )
 
 
@@ -154,7 +150,7 @@ class TblastnHit:
     internal_stops: int
 
 
-def _parse_hit(line: str) -> Optional[TblastnHit]:
+def _parse_hit(line: str) -> TblastnHit | None:
     fields = line.rstrip("\n").split("\t")
     if len(fields) < _FIELD_COUNT:
         raise TblastnError(
@@ -192,7 +188,7 @@ def run_tblastn(
     binary: str = "tblastn",
     evalue: float = DEFAULT_EVALUE,
     timeout: int = TBLASTN_TIMEOUT,
-) -> Optional[TblastnHit]:
+) -> TblastnHit | None:
     """Align one reference protein against one genome; return the best HSP.
 
     Returns ``None`` when there is no hit above *evalue*.
@@ -202,12 +198,18 @@ def run_tblastn(
     """
     command = [
         binary,
-        "-query", str(ref_faa),
-        "-subject", str(genome_fna),
-        "-outfmt", f"6 {_OUTFMT_FIELDS}",
-        "-evalue", repr(evalue),
-        "-max_target_seqs", "1",
-        "-max_hsps", "1",
+        "-query",
+        str(ref_faa),
+        "-subject",
+        str(genome_fna),
+        "-outfmt",
+        f"6 {_OUTFMT_FIELDS}",
+        "-evalue",
+        repr(evalue),
+        "-max_target_seqs",
+        "1",
+        "-max_hsps",
+        "1",
     ]
 
     try:
@@ -234,7 +236,7 @@ class _Task:
     accession: str
     genome: Path
     gene: str
-    reference: Optional[Path]
+    reference: Path | None
 
 
 def _row(
@@ -242,7 +244,7 @@ def _row(
     gene: str,
     status: str,
     detail: str = "",
-    hit: Optional[TblastnHit] = None,
+    hit: TblastnHit | None = None,
 ) -> dict:
     return {
         "Accession": accession,
@@ -327,9 +329,11 @@ def extract(
     proteins_out = Path(proteins_out)
     proteins_out.mkdir(parents=True, exist_ok=True)
 
-    gene_names = list(targets.genes) if isinstance(targets, ReferenceSet) else [
-        str(gene).strip() for gene in targets if str(gene).strip()
-    ]
+    gene_names = (
+        list(targets.genes)
+        if isinstance(targets, ReferenceSet)
+        else [str(gene).strip() for gene in targets if str(gene).strip()]
+    )
 
     genome_files = list(genomes) if genomes is not None else discover_genomes(genomes_dir)
 
@@ -372,8 +376,7 @@ def extract(
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(_run_task, task, proteins_out, tblastn_binary, evalue)
-                for task in tasks
+                pool.submit(_run_task, task, proteins_out, tblastn_binary, evalue) for task in tasks
             ]
             for index, future in enumerate(futures, start=1):
                 rows.append(future.result())

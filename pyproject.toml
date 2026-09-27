@@ -18,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
@@ -29,7 +30,17 @@ dependencies = [
 [project.optional-dependencies]
 workflow = ["snakemake>=7.32.4"]
 plots = ["matplotlib>=3.7.0"]
-dev = ["pytest>=7.4", "matplotlib>=3.7.0"]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.0",
+    "ruff>=0.5",
+    "mypy>=1.0",
+    "snakemake>=7.32.4",
+    "matplotlib>=3.7.0",
+    "scipy>=1.10",
+    "statsmodels>=0.14",
+    "networkx>=3.0",
+]
 
 [project.scripts]
 mutationscan = "mutation_scan.cli:main"
@@ -45,3 +56,22 @@ include = ["mutation_scan*"]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
 filterwarnings = ["ignore::DeprecationWarning:Bio.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "C4"]
+ignore = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mutation_scan"]
+
+[tool.mypy]
+packages = ["mutation_scan"]
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

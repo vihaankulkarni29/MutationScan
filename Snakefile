@@ -4,10 +4,10 @@
 #     snakemake --cores 4 --config job_name=x   # override any config key
 #     snakemake -n                              # dry run: check the DAG
 #
-# Three stages, in order: extract proteins from genomes, call substitutions
-# against the reference, count co-occurrence. Every path below is derived from a
-# single validated Config object, so this file and `mutationscan run` cannot
-# drift apart -- they call the same functions with the same layout.
+# Five stages, in order: extract proteins from genomes, call substitutions,
+# count co-occurrence, epistasis analysis, run summary. Every path below is
+# derived from a single validated Config object, so this file and `mutationscan
+# run` cannot drift apart -- they call the same functions with the same layout.
 #
 # Nothing here names a gene, organism or database. Targets are whatever
 # reference files are present in references_dir.
@@ -89,6 +89,9 @@ rule run_summary:
         qc=str(CONFIG.variant_qc_csv),
         genes=str(CONFIG.cooccurrence_genes_csv),
         matrix=str(CONFIG.cooccurrence_matrix_csv),
+        genome_map=str(CONFIG.genome_mutation_map_csv),
+        severity=str(CONFIG.mutation_severity_csv),
+        networks=str(CONFIG.epistasis_networks_csv),
         refs_dir=str(CONFIG.refs_dir),
     output:
         summary=str(CONFIG.run_summary_json),
@@ -97,3 +100,20 @@ rule run_summary:
         tblastn_binary=CONFIG.tblastn_binary,
     script:
         "workflow/scripts/04_summary.py"
+
+
+rule epistasis:
+    """Epistasis: genome mutation map + Fisher exact pair testing with BH FDR."""
+    input:
+        mutations=str(CONFIG.mutations_csv),
+        qc=str(CONFIG.variant_qc_csv),
+    output:
+        genome_map=str(CONFIG.genome_mutation_map_csv),
+        severity=str(CONFIG.mutation_severity_csv),
+        networks=str(CONFIG.epistasis_networks_csv),
+    params:
+        fdr_threshold=CONFIG.epistasis.fdr_threshold,
+        min_count=CONFIG.epistasis.min_count,
+    threads: CONFIG.epistasis.threads
+    script:
+        "workflow/scripts/05_epistasis.py"

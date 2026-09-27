@@ -30,7 +30,6 @@ from mutation_scan.variants import (
 
 from ..conftest import PROTEIN_ALPHA, PROTEIN_BETA, mutate
 
-
 # -- the residue counter ----------------------------------------------------
 
 
@@ -173,9 +172,7 @@ def test_call_variants_is_driven_by_the_manifest(run_dirs):
 
     assert list(result.mutations.columns) == list(MUTATION_COLUMNS)
     assert list(result.qc.columns) == list(QC_COLUMNS)
-    assert result.mutations["Mutation"].tolist() == [
-        f"{PROTEIN_ALPHA[11]}12W"
-    ]
+    assert result.mutations["Mutation"].tolist() == [f"{PROTEIN_ALPHA[11]}12W"]
     assert set(result.qc["Status"]) == {VARIANT_STATUS_CALLED}
     # betaQ was evaluated and found unmutated -- a row exists saying so.
     beta = result.qc[result.qc["Gene"] == "betaQ"].iloc[0]
@@ -256,7 +253,7 @@ def test_missing_protein_file_and_missing_reference_are_reported(run_dirs):
         refs,
         manifest=manifest_for([("g1", "alphaX"), ("g1", "betaQ"), ("g1", "gammaZ")]),
     )
-    status = dict(zip(result.qc["Gene"], result.qc["Status"]))
+    status = dict(zip(result.qc["Gene"], result.qc["Status"], strict=False))
 
     assert status["alphaX"] == VARIANT_STATUS_CALLED
     assert status["betaQ"] == VARIANT_STATUS_MISSING_PROTEIN  # in manifest, not on disk
@@ -272,7 +269,7 @@ def test_an_unreadable_protein_is_recorded_as_an_error(run_dirs):
     result = call_variants(
         proteins, refs, manifest=manifest_for([("g1", "alphaX"), ("g2", "alphaX")])
     )
-    status = dict(zip(result.qc["Accession"], result.qc["Status"]))
+    status = dict(zip(result.qc["Accession"], result.qc["Status"], strict=False))
 
     assert status["g1"] == VARIANT_STATUS_CALLED
     assert status["g2"] == VARIANT_STATUS_ERROR

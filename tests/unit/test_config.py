@@ -37,9 +37,7 @@ def test_absolute_paths_are_left_alone(tmp_path):
 
 
 def test_run_layout_is_a_single_folder(tmp_path):
-    config = Config.from_mapping(
-        {"job_name": "my_run", "output_root": "out"}, base_dir=tmp_path
-    )
+    config = Config.from_mapping({"job_name": "my_run", "output_root": "out"}, base_dir=tmp_path)
     run_dir = tmp_path / "out" / "my_run"
 
     assert config.run_dir == run_dir
@@ -55,9 +53,7 @@ def test_variant_level_adds_its_output(tmp_path):
     gene_only = Config.from_mapping({}, base_dir=tmp_path)
     assert gene_only.cooccurrence_variants_csv not in gene_only.outputs()
 
-    both = Config.from_mapping(
-        {"cooccurrence": {"levels": ["variant", "gene"]}}, base_dir=tmp_path
-    )
+    both = Config.from_mapping({"cooccurrence": {"levels": ["variant", "gene"]}}, base_dir=tmp_path)
     # Order is normalized regardless of how the user wrote it.
     assert both.cooccurrence.levels == ("gene", "variant")
     assert both.cooccurrence_variants_csv in both.outputs()
