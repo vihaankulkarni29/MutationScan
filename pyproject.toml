@@ -25,6 +25,7 @@ dependencies = [
     "pandas>=2.0.0",
     "biopython>=1.81",
     "pyyaml>=6.0",
+    "scipy>=1.10",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +38,6 @@ dev = [
     "mypy>=1.0",
     "snakemake>=7.32.4",
     "matplotlib>=3.7.0",
-    "scipy>=1.10",
     "statsmodels>=0.14",
     "networkx>=3.0",
 ]
