@@ -2,23 +2,20 @@ name: mutationscan
 channels:
   - conda-forge
   - bioconda
-  - defaults
 dependencies:
+  # Runtime
   - python>=3.10
-  - pip
-  - pytest
-  - snakemake-minimal>=7.32.4
-  - blast
-  - openmm
-  - pdbfixer
-  - smina
+  - blast          # supplies tblastn, the only external binary the tool calls
   - pandas>=2.0.0
   - biopython>=1.81
-  - networkx>=3.0
-  - matplotlib>=3.7.0
   - pyyaml>=6.0
-  - requests>=2.31.0
-  - rdkit
-  - gemmi
-  - pip:
-      - meeko>=0.6
+  - scipy>=1.10     # epistasis: Fisher exact test
+
+  # Workflow engine (optional at runtime; the `mutationscan` CLI needs none of it)
+  - snakemake-minimal>=7.32.4
+
+  # Development
+  - pip
+  - pytest>=7.4
+  - ruff>=0.5
+  - mypy>=1.0

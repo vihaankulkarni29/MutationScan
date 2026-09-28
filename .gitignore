@@ -1,137 +1,76 @@
-# Snakemake State
+# Run state and outputs. Everything a run produces lives under data/output/.
 .snakemake/
 
-# Dynamic Data & Results (Strict quarantine)
-data/local_genomes/*
-!data/local_genomes/.gitkeep
+# Any other folder you create under data/ is yours and is never tracked --
+# private cohorts, scratch dirs, downloads. Only the scaffold below is in git.
+data/*/
+!data/genomes/
+!data/references/
+!data/databases/
+!data/output/
+!data/results/
+
+# User-supplied inputs and run outputs. These are your data, not the tool's
+# source: genomes and reference proteins are organism-specific and must never be
+# baked into the repo. The .gitkeep files keep the empty scaffold in git.
+data/genomes/*
+!data/genomes/.gitkeep
+data/references/*
+!data/references/.gitkeep
+data/databases/*
+!data/databases/.gitkeep
 data/output/*
 !data/output/.gitkeep
 data/results/*
 !data/results/.gitkeep
-data/ligands/*
-!data/ligands/.gitkeep
-
-# IDE & Python Caches
-__pycache__/
-*.pyc
-.vscode/
-.idea/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
 sdist/
-var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
+.eggs/
+.Python
 MANIFEST
 
 # Virtual environments
 venv/
-ENV/
 env/
+ENV/
 .venv
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-*.sublime-project
-*.sublime-workspace
-
-# Testing and coverage
+# Testing, coverage, type checking
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
 .tox/
 .hypothesis/
-
-# Type checking
 .mypy_cache/
 .dmypy.json
 dmypy.json
 
-# IDE specific
-.pylintrc
-.flake8
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
-# Project specific Data & Caches
-data/genomes/*
-!data/genomes/.gitkeep
-data/output/*
-!data/output/.gitkeep
-data/databases/*
-!data/databases/.gitkeep
-data/interim/*
-!data/interim/.gitkeep
-data/results/*
-!data/results/.gitkeep
-data/proteins/*
-!data/proteins/.gitkeep
-data/refs/*
-!data/refs/.gitkeep
-data/raw/*
-!data/raw/.gitkeep
-data/ligands/*
-!data/ligands/.gitkeep
-
-# Global ignores for dynamic biophysics and data files
-*.csv
-*.pdb
-*.pdbqt
-*.fasta
-*.faa
-*.fna
-
-# Downloaded tools/binaries
-datasets.exe
-*.exe
-
-# Logs
+# Logs, caches, scratch
 logs/
 *.log
-
-# Cache
 .cache/
-*.pkl
-*.pickle
-
-# Temporary files
 *.tmp
 *.bak
-*.backup
-temp_data_collection/
-filter_modern_strains.py
-get_refs.py
-
-# OS specific
-Thumbs.db
-.DS_Store
-.AppleDouble
-.LSOverride
 
 # Docker
 docker-compose.override.yml
-
-# CI/CD
-.github/workflows/*.backup

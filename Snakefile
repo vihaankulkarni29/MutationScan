@@ -1,109 +1,119 @@
-# Snakefile - MutationScan Master Workflow
+# MutationScan workflow.
+#
+#     snakemake --cores 4                       # uses config/config.yaml
+#     snakemake --cores 4 --config job_name=x   # override any config key
+#     snakemake -n                              # dry run: check the DAG
+#
+# Five stages, in order: extract proteins from genomes, call substitutions,
+# count co-occurrence, epistasis analysis, run summary. Every path below is
+# derived from a single validated Config object, so this file and `mutationscan
+# run` cannot drift apart -- they call the same functions with the same layout.
+#
+# Nothing here names a gene, organism or database. Targets are whatever
+# reference files are present in references_dir.
+
+from mutation_scan.config import Config
+
 configfile: "config/config.yaml"
 
-import os
+# Snakemake runs with the workdir as cwd, so relative config paths resolve there.
+CONFIG = Config.from_mapping(config)
 
-# ---------------------------------------------------------------------------
-# CONFIGURATION
-# ---------------------------------------------------------------------------
-# The entry point is now strictly a local directory of provided genomes.
-GENOMES_DIR = config.get("local_genomes", "data/local_genomes")
-TARGETS_FILE = config.get("targets_file", "config/acr_targets.txt")
-DEFAULT_PDB = config.get("default_pdb", "data/5o66.pdb")
-JOB_NAME = config.get("job_name", "default_run")
-SKIP_EXTRACTION = str(config.get("skip_extraction", False)).lower() in ("1", "true", "yes", "y")
-LEGACY_RESULTS_DIR = config.get("legacy_results_dir", "data/results")
+WANT_VARIANT_LEVEL = "variant" in CONFIG.cooccurrence.levels
 
-# THIS IS THE CRITICAL LINE:
-OUT_DIR = f"data/output/{JOB_NAME}"
 
-# When skip_extraction=true, reuse existing proteins/refs (legacy defaults).
-PROTEINS_INPUT_DIR = config.get(
-    "proteins_dir",
-    f"{LEGACY_RESULTS_DIR}/proteins" if SKIP_EXTRACTION else f"{OUT_DIR}/proteins"
-)
-REFS_INPUT_DIR = config.get(
-    "refs_dir",
-    f"{LEGACY_RESULTS_DIR}/refs" if SKIP_EXTRACTION else f"{OUT_DIR}/refs"
-)
-
-# ---------------------------------------------------------------------------
-# MASTER RULE
-# ---------------------------------------------------------------------------
 rule all:
     input:
-        f"{OUT_DIR}/1_genomics_report.csv",
-        f"{OUT_DIR}/2_epistasis_networks.csv",
-        f"{OUT_DIR}/ControlScan_Networks",
-        f"{OUT_DIR}/3_biophysics_docking.csv"
+        [str(path) for path in CONFIG.outputs()],
 
-# ---------------------------------------------------------------------------
-# PHASE 1A: PROTEIN EXTRACTION
-# ---------------------------------------------------------------------------
+
 rule extract_proteins:
+    """tblastn every reference protein against every genome."""
     input:
-        genomes_dir=GENOMES_DIR,
-        targets_file=TARGETS_FILE
+        genomes_dir=str(CONFIG.genomes_dir),
+        references_dir=str(CONFIG.references_dir),
     output:
-        proteins_dir=directory(f"{OUT_DIR}/proteins"),
-        refs_dir=directory(f"{OUT_DIR}/refs"),
-        marker=f"{OUT_DIR}/proteins/.proteins_extracted"
+        manifest=str(CONFIG.manifest_csv),
+        proteins_dir=directory(str(CONFIG.proteins_dir)),
+        refs_dir=directory(str(CONFIG.refs_dir)),
     params:
-        uniprot_taxid=config.get("uniprot_taxid", ""),
-        out_dir=OUT_DIR,
-        skip_extraction=config.get("skip_extraction", False)
+        targets=list(CONFIG.targets),
+        uniprot_taxid=CONFIG.uniprot_taxid,
+        tblastn_binary=CONFIG.tblastn_binary,
+    threads: CONFIG.threads
     script:
-        "src/scripts/02a_extract_proteins.py"
+        "workflow/scripts/01_extract.py"
 
-# ---------------------------------------------------------------------------
-# PHASE 1B: VARIANT CALLING
-# ---------------------------------------------------------------------------
+
 rule call_variants:
+    """Global-align each extracted protein to its reference and call substitutions."""
     input:
-        proteins_dir=PROTEINS_INPUT_DIR,
-        refs_dir=REFS_INPUT_DIR
+        manifest=str(CONFIG.manifest_csv),
+        proteins_dir=str(CONFIG.proteins_dir),
+        refs_dir=str(CONFIG.refs_dir),
     output:
-        report=f"{OUT_DIR}/1_genomics_report.csv",
-        marker=f"{OUT_DIR}/.variants_called"
+        mutations=str(CONFIG.mutations_csv),
+        qc=str(CONFIG.variant_qc_csv),
     params:
-        out_dir=OUT_DIR
+        min_identity_percent=CONFIG.min_identity_percent,
+        min_coverage_percent=CONFIG.min_coverage_percent,
     script:
-        "src/scripts/02b_call_variants.py"
+        "workflow/scripts/02_call_variants.py"
 
-# ---------------------------------------------------------------------------
-# PHASE 2: BIOCHEMICAL EPISTASIS
-# ---------------------------------------------------------------------------
-rule biochemical_epistasis:
-    input:
-        report=f"{OUT_DIR}/1_genomics_report.csv"
-    output:
-        networks=f"{OUT_DIR}/2_epistasis_networks.csv",
-        plots_dir=directory(f"{OUT_DIR}/ControlScan_Networks")
-    params:
-        out_dir=OUT_DIR
-    script:
-        "src/scripts/03_biochemical_epistasis.py"
 
-# ---------------------------------------------------------------------------
-# PHASE 3: OPENMM DYNAMICS & HTVS DOCKING
-# ---------------------------------------------------------------------------
-rule htvs_biophysics:
+rule cooccurrence:
+    """Count how often pairs of genes are mutated in the same genome."""
     input:
-        networks=f"{OUT_DIR}/2_epistasis_networks.csv",
-        proteins_dir=PROTEINS_INPUT_DIR,
-        pdb_file=DEFAULT_PDB
+        mutations=str(CONFIG.mutations_csv),
+        qc=str(CONFIG.variant_qc_csv),
     output:
-        docking_report=f"{OUT_DIR}/3_biophysics_docking.csv",
-        mutated_pdbs=directory(f"{OUT_DIR}/Mutated_Structures"),
-        readme=f"{OUT_DIR}/README_Biophysics.txt"
+        genes=str(CONFIG.cooccurrence_genes_csv),
+        matrix=str(CONFIG.cooccurrence_matrix_csv),
+        **(
+            {"variants": str(CONFIG.cooccurrence_variants_csv)}
+            if WANT_VARIANT_LEVEL
+            else {}
+        ),
     params:
-        pdb=DEFAULT_PDB,
-        chain_map=config.get("chain_map", ""),
-        ligand=config.get("ligand", ""),
-        center_x=config.get("center_x", 0.0),
-        center_y=config.get("center_y", 0.0),
-        center_z=config.get("center_z", 0.0),
-        stiffness=config.get("md_stiffness", 500.0),
-        out_dir=OUT_DIR
+        levels=list(CONFIG.cooccurrence.levels),
+        min_count=CONFIG.cooccurrence.min_count,
     script:
-        "src/scripts/04_htvs_biophysics.py"
+        "workflow/scripts/03_cooccurrence.py"
+
+
+rule run_summary:
+    """Record what was run, on what, with which settings, and what came out."""
+    input:
+        manifest=str(CONFIG.manifest_csv),
+        mutations=str(CONFIG.mutations_csv),
+        qc=str(CONFIG.variant_qc_csv),
+        genes=str(CONFIG.cooccurrence_genes_csv),
+        matrix=str(CONFIG.cooccurrence_matrix_csv),
+        genome_map=str(CONFIG.genome_mutation_map_csv),
+        severity=str(CONFIG.mutation_severity_csv),
+        networks=str(CONFIG.epistasis_networks_csv),
+        refs_dir=str(CONFIG.refs_dir),
+    output:
+        summary=str(CONFIG.run_summary_json),
+    params:
+        variants=(str(CONFIG.cooccurrence_variants_csv) if WANT_VARIANT_LEVEL else ""),
+        tblastn_binary=CONFIG.tblastn_binary,
+    script:
+        "workflow/scripts/04_summary.py"
+
+
+rule epistasis:
+    """Epistasis: genome mutation map + Fisher exact pair testing with BH FDR."""
+    input:
+        mutations=str(CONFIG.mutations_csv),
+        qc=str(CONFIG.variant_qc_csv),
+    output:
+        genome_map=str(CONFIG.genome_mutation_map_csv),
+        severity=str(CONFIG.mutation_severity_csv),
+        networks=str(CONFIG.epistasis_networks_csv),
+    params:
+        fdr_threshold=CONFIG.epistasis.fdr_threshold,
+        min_count=CONFIG.epistasis.min_count,
+    threads: CONFIG.epistasis.threads
+    script:
+        "workflow/scripts/05_epistasis.py"

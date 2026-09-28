@@ -1,30 +1,22 @@
-# Use Miniforge for fast, robust Conda environment solving
+# MutationScan.
+#
+#   docker build -t mutationscan .
+#   docker run --rm -v "$PWD/data:/app/data" mutationscan \
+#       run --genomes data/genomes --references data/references --out data/output
+#
+# Miniforge because BLAST+ comes from bioconda; everything else is pure Python.
 FROM condaforge/miniforge3:latest
 
-# Set working directory
 WORKDIR /app
 
-# Install system-level dependencies required by SMINA and OpenMM
-RUN apt-get update && apt-get install -y \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy the environment definition
+# Environment first, so a code change does not invalidate the conda layer.
 COPY environment.yml .
-
-# Create the conda environment and clean up caches to keep the image small
 RUN mamba env create -f environment.yml && mamba clean -afy
-
-# Activate the conda environment globally for all subsequent commands
 ENV PATH="/opt/conda/envs/mutationscan/bin:$PATH"
 
-# Copy the entire codebase into the container
 COPY . .
+RUN pip install --no-deps -e .
 
-# ---------------------------------------------------------
-# THE FIX: Universally expose the custom Python package
-# ---------------------------------------------------------
-ENV PYTHONPATH="/app/src"
-
-# Set Snakemake as the default command (entrypoint can be overridden if needed)
-CMD ["snakemake", "--help"]
+# `docker run mutationscan <args>` is `mutationscan <args>`.
+ENTRYPOINT ["mutationscan"]
+CMD ["--help"]

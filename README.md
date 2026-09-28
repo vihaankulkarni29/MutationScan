@@ -1,103 +1,53 @@
 # MutationScan
 
-MutationScan is a Snakemake-orchestrated AMR analytics pipeline that transforms local bacterial genome assemblies into:
+Find amino-acid substitutions in your proteins of interest across a cohort of
+bacterial genomes, and count how often pairs of those proteins are mutated in the
+same genome.
 
-1. Mutation call reports
-2. Biochemical epistasis network rankings
-3. Optional structure-guided docking deltas (WT vs mutant)
+**No gene, organism, drug or database is hardcoded anywhere in this tool.** You
+supply reference proteins and genomes; the reference filenames *are* the target
+list. Point it at different proteins and it studies different proteins — there is
+nothing to reconfigure and nothing in the code to edit.
 
-The repository is structured for production use with deterministic workflow steps, job-scoped output directories, and strict separation of source code vs runtime state.
+---
 
-## What MutationScan Does
+## What it does
 
-MutationScan executes a staged workflow:
+Five stages, in order.
 
-1. Sequence extraction and variant calling from local `.fna` genomes
-2. Biochemical scoring and co-occurrence epistasis network generation
-3. Optional biophysics docking against a provided protein structure
+**1. Extract.** For every (genome, gene) pair, `tblastn` aligns the reference
+protein against the six-frame translation of the genome and the best hit is
+written out as a protein sequence. This finds the gene without needing the genome
+to be annotated.
 
-Current design principle:
+**2. Call substitutions.** Each extracted protein is globally aligned to its
+reference (Needleman–Wunsch, BLOSUM62). Walking the alignment, the position
+counter advances only on non-gap reference columns — so `Y83F` means *the 83rd
+residue of your reference protein*, not the 83rd column of some alignment. Two
+gates decide whether a pair is called at all: **identity** to the reference and
+**coverage** of it. Coverage is what catches a truncated or fragmented gene,
+which identity alone will happily score as near-perfect.
 
-- Local genomes are the input source (no built-in metadata download stage in the production DAG).
-- Every run is namespaced by `job_name` and writes to `data/output/{job_name}/`.
+**3. Count co-occurrence.** For each pair of genes, count the genomes where both
+are mutated. The denominator is only those genomes where **both genes were
+actually evaluated**, so "gene B is not mutated here" is never confused with
+"gene B was never observed here". A pair with no genome in common is omitted
+entirely rather than reported as zero. Counts are descriptive only — no p-values
+or enrichment statistics at this stage.
 
-## Recent Updates (March 2026)
+**4. Epistasis.** For every pair of mutations that co-occur in at least one
+genome, Fisher's exact test probes whether they appear together more (or less)
+often than chance. Benjamini–Hochberg FDR correction is applied across all
+tested pairs, and significant pairs are classified as *positive* (enriched
+together), *negative* (mutually exclusive), or *neutral*. Pairs are ranked by
+FDR-adjusted p-value, then by composite biochemical severity
+(BLOSUM62 + charge + hydropathy + volume), then by co-occurrence count. A
+per-genome **mutation map** is also written so you can see every mutation in
+every genome at a glance.
 
-The current main branch includes several pipeline correctness and quality upgrades:
+---
 
-- Variant-calling identity filter to suppress weak-homology mutation inflation.
-- MVBM docking refinements with fixed-pocket targeting and flexible-residue mutant docking.
-- Fast steric quality control with explicit `FAILED_QC` status for non-physical mutant models.
-- Confidence and interpretation annotations in biophysics outputs for easier triage.
-
-These updates are now the documented baseline behavior for new runs.
-
-## Production Workflow (Snakemake)
-
-The active workflow in [Snakefile](Snakefile) calls exactly these scripts:
-
-1. [src/scripts/02a_extract_proteins.py](src/scripts/02a_extract_proteins.py)
-2. [src/scripts/02b_call_variants.py](src/scripts/02b_call_variants.py)
-3. [src/scripts/03_biochemical_epistasis.py](src/scripts/03_biochemical_epistasis.py)
-4. [src/scripts/04_htvs_biophysics.py](src/scripts/04_htvs_biophysics.py)
-
-No legacy acquisition script is used in the current production DAG.
-
-## Inputs and Outputs
-
-Required inputs:
-
-- Local genomes directory (default `data/local_genomes`)
-- Target gene list (default `config/acr_targets.txt`)
-- Optional reference PDB for Phase 3 biophysics (default `data/5o66.pdb` in config)
-- Optional ligand path from config (`ligand`)
-
-Primary outputs for a run:
-
-- `data/output/{job_name}/1_genomics_report.csv`
-- `data/output/{job_name}/2_epistasis_networks.csv`
-- `data/output/{job_name}/ControlScan_Networks/`
-- `data/output/{job_name}/3_biophysics_docking.csv`
-- `data/output/{job_name}/Mutated_Structures/`
-- `data/output/{job_name}/README_Biophysics.txt`
-
-## Configuration
-
-Edit [config/config.yaml](config/config.yaml) to control run behavior.
-
-Minimum important keys:
-
-- `job_name`: output namespace for this run
-- `local_genomes`: folder containing `.fna` files
-- `targets_file`: target genes list
-- `variant_min_identity_percent`: minimum alignment identity threshold for variant emission (default `80`)
-- `default_pdb`: structure file for biophysics stage
-- `ligand`: optional ligand file path for docking
-- `pocket_center_x`/`pocket_center_y`/`pocket_center_z`: optional override for docking pocket center (default AcrB center)
-- `exhaustiveness`: docking search exhaustiveness (default `16`)
-
-Example:
-
-```yaml
-job_name: "trial_001"
-local_genomes: "data/local_genomes"
-targets_file: "config/acr_targets.txt"
-variant_min_identity_percent: 80
-default_pdb: "data/5o66.pdb"
-ligand: "data/ligands/ligand.sdf"
-exhaustiveness: 16
-```
-
-Identity filtering note:
-
-- Alignments below `variant_min_identity_percent` are skipped before mutation emission.
-- If you want a broader but noisier search, reduce to `75`; for stricter calls, keep `80` or raise it.
-
-## Quick Start
-
-### Option A: Local environment
-
-Use the project Conda environment definition:
+## Install
 
 ```bash
 conda env create -f environment.yml
@@ -105,72 +55,189 @@ conda activate mutationscan
 pip install -e .
 ```
 
-Dry-run the DAG:
+The only external binary is `tblastn` (BLAST+), which the environment provides.
+Check it:
 
 ```bash
-python -m snakemake -n --cores 1 --config job_name="smoke_test"
+tblastn -version
 ```
 
-Run the workflow:
+## Run it
+
+Put one protein FASTA per target gene in a references folder, and your genome
+assemblies in another:
+
+```
+data/references/geneA_WT.faa      data/genomes/SAMPLE_001.fna
+data/references/geneB_WT.faa      data/genomes/SAMPLE_002.fna
+data/references/geneC_WT.faa      data/genomes/SAMPLE_003.fna
+```
+
+Then:
 
 ```bash
-python -m snakemake --cores 4 --config job_name="run_2026_03_18"
+mutationscan run --genomes data/genomes --references data/references --out data/output --job-name my_run --threads 4
 ```
 
-### Option B: Docker
+That is the whole interface. Three genes went in because three files were in the
+folder. Filenames become gene names (`geneA_WT.faa` → `geneA`; the `_WT` is
+optional), and genome filenames become the accessions in every output table.
+
+Check a config without running anything:
+
+```bash
+mutationscan config-check --config config/config.yaml
+```
+
+### Useful flags
+
+| Flag | Effect |
+|---|---|
+| `--targets geneA,geneB` | analyse a subset of the references on disk |
+| `--min-identity 80` | reject a protein below this % identity to the reference |
+| `--min-coverage 80` | reject a protein below this % coverage of the reference |
+| `--cooccurrence-level gene,variant` | also count pairs at `gene:mutation` resolution |
+| `--min-count 3` | only report pairs co-mutated in ≥ 3 genomes |
+| `--taxid 1234` | fetch a missing reference from UniProt for that organism |
+| `--threads 8` | concurrent `tblastn` processes |
+| `--config FILE` | start from a YAML config; flags override it |
+
+The epistasis stage runs automatically at the end of `mutationscan run`. To
+run it separately on an existing mutations table:
+
+```bash
+mutationscan epistasis --mutations data/output/my_run/mutations.csv \
+                      --qc data/output/my_run/variant_qc.csv \
+                      --out data/output/my_run \
+                      --fdr-threshold 0.05 --min-count 1 --threads 4
+```
+
+## Configuration
+
+Everything above can live in [config/config.yaml](config/config.yaml) instead.
+The whole schema:
+
+```yaml
+job_name: default_run
+
+genomes_dir: data/genomes           # nucleotide assemblies, one *.fna per genome
+references_dir: data/references     # wild-type proteins, {gene}_WT.faa or {gene}.faa
+output_root: data/output            # results land in {output_root}/{job_name}/
+
+targets: []                         # [] means "every reference present"
+uniprot_taxid: ""                   # "" disables all network access
+
+min_identity_percent: 80
+min_coverage_percent: 80
+
+tblastn_binary: tblastn
+threads: 4
+
+cooccurrence:
+  levels: [gene]                    # add "variant" for {gene}:{mutation} pairs
+  min_count: 1
+
+epistasis:
+  fdr_threshold: 0.05             # Benjamini-Hochberg q-value cutoff
+  min_count: 1                    # require >= this many co-occurring genomes
+  threads: 1                       # parallel pairwise Fisher tests
+```
+
+Unknown keys are rejected with a message naming the valid ones, so a typo fails
+before the run starts rather than silently doing the wrong thing.
+
+## Outputs
+
+All under `data/output/{job_name}/`:
+
+| File | What it holds |
+|---|---|
+| `extraction_manifest.csv` | One row per attempted (genome, gene) pair, with the tblastn hit stats and a status: `extracted`, `no_hit`, `no_reference` or `error`. A genome where nothing was found is recorded here, not dropped. |
+| `mutations.csv` | One row per substitution: genome, gene, `{ref}{position}{alt}`, and the identity/coverage of the alignment it came from. |
+| `variant_qc.csv` | One row per pair *considered*, including the ones a gate rejected (`low_identity`, `low_coverage`). This is what distinguishes "not mutated" from "not evaluated", and it supplies the denominators below. |
+| `cooccurrence_genes.csv` | One row per gene pair: `N_Both`, `N_A`, `N_B`, `N_Eligible`, and the two plain fractions. |
+| `cooccurrence_genes_matrix.csv` | The same counts as a gene × gene matrix; the diagonal is the genomes mutating that gene. |
+| `cooccurrence_variants.csv` | The same at `gene:mutation` resolution. Only written when you ask for the `variant` level. |
+| `genome_mutation_map.csv` | One row per genome with all its mutations listed (`gene:mut | gene:mut …`). Written by the epistasis stage. |
+| `mutation_severity.csv` | Per-mutation biochemical severity (BLOSUM62, charge, hydropathy, volume, composite score). |
+| `epistasis_networks.csv` | Ranked epistatic pairs: Fisher's exact p-value, BH-adjusted q-value, odds ratio, sign (positive/negative/neutral), and composite pair severity. |
+| `run_summary.json` | Versions, settings, per-stage status counts, and the numerator and denominator behind every count. Attach this to a manuscript. |
+| `refs/`, `proteins/` | The exact reference used for every call, and every protein extracted. |
+
+## Epistasis output
+
+`epistasis_networks.csv` is the main statistical output. Each row is an unordered
+pair of mutations. Read the columns together:
+
+- `N_Both`, `N_A_only`, `N_B_only`, `N_Neither`, `N_Eligible` — the 2×2 table and
+  its denominator (only genomes where **both** mutations were evaluated).
+- `Observed` vs `Expected` — how many co-occurrences you saw vs the null model.
+- `Odds_Ratio` — enrichment direction. `>1` means they co-occur more than expected,
+  `<1` means they exclude each other, `inf` means a structural zero (handled
+  gracefully).
+- `P_value` — Fisher's exact test on the 2×2 table.
+- `Q_value` — Benjamini–Hochberg FDR-adjusted p-value.
+- `Sign` — `positive` (enriched, q < threshold), `negative` (excluded, q < threshold),
+  or `neutral` (not significant).
+- `Pair_Severity` — average biochemical severity of the two substitutions, used
+  only for ranking ties.
+
+Pairs are sorted by `Q_value` ascending (most significant first), then severity
+descending, then `N_Both` descending.
+
+**Read `N_Eligible` before comparing two pairs.** Different pairs can have
+different denominators — that is the honest behaviour, not a bug, and it is why
+the column exists.
+
+## What this tool does not do
+
+Co-occurrence here is **a descriptive count and nothing more**. When one protein
+is mutated, was another protein also mutated in that same genome? That is the
+whole question, and the answer is a number.
+
+It also does not predict phenotype, map mutations to drugs, model structure or
+estimate binding. It reports what the alignment says and counts what it sees.
+
+## Snakemake
+
+For large cohorts, the same stages run under Snakemake with checkpointing and
+cluster support. It reads the same `config/config.yaml` and calls the same
+library functions, so the two entry points cannot produce different results:
+
+```bash
+snakemake -n --cores 1
+snakemake --cores 8
+```
+
+## Docker
 
 ```bash
 docker compose build
-docker compose run --rm mutationscan python -m snakemake -n --cores 1 --config job_name="docker_smoke"
-docker compose run --rm mutationscan python -m snakemake --cores 4 --config job_name="docker_run"
+docker compose run --rm mutationscan run --genomes data/genomes --references data/references --out data/output
 ```
 
-## CI/CD Notes
+Your `./data` and `./config` are mounted from the host, so results appear on your
+machine.
 
-Repository CI validates:
+## Tests
 
-- Unit tests
-- Snakemake DAG buildability
+```bash
+python -m pytest
+```
 
-Runtime data/state folders are intentionally quarantined via ignore rules, and `.snakemake/` is not tracked.
-
-## Scientific and Operational Disclaimers
-
-This pipeline is intended for research and engineering triage workflows.
-
-1. Not a clinical diagnostic device.
-2. Mutation-to-phenotype inference is model- and rule-dependent, not ground truth.
-3. Docking outputs are best-effort relative estimates, not absolute binding free-energy truth.
-4. Fast local docking does not fully model large conformational changes, explicit solvent, long-timescale dynamics, or complete thermodynamic integration.
-5. For high-confidence mechanistic conclusions, use full molecular dynamics and dedicated free-energy methods.
-
-## Repository Hygiene Policy
-
-Tracked assets should remain source/config/documentation only.
-
-Not shipped as production code or tracked outputs:
-
-- `.snakemake/` runtime state
-- Generated output under `data/output/*`
-- Downloaded genome payloads under `data/local_genomes/*`
-- Ad hoc local experiment files
-
-Keep placeholders only (`.gitkeep`) in runtime data folders.
+Unit tests need no external tools; the integration tests build a small synthetic
+cohort with substitutions planted at known positions and are skipped
+automatically if BLAST+ is absent.
 
 ## Troubleshooting
 
-Common causes of failed runs:
-
-1. Missing `.fna` files in `local_genomes`
-2. Missing/incorrect target genes file
-3. Missing PDB when biophysics stage is enabled
-4. Missing external binaries in local environment (`tblastn`, docking dependencies)
-
-Recommended first check:
-
-```bash
-python -m snakemake -n --cores 1 --config job_name="debug_run"
-```
+| Symptom | Cause |
+|---|---|
+| `No reference proteins found` | The references folder is empty or holds no `.faa`/`.fasta`/`.fa`/`.fas` files. |
+| `tblastn not found` | BLAST+ is not on `PATH`; set `tblastn_binary` to its full path. |
+| Everything is `no_hit` | The references are from too distant an organism, or the genome files are not nucleotide assemblies. |
+| Many pairs are `low_coverage` | The gene is fragmented across contigs in those assemblies. Lower `--min-coverage` deliberately, or accept the exclusion. |
+| A pair is missing from the output | No genome evaluated both of its genes. A fraction over an empty denominator is undefined, so the pair is omitted rather than reported as zero. |
 
 ## License
 

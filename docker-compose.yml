@@ -1,19 +1,17 @@
+# Convenience wrapper around the Dockerfile.
+#
+#   docker compose run --rm mutationscan run \
+#       --genomes data/genomes --references data/references --out data/output
+#
+# Your data and config are mounted from the host, so results land in ./data/output
+# on your machine and nothing is trapped inside the container.
 services:
   mutationscan:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
-    image: mutationscan:v2.1
-    # Map the host directories to the container so data persists and is readable
+    image: mutationscan:latest
     volumes:
       - ./data:/app/data
       - ./config:/app/config
-    # Pass the working directory
     working_dir: /app
-    
-    # Resource limits (optional, uncomment if needed)
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 2G
