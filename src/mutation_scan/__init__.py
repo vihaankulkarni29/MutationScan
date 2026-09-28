@@ -14,6 +14,6 @@ supplies, and every output is a count or a measurement -- the tool reports what
 is in the data and interprets none of it.
 """
 
-__version__ = "3.0.0"
+__version__ = "1.0.0"
 
 __all__ = ["__version__"]
