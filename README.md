@@ -239,6 +239,8 @@ automatically if BLAST+ is absent.
 | Many pairs are `low_coverage` | The gene is fragmented across contigs in those assemblies. Lower `--min-coverage` deliberately, or accept the exclusion. |
 | A pair is missing from the output | No genome evaluated both of its genes. A fraction over an empty denominator is undefined, so the pair is omitted rather than reported as zero. |
 
+<img width="6107" height="1751" alt="Genome Mutation-2026-09-28-151342" src="https://github.com/user-attachments/assets/91246564-7e77-4342-a45d-e77e305ea506" />
+
 ## License
 
 See [LICENSE](LICENSE).
