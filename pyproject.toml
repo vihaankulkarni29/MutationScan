@@ -45,6 +45,12 @@ dev = [
 [project.scripts]
 mutationscan = "mutation_scan.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/vihaankulkarni29/MutationScan"
+Documentation = "https://github.com/vihaankulkarni29/MutationScan#readme"
+Repository = "https://github.com/vihaankulkarni29/MutationScan"
+"Bug Tracker" = "https://github.com/vihaankulkarni29/MutationScan/issues"
+
 [tool.setuptools.dynamic]
 version = { attr = "mutation_scan.__version__" }
 
