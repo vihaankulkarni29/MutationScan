@@ -357,3 +357,81 @@ def test_numeric_accessions_survive_the_csv_round_trip(run_dirs, tmp_path):
     )
 
     assert read_mutations(mutations_csv)["Accession"].iloc[0] == "9999.12345"
+
+
+# -- parallel variant calling ------------------------------------------------
+
+
+def _mixed_cohort(proteins_dir):
+    """Enough (genome, gene) pairs, of mixed quality, to exercise chunking.
+
+    Deliberately includes a pair that must be rejected by the identity gate and
+    one rejected by the coverage gate, so a parallel run cannot agree with a
+    sequential one merely by getting every pair right.
+    """
+    pairs = []
+    for index in range(24):
+        accession = f"g{index:02d}"
+        if index % 7 == 0:
+            # Diverged past the identity gate.
+            sequence = "".join("W" if i % 3 else aa for i, aa in enumerate(PROTEIN_ALPHA))
+            put_protein(proteins_dir, accession, "alphaX", sequence)
+            pairs.append((accession, "alphaX"))
+            continue
+        if index % 7 == 1:
+            # Truncated past the coverage gate.
+            put_protein(proteins_dir, accession, "betaQ", PROTEIN_BETA[: len(PROTEIN_BETA) // 3])
+            pairs.append((accession, "betaQ"))
+            continue
+        put_protein(proteins_dir, accession, "alphaX", mutate(PROTEIN_ALPHA, (12, "W")))
+        put_protein(proteins_dir, accession, "betaQ", PROTEIN_BETA)
+        pairs.extend([(accession, "alphaX"), (accession, "betaQ")])
+    return pairs
+
+
+def test_parallel_variant_calling_matches_the_sequential_result(run_dirs):
+    """The parallel path must be a scheduling change and nothing else.
+
+    Identical inputs have to produce identical mutations *and* identical QC
+    rows, including which pairs the gates reject. Anything less means the
+    parallel path is silently changing results, not just speeding them up.
+    """
+    refs, proteins = run_dirs
+    pairs = _mixed_cohort(proteins)
+    manifest = manifest_for(pairs)
+
+    sequential = call_variants(proteins, refs, manifest=manifest, threads=1)
+    parallel = call_variants(proteins, refs, manifest=manifest, threads=3)
+
+    assert len(parallel.qc) == len(pairs)
+    pd.testing.assert_frame_equal(sequential.mutations, parallel.mutations)
+    pd.testing.assert_frame_equal(sequential.qc, parallel.qc)
+
+
+def test_parallel_variant_calling_reports_every_gate_outcome(run_dirs):
+    """Chunking must not drop or merge the rejected pairs.
+
+    A worker crash previously turned every pair in a chunk into an ``error``
+    row that looked like a data problem; this pins the real status mix so a
+    regression there is visible.
+    """
+    refs, proteins = run_dirs
+    pairs = _mixed_cohort(proteins)
+
+    result = call_variants(proteins, refs, manifest=manifest_for(pairs), threads=3)
+
+    statuses = set(result.qc["Status"])
+    assert VARIANT_STATUS_ERROR not in statuses
+    assert VARIANT_STATUS_CALLED in statuses
+    assert VARIANT_STATUS_LOW_IDENTITY in statuses
+    assert result.qc["Accession"].nunique() == len({a for a, _ in pairs})
+
+
+def test_variant_threads_below_one_is_clamped_not_rejected(run_dirs):
+    """``threads=0`` must not silently disable the stage."""
+    refs, proteins = run_dirs
+    put_protein(proteins, "g1", "alphaX", mutate(PROTEIN_ALPHA, (12, "W")))
+
+    result = call_variants(proteins, refs, manifest=manifest_for([("g1", "alphaX")]), threads=0)
+
+    assert result.mutations["Mutation"].tolist() == [f"{PROTEIN_ALPHA[11]}12W"]

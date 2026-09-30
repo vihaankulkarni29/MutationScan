@@ -187,16 +187,45 @@ def mutation_severity(mutations: pd.DataFrame) -> pd.DataFrame:
     return frame[cols]
 
 
-def pair_severity(variant_a: str, variant_b: str, severity: pd.DataFrame) -> float:
-    """Average severity of two variants across all genomes that carry them."""
+def build_severity_index(severity: pd.DataFrame) -> dict[tuple[str, str], float]:
+    """Mean severity per ``(gene, mutation)``, built once for many lookups.
+
+    Pair scoring needs this same lookup once per candidate pair. Computing it
+    per pair means re-scanning the whole severity table each time, which is
+    quadratic: at cohort scale it dominated the epistasis stage so completely
+    that the run never finished.
+    """
+    if severity.empty:
+        return {}
+    grouped = (
+        severity.assign(
+            _gene=severity["Gene"].astype(str),
+            _mutation=severity["Mutation"].astype(str),
+        )
+        .groupby(["_gene", "_mutation"])["severity_score"]
+        .mean()
+    )
+    return {(str(gene), str(mutation)): float(value) for (gene, mutation), value in grouped.items()}
+
+
+def pair_severity(
+    variant_a: str,
+    variant_b: str,
+    severity: pd.DataFrame,
+    index: dict[tuple[str, str], float] | None = None,
+) -> float:
+    """Average severity of two variants across all genomes that carry them.
+
+    Pass *index* (from :func:`build_severity_index`) when scoring many pairs;
+    without it each call rescans *severity*.
+    """
     if severity.empty:
         return 0.0
+    if index is None:
+        index = build_severity_index(severity)
 
     def _mean(variant: str) -> float:
         gene, mut = variant.split(":", 1)
-        sub = severity[
-            (severity["Gene"].astype(str) == gene) & (severity["Mutation"].astype(str) == mut)
-        ]
-        return float(sub["severity_score"].mean()) if not sub.empty else 0.0
+        return index.get((gene, mut), 0.0)
 
     return round((_mean(variant_a) + _mean(variant_b)) / 2.0, 2)

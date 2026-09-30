@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -23,7 +22,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import fisher_exact
 
-from .scoring import pair_severity
+from .parallel import WORKLOAD_PROCESS, parallel_map
+from .scoring import build_severity_index, pair_severity
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,78 @@ def _pair_epistasis(n11: int, n10: int, n01: int, n00: int) -> dict:
     }
 
 
+#: Below this many pairs, test them in-process.
+#:
+#: A Fisher exact test is not the cheap call it looks like: measured on this
+#: workload it costs ~160us for a balanced small table and ~1.5ms for a rare
+#: co-mutation in a large cohort (``benchmarks/parallel_bench.py --verify-thresholds``
+#: re-checks this). Even at the cheap end, 2048 pairs is ~0.3s of work against a
+#: ~0.2s pool start-up under the ``spawn`` start method that Windows forces, so
+#: this threshold sits just past break-even even in the most favourable case, and
+#: well past it for anything but a small balanced cohort.
+#:
+#: Erring low is the safe direction: running serially when a pool might have
+#: given 1.5x costs almost nothing, whereas starting a pool that then gains
+#: nothing costs the same 0.2s every time.
+_SERIAL_PAIR_LIMIT = 2048
+
+#: Per-process epistasis state, installed once by the pool initializer.
+#:
+#: A closure would be simpler but cannot be pickled, and shipping the three
+#: tables to every task would pickle the whole cohort once per pair. Handing them
+#: to the initializer instead costs one copy per *worker*.
+_EPISTASIS_STATE: dict[str, object] = {}
+
+
+def _init_epistasis_worker(
+    eligible: dict[str, set[str]],
+    mutated: dict[str, set[str]],
+    gene_of: dict[str, str],
+) -> None:
+    """Pool initializer: install the shared tables in this worker."""
+    _EPISTASIS_STATE["eligible"] = eligible
+    _EPISTASIS_STATE["mutated"] = mutated
+    _EPISTASIS_STATE["gene_of"] = gene_of
+
+
+def _test_variant_pair(pair: tuple[str, str]) -> dict | None:
+    """Build the 2x2 table for one variant pair and run Fisher's exact test.
+
+    Module level, and therefore picklable, so a process pool can call it.
+    Returns ``None`` for a pair with no shared denominator, which is the same
+    signal the serial path used.
+    """
+    eligible = _EPISTASIS_STATE["eligible"]
+    mutated = _EPISTASIS_STATE["mutated"]
+    gene_of = _EPISTASIS_STATE["gene_of"]
+    assert isinstance(eligible, dict) and isinstance(mutated, dict)
+    assert isinstance(gene_of, dict)
+
+    variant_a, variant_b = pair
+    gene_a = gene_of[variant_a]
+    gene_b = gene_of[variant_b]
+    if gene_a == gene_b:
+        shared = eligible.get(gene_a, set())
+    else:
+        shared = eligible.get(gene_a, set()) & eligible.get(gene_b, set())
+    if not shared:
+        return None
+
+    in_a = mutated[variant_a] & shared
+    in_b = mutated[variant_b] & shared
+    n11 = len(in_a & in_b)
+    n10 = len(in_a - in_b)
+    n01 = len(in_b - in_a)
+    n00 = len(shared) - n11 - n10 - n01
+
+    result = _pair_epistasis(n11, n10, n01, n00)
+    result["Variant_A"] = variant_a
+    result["Variant_B"] = variant_b
+    result["Gene_A"] = gene_a
+    result["Gene_B"] = gene_b
+    return result
+
+
 def detect_epistasis(
     mutations: pd.DataFrame,
     qc: pd.DataFrame,
@@ -210,7 +282,7 @@ def detect_epistasis(
             If ``None``, pairs are ranked only by count and p-value.
         fdr_threshold: significance cut after FDR correction.
         min_count: drop pairs with ``N_Both`` below this threshold.
-        threads: parallel threads for pairwise tests.
+        threads: parallel worker processes for the pairwise tests.
 
     Returns:
         Ranked epistasis network DataFrame.
@@ -249,53 +321,34 @@ def detect_epistasis(
     variants = sorted(mutated.keys())
     pairs = list(combinations(variants, 2))
 
-    logger.info(
-        "Computing epistasis for %d variant pairs on %d thread(s)",
-        len(pairs),
-        threads,
-    )
-
-    def _work(va: str, vb: str) -> dict | None:
-        ga = gene_of[va]
-        gb = gene_of[vb]
-        if ga == gb:
-            shared = eligible.get(ga, set())
-        else:
-            shared = eligible.get(ga, set()) & eligible.get(gb, set())
-        if not shared:
-            return None
-
-        in_a = mutated[va] & shared
-        in_b = mutated[vb] & shared
-        n11 = len(in_a & in_b)
-        n10 = len(in_a - in_b)
-        n01 = len(in_b - in_a)
-        n00 = len(shared) - n11 - n10 - n01
-
-        res = _pair_epistasis(n11, n10, n01, n00)
-        res["Variant_A"] = va
-        res["Variant_B"] = vb
-        res["Gene_A"] = ga
-        res["Gene_B"] = gb
-        return res
+    use_pool = threads > 1 and len(pairs) > _SERIAL_PAIR_LIMIT
+    if threads > 1 and not use_pool:
+        logger.info(
+            "Testing %d variant pair(s) in-process: below the %d-pair threshold "
+            "where pool start-up pays for itself",
+            len(pairs),
+            _SERIAL_PAIR_LIMIT,
+        )
+    else:
+        logger.info("Computing epistasis for %d variant pairs on %d thread(s)", len(pairs), threads)
 
     results: list[dict] = []
-    if threads > 1 and len(pairs) > 200:
-        with ThreadPoolExecutor(max_workers=threads) as pool:
-            futures = {pool.submit(_work, va, vb): (va, vb) for va, vb in pairs}
-            for future in as_completed(futures):
-                try:
-                    res = future.result()
-                    if res is not None:
-                        results.append(res)
-                except Exception as exc:
-                    va, vb = futures[future]
-                    logger.error("epistasis pair %s / %s failed: %s", va, vb, exc)
-    else:
-        for va, vb in pairs:
-            res = _work(va, vb)
-            if res is not None:
-                results.append(res)
+    # Processes, not threads: scipy's exact tests and the set arithmetic are
+    # CPU-bound Python, and the GIL would serialise a thread pool. The shared
+    # tables ride along in initargs, so they are sent once per worker rather than
+    # once per task.
+    for result in parallel_map(
+        _test_variant_pair,
+        pairs,
+        threads=threads if use_pool else 1,
+        workload=WORKLOAD_PROCESS,
+        total=len(pairs),
+        initializer=_init_epistasis_worker,
+        initargs=(eligible, mutated, gene_of),
+        label="epistasis",
+    ):
+        if result is not None:
+            results.append(result)
 
     if not results:
         return pd.DataFrame(columns=list(EPISTASIS_COLUMNS))
@@ -315,10 +368,14 @@ def detect_epistasis(
 
     frame["Pair_Severity"] = 0.0
     if sev_lookup:
-        pair_sevs = []
-        for _, row in frame.iterrows():
-            pair_sevs.append(pair_severity(row["Variant_A"], row["Variant_B"], severity))
-        frame["Pair_Severity"] = pair_sevs
+        # Build the (gene, mutation) -> mean severity lookup once. Scoring each
+        # pair with its own scan of the severity table is quadratic, and at
+        # cohort scale that scan outweighed the Fisher tests themselves.
+        index = build_severity_index(severity)
+        frame["Pair_Severity"] = [
+            pair_severity(variant_a, variant_b, severity, index)
+            for variant_a, variant_b in zip(frame["Variant_A"], frame["Variant_B"], strict=True)
+        ]
 
     frame = frame.sort_values(
         ["Q_value", "Pair_Severity", "N_Both"],

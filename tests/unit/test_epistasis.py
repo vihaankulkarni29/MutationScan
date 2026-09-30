@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
+from mutation_scan import epistasis
 from mutation_scan.epistasis import (
     EPISTASIS_COLUMNS,
     GENOME_MAP_COLUMNS,
@@ -12,6 +14,7 @@ from mutation_scan.epistasis import (
     read_epistasis,
 )
 from mutation_scan.scoring import (
+    build_severity_index,
     compute_severity,
     mutation_severity,
     pair_severity,
@@ -229,6 +232,30 @@ class TestDetectEpistasis:
         assert list(reloaded.columns) == list(frame.columns)
 
 
+class TestDetectEpistasisProcessPath:
+    """The process pool path, which every other test here avoids.
+
+    ``detect_epistasis`` used a thread pool under 2048 pairs and a process pool
+    above it, so a small synthetic fixture never reached the process code at
+    all. The one bug that lived there -- an initializer needing shared tables
+    but never being given them -- was therefore invisible to the whole suite and
+    only appeared as "a process in the pool was terminated abruptly" on a real
+    4,371-pair run. These tests force the process path so it stays covered.
+    """
+
+    def test_the_process_path_runs_and_matches_the_serial_path(self, monkeypatch):
+        monkeypatch.setattr(epistasis, "_SERIAL_PAIR_LIMIT", 0)
+        parallel = detect_epistasis(_mutations(), _qc(), threads=2)
+        serial = detect_epistasis(_mutations(), _qc(), threads=1)
+        pd.testing.assert_frame_equal(parallel, serial)
+
+    def test_the_process_path_returns_the_expected_columns(self, monkeypatch):
+        monkeypatch.setattr(epistasis, "_SERIAL_PAIR_LIMIT", 0)
+        frame = detect_epistasis(_mutations(), _qc(), threads=2)
+        assert list(frame.columns) == list(EPISTASIS_COLUMNS)
+        assert not frame.empty
+
+
 class TestEpistasisNetworks:
     def test_full_pipeline(self, tmp_path):
         mut = pd.DataFrame(
@@ -258,3 +285,69 @@ class TestEpistasisNetworks:
         assert (out_dir / "mutation_severity.csv").exists()
         assert (out_dir / "epistasis_networks.csv").exists()
         assert len(result) == 3
+
+
+class TestSeverityIndex:
+    """The lookup that made epistasis tractable, pinned against the naive form.
+
+    ``pair_severity`` used to rescan the whole severity table twice per pair,
+    which is quadratic: at cohort scale (146,070 pairs over 66,416 mutations)
+    that scan ran for hours and the pipeline never finished. The index build
+    has to agree with the scan on every input, including the awkward ones.
+    """
+
+    @staticmethod
+    def _naive(variant_a: str, variant_b: str, severity: pd.DataFrame) -> float:
+        """The original implementation, kept here as the reference."""
+        if severity.empty:
+            return 0.0
+
+        def mean_for(variant: str) -> float:
+            gene, mutation = variant.split(":", 1)
+            sub = severity[
+                (severity["Gene"].astype(str) == gene)
+                & (severity["Mutation"].astype(str) == mutation)
+            ]
+            return float(sub["severity_score"].mean()) if not sub.empty else 0.0
+
+        return round((mean_for(variant_a) + mean_for(variant_b)) / 2.0, 2)
+
+    def test_index_matches_the_naive_lookup(self):
+        severity = mutation_severity(_mutations())
+        index = build_severity_index(severity)
+        variants = [f"{row.Gene}:{row.Mutation}" for row in severity.head(20).itertuples()]
+
+        for variant_a, variant_b in zip(variants, variants[1:] + variants[:1], strict=True):
+            assert pair_severity(variant_a, variant_b, severity, index) == self._naive(
+                variant_a, variant_b, severity
+            ), f"{variant_a}/{variant_b}"
+
+    def test_a_variant_absent_from_the_table_scores_zero(self):
+        severity = mutation_severity(_mutations())
+        index = build_severity_index(severity)
+
+        assert pair_severity("nosuchgene:A1V", "acrA:R50H", severity, index) == self._naive(
+            "nosuchgene:A1V", "acrA:R50H", severity
+        )
+
+    def test_an_empty_severity_table_scores_zero(self):
+        empty = pd.DataFrame(columns=["Gene", "Mutation", "severity_score"])
+
+        assert build_severity_index(empty) == {}
+        assert pair_severity("acrA:R50H", "acrB:H596N", empty) == 0.0
+
+    def test_one_variant_carried_by_many_genomes_uses_their_mean(self):
+        """A variant in many genomes is one key, scored by the mean over genomes."""
+        repeated = pd.concat([mutation_severity(_mutations())] * 4, ignore_index=True)
+        first = repeated.iloc[0]
+        gene, mutation = str(first["Gene"]), str(first["Mutation"])
+
+        index = build_severity_index(repeated)
+        expected = float(
+            repeated[
+                (repeated["Gene"].astype(str) == gene)
+                & (repeated["Mutation"].astype(str) == mutation)
+            ]["severity_score"].mean()
+        )
+
+        assert index[(gene, mutation)] == pytest.approx(expected)

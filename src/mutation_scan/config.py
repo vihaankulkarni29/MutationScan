@@ -48,8 +48,13 @@ _DEFAULTS: dict[str, Any] = {
     "min_coverage_percent": 80.0,
     "tblastn_binary": "tblastn",
     "threads": 1,
+    "variant_threads": 1,
     "cooccurrence": {"levels": ["gene"], "min_count": 1},
-    "epistasis": {"fdr_threshold": 0.05, "min_count": 1, "threads": 1},
+    # `threads` defaults to None, meaning "inherit the run's `threads`". An
+    # explicit value still wins. Doing the inheritance here means both entry
+    # points -- this file and the `--threads` flag -- read one already-resolved
+    # value, so they cannot disagree about how wide epistasis runs.
+    "epistasis": {"fdr_threshold": 0.05, "min_count": 1, "threads": None},
 }
 
 
@@ -63,7 +68,13 @@ class CooccurrenceConfig:
 
 @dataclass(frozen=True)
 class EpistasisConfig:
-    """Settings for the epistasis stage."""
+    """Settings for the epistasis stage.
+
+    ``threads`` is always a concrete worker count by the time a Config exists:
+    an unset value has already been resolved to the run's top-level ``threads``
+    in :meth:`Config.from_mapping`. Nothing downstream should have to know
+    whether the user asked for it or inherited it.
+    """
 
     fdr_threshold: float = 0.05
     min_count: int = 1
@@ -84,6 +95,7 @@ class Config:
     min_coverage_percent: float
     tblastn_binary: str
     threads: int
+    variant_threads: int
     cooccurrence: CooccurrenceConfig
     epistasis: EpistasisConfig
 
@@ -179,7 +191,12 @@ class Config:
         working directory, which is what Snakemake sets to the workdir).
         """
         raw = dict(_DEFAULTS)
+        # Both nested mappings are re-created. dict(_DEFAULTS) is a shallow copy,
+        # so updating raw["epistasis"] in place would otherwise write through to
+        # the module-level defaults and every later Config in this process would
+        # inherit them.
         raw["cooccurrence"] = dict(_DEFAULTS["cooccurrence"])
+        raw["epistasis"] = dict(_DEFAULTS["epistasis"])
 
         supplied = dict(mapping or {})
         unknown = sorted(set(supplied) - set(_DEFAULTS))
@@ -229,6 +246,13 @@ class Config:
         if Path(job_name).name != job_name or job_name in {".", ".."}:
             raise ConfigError(f"'job_name' must be a single folder name, got {job_name!r}.")
 
+        threads = _positive_int(raw["threads"], "threads")
+        epistasis_threads = raw["epistasis"].get("threads")
+        if epistasis_threads is None:
+            # Inherit rather than defaulting to 1. Both entry points -- the CLI
+            # and the Snakefile -- read this one resolved value, so neither can
+            # disagree about how wide epistasis runs.
+            epistasis_threads = threads
         config = cls(
             job_name=job_name,
             genomes_dir=_resolve("genomes_dir"),
@@ -239,7 +263,8 @@ class Config:
             min_identity_percent=_percent(raw["min_identity_percent"], "min_identity_percent"),
             min_coverage_percent=_percent(raw["min_coverage_percent"], "min_coverage_percent"),
             tblastn_binary=str(raw["tblastn_binary"]).strip() or "tblastn",
-            threads=_positive_int(raw["threads"], "threads"),
+            threads=threads,
+            variant_threads=_positive_int(raw["variant_threads"], "variant_threads"),
             cooccurrence=CooccurrenceConfig(
                 levels=_clean_levels(raw["cooccurrence"]["levels"]),
                 min_count=_positive_int(raw["cooccurrence"]["min_count"], "cooccurrence.min_count"),
@@ -249,7 +274,7 @@ class Config:
                     raw["epistasis"]["fdr_threshold"], "epistasis.fdr_threshold"
                 ),
                 min_count=_positive_int(raw["epistasis"]["min_count"], "epistasis.min_count"),
-                threads=_positive_int(raw["epistasis"]["threads"], "epistasis.threads"),
+                threads=_positive_int(epistasis_threads, "epistasis.threads"),
             ),
         )
         return config
@@ -286,6 +311,7 @@ class Config:
             "min_coverage_percent": self.min_coverage_percent,
             "tblastn_binary": self.tblastn_binary,
             "threads": self.threads,
+            "variant_threads": self.variant_threads,
             "cooccurrence": {
                 "levels": list(self.cooccurrence.levels),
                 "min_count": self.cooccurrence.min_count,

@@ -25,6 +25,7 @@ from . import __version__
 from .config import Config
 from .cooccurrence import CooccurrenceResult
 from .extract import STATUS_EXTRACTED
+from .parallel_plan import describe
 from .references import ReferenceSet
 from .variants import VARIANT_STATUS_CALLED
 
@@ -68,11 +69,18 @@ def build_run_summary(
     mutations: pd.DataFrame | None = None,
     cooccurrence: CooccurrenceResult | None = None,
     tblastn_version: str = "",
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Assemble the provenance record for one run.
 
     Every argument beyond *config* is optional so a partial run (or a dry run)
     still produces a readable summary rather than failing.
+
+    Args:
+        timings: wall-clock seconds per stage, as measured by the caller. The
+            summary is the only artifact a run leaves behind, so if it does not
+            record where the time went then nobody but whoever watched the log
+            can tell.
     """
     extracted = (
         manifest[manifest["Status"] == STATUS_EXTRACTED]
@@ -140,6 +148,8 @@ def build_run_summary(
             "network_pairs": _n_rows(config.epistasis_networks_csv),
         },
         "outputs": [str(path) for path in config.outputs()],
+        "parallelism": [stage.to_dict() for stage in describe(config)],
+        "timings_seconds": dict(timings) if timings else {},
         "note": (
             "Co-occurrence counts are descriptive. They are not tests of "
             "interaction, selection or causation."

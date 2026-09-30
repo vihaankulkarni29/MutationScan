@@ -28,7 +28,20 @@ min_coverage_percent: 80    # fraction of reference positions the query covers
 tblastn_binary: tblastn
 
 # Parallel tblastn processes during extraction.
+#
+# `threads` is the run's width. `variant_threads` and `epistasis.threads` both
+# default to it, so setting one number widens every stage that can benefit and
+# leaves the two entry points (this file and the `--threads` flag) unable to
+# disagree. Override either to make one stage narrower.
+#
+# Roughly: speedup ~= the worker count, up to the core count. The stages do not
+# overlap, so several stages can all be your core count.
 threads: 4
+
+# Parallel worker processes during variant calling. The alignment is CPU-bound
+# in Biopython, so this is the setting that shortens the second stage. Omit it
+# to inherit `threads`.
+variant_threads: 4
 
 # Descriptive co-occurrence: raw counts only, no statistics or scoring.
 cooccurrence:
@@ -39,4 +52,6 @@ cooccurrence:
 epistasis:
   fdr_threshold: 0.05   # Benjamini-Hochberg q-value cutoff
   min_count: 1          # require at least this many co-occurring genomes
-  threads: 1            # parallel pairwise tests
+  # threads: inherits the run's `threads` when omitted. Pairwise testing is
+  # CPU-bound Python, so it scales; below ~2048 variant pairs it runs
+  # in-process regardless, because pool start-up costs more than it saves.

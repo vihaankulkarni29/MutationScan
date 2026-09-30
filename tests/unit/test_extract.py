@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -96,18 +98,16 @@ def test_verify_tblastn_rejects_a_nonzero_exit(monkeypatch, tmp_path):
 
 @pytest.fixture
 def fake_tblastn(monkeypatch):
-    """Replace tblastn with a scripted stub keyed by (gene, accession)."""
+    """Replace tblastn with a scripted stub keyed by (gene, accession).
+
+    Patches both the single-query and the batched entry point, so these tests
+    exercise manifest bookkeeping without needing BLAST installed. A scripted
+    *Exception* now fails the whole genome rather than one pair -- see
+    ``test_a_failed_call_errors_every_gene_in_that_genome`` for why.
+    """
     behaviour: dict = {}
 
-    def fake_run(ref_faa, genome_fna, binary="tblastn", evalue=None, timeout=None):
-        gene = ref_faa.stem.replace("_WT", "")
-        key = (genome_fna.stem, gene)
-        outcome = behaviour.get(key, behaviour.get(gene, "hit"))
-        if isinstance(outcome, Exception):
-            raise outcome
-        if outcome is None:
-            return None
-        sequence = outcome if isinstance(outcome, str) else PROTEIN_ALPHA
+    def _hit(gene: str, sequence: str) -> TblastnHit:
         return TblastnHit(
             sequence=sequence,
             pident=99.0,
@@ -118,7 +118,28 @@ def fake_tblastn(monkeypatch):
             internal_stops=sequence.count("*"),
         )
 
+    def fake_run(ref_faa, genome_fna, binary="tblastn", evalue=None, timeout=None):
+        gene = ref_faa.stem.replace("_WT", "")
+        outcome = behaviour.get((genome_fna.stem, gene), behaviour.get(gene, "hit"))
+        if isinstance(outcome, Exception):
+            raise outcome
+        if outcome is None:
+            return None
+        return _hit(gene, outcome if isinstance(outcome, str) else PROTEIN_ALPHA)
+
+    def fake_run_batch(query_faa, genome_fna, genes, binary="tblastn", evalue=None, timeout=None):
+        hits = {}
+        for gene in genes:
+            outcome = behaviour.get((genome_fna.stem, gene), behaviour.get(gene, "hit"))
+            if isinstance(outcome, Exception):
+                raise outcome
+            if outcome is None:
+                continue
+            hits[gene] = _hit(gene, outcome if isinstance(outcome, str) else PROTEIN_ALPHA)
+        return hits
+
     monkeypatch.setattr(extract_module, "run_tblastn", fake_run)
+    monkeypatch.setattr(extract_module, "run_tblastn_batch", fake_run_batch)
     monkeypatch.setattr(extract_module, "verify_tblastn", lambda binary="tblastn": "stub")
     return behaviour
 
@@ -163,11 +184,34 @@ def test_no_hit_and_error_are_distinguished_from_success(tmp_path, references_di
 
     assert status[("g1", "alphaX")] == STATUS_EXTRACTED
     assert status[("g1", "betaQ")] == STATUS_NO_HIT
+    # Batching changed this deliberately: one tblastn call covers the whole gene
+    # panel, so a call that fails takes every gene in that genome with it. What
+    # matters is that it is reported as an error rather than silently degrading
+    # to no_hit, which would read as "we looked and found nothing".
+    assert status[("g2", "alphaX")] == STATUS_ERROR
     assert status[("g2", "betaQ")] == STATUS_ERROR
     detail = manifest.loc[
         (manifest["Accession"] == "g2") & (manifest["Gene"] == "betaQ"), "Detail"
     ].iloc[0]
     assert "timed out" in detail
+
+
+def test_a_failed_call_errors_every_gene_in_that_genome(tmp_path, references_dir, fake_tblastn):
+    """A genome-level failure must not look like a clean empty result."""
+    refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX", "betaQ"])
+    write_genome(tmp_path / "genomes", "bad", {"alphaX": PROTEIN_ALPHA})
+    write_genome(tmp_path / "genomes", "good", {"alphaX": PROTEIN_ALPHA})
+    fake_tblastn[("bad", "alphaX")] = TblastnError("tblastn exited 1: bad subject")
+
+    manifest = extract(tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs)
+    status = {(row.Accession, row.Gene): row.Status for row in manifest.itertuples()}
+
+    assert status[("bad", "alphaX")] == STATUS_ERROR
+    assert status[("bad", "betaQ")] == STATUS_ERROR
+    # The healthy genome is untouched, so the failure is scoped, not global.
+    assert status[("good", "alphaX")] == STATUS_EXTRACTED
+    assert status[("good", "betaQ")] == STATUS_EXTRACTED
+    assert not (tmp_path / "proteins" / "bad_alphaX.faa").exists()
 
 
 def test_target_without_a_reference_is_recorded_not_skipped(tmp_path, references_dir, fake_tblastn):
@@ -306,3 +350,216 @@ def test_real_tblastn_measures_partial_coverage(tmp_path, references_dir):
     assert float(row["Ref_Coverage_pct"]) < 60.0
     # Identity alone would look perfect -- coverage is what catches this.
     assert float(row["Pident"]) > 95.0
+
+
+# -- query panel construction ------------------------------------------------
+
+
+def test_build_query_fasta_writes_one_record_per_gene(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "alphaX_WT.faa").write_text(f">orig_id\n{PROTEIN_ALPHA}\n", encoding="utf-8")
+    (refs / "betaQ_WT.faa").write_text(f">orig_id\n{PROTEIN_BETA}\n", encoding="utf-8")
+
+    written = extract_module._build_query_fasta(
+        {"alphaX": refs / "alphaX_WT.faa", "betaQ": refs / "betaQ_WT.faa", "gone": None},
+        tmp_path / "panel.faa",
+    )
+
+    assert written == ["alphaX", "betaQ"]
+    text = (tmp_path / "panel.faa").read_text(encoding="utf-8")
+    # The record id must be the gene, not whatever the reference called itself:
+    # run_tblastn_batch maps results back by this id.
+    assert text.count(">") == 2
+    assert ">alphaX" in text and ">betaQ" in text
+    assert "orig_id" not in text
+
+
+def test_build_query_fasta_rejects_a_multi_record_reference(tmp_path):
+    """Two records under one id would become two queries sharing an id."""
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "alphaX_WT.faa").write_text(
+        f">one\n{PROTEIN_ALPHA}\n>two\n{PROTEIN_BETA}\n", encoding="utf-8"
+    )
+
+    with pytest.raises(TblastnError, match="2 records"):
+        extract_module._build_query_fasta({"alphaX": refs / "alphaX_WT.faa"}, tmp_path / "p.faa")
+
+
+def test_build_query_fasta_rejects_an_empty_reference(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "alphaX_WT.faa").write_text(">alphaX\n\n", encoding="utf-8")
+
+    with pytest.raises(TblastnError, match="empty"):
+        extract_module._build_query_fasta({"alphaX": refs / "alphaX_WT.faa"}, tmp_path / "p.faa")
+
+
+def test_build_query_fasta_rejects_a_gene_name_that_cannot_be_a_record_id(tmp_path):
+    refs = tmp_path / "refs"
+    refs.mkdir()
+    (refs / "alphaX_WT.faa").write_text(f">x\n{PROTEIN_ALPHA}\n", encoding="utf-8")
+
+    with pytest.raises(TblastnError, match="FASTA record id"):
+        extract_module._build_query_fasta({"bad name": refs / "alphaX_WT.faa"}, tmp_path / "p.faa")
+
+
+def test_a_multi_record_reference_stops_the_run_early(tmp_path, references_dir, fake_tblastn):
+    """The failure must surface before any genome is aligned."""
+    refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX"])
+    write_genome(tmp_path / "genomes", "g1", {"alphaX": PROTEIN_ALPHA})
+    doubled = refs.refs_dir / "alphaX_WT.faa"
+    doubled.write_text(doubled.read_text(encoding="utf-8") * 2, encoding="utf-8")
+
+    with pytest.raises(TblastnError, match="2 records"):
+        extract(tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs)
+
+
+# -- batched tblastn --------------------------------------------------------
+
+
+@requires_tblastn
+def test_batched_call_maps_each_query_to_its_own_gene(tmp_path, references_dir):
+    """The core risk of batching: results must not be mis-assigned between genes."""
+    refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX", "betaQ"])
+    variant_a = mutate(PROTEIN_ALPHA, (5, "W"))
+    write_genome(tmp_path / "genomes", "g1", {"alphaX": variant_a, "betaQ": PROTEIN_BETA})
+
+    panel = tmp_path / "panel.faa"
+    extract_module._build_query_fasta(
+        {"alphaX": refs.refs_dir / "alphaX_WT.faa", "betaQ": refs.refs_dir / "betaQ_WT.faa"},
+        panel,
+    )
+    hits = extract_module.run_tblastn_batch(
+        panel, tmp_path / "genomes" / "g1.fna", ["alphaX", "betaQ"]
+    )
+
+    assert set(hits) == {"alphaX", "betaQ"}
+    assert hits["alphaX"].sequence == variant_a
+    assert hits["betaQ"].sequence == PROTEIN_BETA
+    assert hits["alphaX"].contig == "contig_alphaX"
+    assert hits["betaQ"].contig == "contig_betaQ"
+
+
+@requires_tblastn
+def test_max_target_seqs_is_applied_per_query_not_per_call(tmp_path, references_dir):
+    """A regression guard for the worst batching failure mode.
+
+    If ``-max_target_seqs 1`` were interpreted per call rather than per query,
+    a single call would report one gene and the other 14 would be reported as
+    ``no_hit`` -- an almost-empty manifest that still looks like a clean run.
+    Placing the two genes on separate contigs makes the two interpretations
+    distinguishable.
+    """
+    refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX", "betaQ"])
+    genomes = tmp_path / "genomes"
+    write_genome(genomes, "split", {"alphaX": PROTEIN_ALPHA})
+    with (genomes / "split.fna").open("a", encoding="utf-8") as handle:
+        handle.write(synthetic_genome({"betaQ": PROTEIN_BETA}))
+
+    panel = tmp_path / "panel.faa"
+    extract_module._build_query_fasta(
+        {"alphaX": refs.refs_dir / "alphaX_WT.faa", "betaQ": refs.refs_dir / "betaQ_WT.faa"},
+        panel,
+    )
+    hits = extract_module.run_tblastn_batch(panel, genomes / "split.fna", ["alphaX", "betaQ"])
+
+    assert set(hits) == {"alphaX", "betaQ"}
+
+
+@requires_tblastn
+def test_batched_and_single_query_agree_on_every_gene(tmp_path, references_dir):
+    """Parity against the one-call-per-gene path, on real BLAST output."""
+    refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX", "betaQ"])
+    variant_a = mutate(PROTEIN_ALPHA, (5, "W"))
+    genome = write_genome(tmp_path / "genomes", "g1", {"alphaX": variant_a, "betaQ": PROTEIN_BETA})
+
+    panel = tmp_path / "panel.faa"
+    extract_module._build_query_fasta(
+        {"alphaX": refs.refs_dir / "alphaX_WT.faa", "betaQ": refs.refs_dir / "betaQ_WT.faa"},
+        panel,
+    )
+    batched = extract_module.run_tblastn_batch(panel, genome, ["alphaX", "betaQ"])
+
+    for gene in ("alphaX", "betaQ"):
+        single = extract_module.run_tblastn(refs.refs_dir / f"{gene}_WT.faa", genome)
+        assert single is not None
+        assert batched[gene] == single, f"{gene} differs between batched and single-query"
+
+
+@requires_tblastn
+def test_a_genome_missing_every_gene_yields_all_no_hit(tmp_path, references_dir):
+    refs = prepare_references(references_dir, tmp_path / "refs", ["alphaX", "betaQ"])
+    genomes = tmp_path / "genomes"
+    genomes.mkdir(parents=True)
+    (genomes / "empty.fna").write_text(">c1\nACGTACGTACGTACGTACGT\n", encoding="utf-8")
+
+    manifest = extract(tmp_path / "genomes", refs.refs_dir, tmp_path / "proteins", refs)
+
+    assert len(manifest) == 2
+    assert set(manifest["Status"]) == {STATUS_NO_HIT}
+
+
+def test_run_tblastn_batch_rejects_an_unexpected_query_id(monkeypatch):
+    """A query id we never asked for means the mapping assumption is broken."""
+    line = "\t".join(
+        [
+            "ghost",
+            "contig",
+            "99.0",
+            "10",
+            "0",
+            "0",
+            "1",
+            "10",
+            "1",
+            "30",
+            "1e-05",
+            "50.0",
+            "10",
+            "20",
+            "M" * 10,
+        ]
+    )
+    monkeypatch.setattr(extract_module, "_run_tblastn", lambda command, timeout: line + "\n")
+
+    with pytest.raises(TblastnError, match="unexpected query id"):
+        extract_module.run_tblastn_batch(Path("panel.faa"), Path("g.fna"), ["alphaX"])
+
+
+def test_run_tblastn_batch_keeps_the_highest_scoring_hsp_per_query(monkeypatch):
+    """Belt and braces: -max_hsps 1 should make this moot, but not silently lose."""
+
+    def row(query: str, bitscore: float, sequence: str) -> str:
+        return "\t".join(
+            [
+                query,
+                "contig",
+                "99.0",
+                str(len(sequence)),
+                "0",
+                "0",
+                "1",
+                str(len(sequence)),
+                "1",
+                "30",
+                "1e-05",
+                str(bitscore),
+                str(len(sequence)),
+                "20",
+                sequence,
+            ]
+        )
+
+    monkeypatch.setattr(
+        extract_module,
+        "_run_tblastn",
+        lambda command, timeout: "\n".join(
+            [row("alphaX", 10.0, "MAAAAAAAAA"), row("alphaX", 99.0, "MCCCCCCCCC")]
+        ),
+    )
+
+    hits = extract_module.run_tblastn_batch(Path("panel.faa"), Path("g.fna"), ["alphaX"])
+
+    assert hits["alphaX"].sequence == "MCCCCCCCCC"

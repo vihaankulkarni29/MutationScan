@@ -19,4 +19,5 @@ call_variants(
     min_coverage_percent=snakemake.params.min_coverage_percent,
     mutations_csv=snakemake.output.mutations,
     qc_csv=snakemake.output.qc,
+    threads=snakemake.threads,
 )

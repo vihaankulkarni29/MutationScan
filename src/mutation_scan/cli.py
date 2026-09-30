@@ -18,15 +18,18 @@ import argparse
 import json
 import logging
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
-from .config import Config, ConfigError, load_config
+from .config import Config, ConfigError, EpistasisConfig, load_config
 from .cooccurrence import cooccurrence
 from .diagnostics import diagnose_empty_extraction, diagnose_empty_variants
 from .epistasis import epistasis_networks
 from .extract import STATUS_EXTRACTED, extract
+from .parallel import available_cores
+from .parallel_plan import describe, format_plan
 from .preflight import preflight
 from .references import prepare_references
 from .summary import write_run_summary
@@ -128,6 +131,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--threads", type=int, metavar="N", help="concurrent tblastn processes")
     run_parser.add_argument(
+        "--variant-threads", type=int, metavar="N", help="parallel processes for variant calling"
+    )
+    run_parser.add_argument(
+        "--epistasis-threads",
+        type=int,
+        metavar="N",
+        help="parallel processes for epistasis testing (default: same as --threads)",
+    )
+    run_parser.add_argument(
         "--config", metavar="FILE", help="YAML config to start from; flags override it"
     )
     run_parser.add_argument(
@@ -210,6 +222,16 @@ def _config_from_args(args: argparse.Namespace) -> Config:
             ),
         )
 
+    # Epistasis defaults to the same width as --threads. Without this, asking
+    # for 8 threads left that stage serial with no way to widen it from the
+    # command line, which is the opposite of what --threads implies. When
+    # neither flag is given, the config's own value stands.
+    epistasis_threads = args.epistasis_threads
+    if epistasis_threads is None:
+        epistasis_threads = args.threads
+    if epistasis_threads is None:
+        epistasis_threads = config.epistasis.threads
+
     return config.with_overrides(
         job_name=args.job_name,
         genomes_dir=Path(args.genomes).expanduser().resolve() if args.genomes else None,
@@ -220,7 +242,13 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         min_identity_percent=args.min_identity,
         min_coverage_percent=args.min_coverage,
         threads=args.threads,
+        variant_threads=args.variant_threads,
         cooccurrence=cooccurrence_config,
+        epistasis=EpistasisConfig(
+            fdr_threshold=config.epistasis.fdr_threshold,
+            min_count=config.epistasis.min_count,
+            threads=epistasis_threads,
+        ),
     )
 
 
@@ -238,6 +266,10 @@ def _report_empty(lines: Sequence[str], allow_empty: bool) -> int:
 
 def run(config: Config, allow_empty: bool = False) -> int:
     """Execute all four stages in order. Returns a process exit code."""
+    # Started before anything else so preflight -- which on a large cohort spends
+    # real time reading every genome header -- is timed too. A timing report
+    # that shows 0.0 for the second-slowest stage is worse than none.
+    started = time.perf_counter()
     config.require_inputs()
 
     logger.info("MutationScan %s -- run '%s'", __version__, config.job_name)
@@ -272,6 +304,15 @@ def run(config: Config, allow_empty: bool = False) -> int:
         )
         return EXIT_USAGE
 
+    # Every stage is timed. A run summary that records what came out but not
+    # where the time went is why a quadratic blow-up in the last stage went
+    # unnoticed: the only way to see it was to read the log.
+    def stage(name: str) -> float:
+        return time.perf_counter() - started
+
+    timings: dict[str, float] = {"preflight": round(stage("preflight"), 3)}
+    mark = stage("extraction")
+
     # 2. Extract every target protein from every genome.
     manifest = extract(
         config.genomes_dir,
@@ -282,6 +323,8 @@ def run(config: Config, allow_empty: bool = False) -> int:
         tblastn_binary=config.tblastn_binary,
         threads=config.threads,
     )
+    timings["extraction"] = round(stage("extraction") - mark, 3)
+    mark = stage("variants")
 
     extracted = (
         int((manifest["Status"] == STATUS_EXTRACTED).sum())
@@ -302,7 +345,10 @@ def run(config: Config, allow_empty: bool = False) -> int:
         min_coverage_percent=config.min_coverage_percent,
         mutations_csv=config.mutations_csv,
         qc_csv=config.variant_qc_csv,
+        threads=config.variant_threads,
     )
+    timings["variants"] = round(stage("variants") - mark, 3)
+    mark = stage("cooccurrence")
 
     called = (
         int((variants.qc["Status"] == VARIANT_STATUS_CALLED).sum())
@@ -330,6 +376,8 @@ def run(config: Config, allow_empty: bool = False) -> int:
             config.cooccurrence_variants_csv if "variant" in config.cooccurrence.levels else None
         ),
     )
+    timings["cooccurrence"] = round(stage("cooccurrence") - mark, 3)
+    mark = stage("epistasis")
 
     # 5. Epistasis -- genome mutation maps + statistical pair networks.
     #    Only runs when there are at least two mutations to compare.
@@ -341,6 +389,8 @@ def run(config: Config, allow_empty: bool = False) -> int:
         min_count=config.epistasis.min_count,
         threads=config.epistasis.threads,
     )
+    timings["epistasis"] = round(stage("epistasis") - mark, 3)
+    timings["total"] = round(stage("done"), 3)
 
     write_run_summary(
         config,
@@ -350,8 +400,13 @@ def run(config: Config, allow_empty: bool = False) -> int:
         mutations=variants.mutations,
         cooccurrence=counts,
         tblastn_version=report.tblastn_version,
+        timings=timings,
     )
 
+    slowest = max(timings, key=lambda name: timings[name] if name != "total" else -1)
+    logger.info(
+        "Slowest stage: %s (%.2fs of %.2fs total)", slowest, timings[slowest], timings["total"]
+    )
     logger.info("Done. Results in %s", config.run_dir)
     return EXIT_OK
 
@@ -372,6 +427,8 @@ def _config_check(args: argparse.Namespace) -> int:
         "settings": config.to_dict(),
         "run_dir": str(config.run_dir),
         "expected_outputs": [str(path) for path in config.outputs()],
+        "cores_available": available_cores(),
+        "parallelism": [stage.to_dict() for stage in describe(config)],
         "inputs_present": inputs_present,
         "preflight": {
             "ran": report is not None,
@@ -409,6 +466,16 @@ def _config_check(args: argparse.Namespace) -> int:
             print(f"  WARNING: {warning}")
         for error in report.errors:
             print(f"  ERROR: {error}")
+
+    stages = describe(config)
+    print(f"parallelism ({available_cores()} core(s) available):")
+    print(format_plan(stages))
+    for stage in stages:
+        if stage.effective < stage.requested:
+            print(
+                f"  NOTE: {stage.name} asked for {stage.requested} workers, "
+                f"will use {stage.effective}"
+            )
 
     print("expected outputs:")
     for path in config.outputs():
