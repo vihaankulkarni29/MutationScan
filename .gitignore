@@ -65,6 +65,10 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
+# Agent tooling state. Deliberately untracked: it is per-machine scratch, not
+# project source.
+.claude/
+
 # Logs, caches, scratch
 logs/
 *.log
