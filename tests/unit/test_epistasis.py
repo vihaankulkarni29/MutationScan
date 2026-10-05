@@ -134,6 +134,49 @@ def _qc():
     )
 
 
+def _cohort(n_genes: int = 4, variants_per_gene: int = 8, n_genomes: int = 30):
+    """A synthetic cohort with enough structure to exercise the batching.
+
+    Variants draw their carriers from a small pool of overlapping patterns rather
+    than independently, which is what real cohorts look like and what makes the
+    distinct-table collapse possible. Uniformly random carriers would give almost
+    every pair a unique intersection count, so a fixture built that way would
+    measure itself rather than the memoisation.
+    """
+    patterns = []
+    for p in range(6):
+        patterns.append({g for g in range(n_genomes) if g % 6 == p or g % 11 == p})
+
+    mutations, qc = [], []
+    for g in range(n_genomes):
+        accession = f"g{g:03d}"
+        for gene in range(n_genes):
+            name = f"gene{gene}"
+            mutations.append(
+                {"Accession": accession, "Gene": name, "Mutation": "W1X", "Position": 1}
+            )
+            qc.append({"Accession": accession, "Gene": name, "Status": "called"})
+
+    for gene in range(n_genes):
+        name = f"gene{gene}"
+        for v in range(variants_per_gene):
+            carriers = patterns[(v + gene) % len(patterns)]
+            for g in sorted(carriers):
+                mutations.append(
+                    {
+                        "Accession": f"g{g:03d}",
+                        "Gene": name,
+                        "Mutation": f"M{v}",
+                        "Position": 100 + v,
+                    }
+                )
+
+    return (
+        pd.DataFrame(mutations, columns=["Accession", "Gene", "Mutation", "Position"]),
+        pd.DataFrame(qc, columns=["Accession", "Gene", "Status"]),
+    )
+
+
 class TestGenomeMutationMap:
     def test_one_row_per_genome(self):
         frame = genome_mutation_map(_mutations(), _qc())
@@ -232,28 +275,161 @@ class TestDetectEpistasis:
         assert list(reloaded.columns) == list(frame.columns)
 
 
-class TestDetectEpistasisProcessPath:
-    """The process pool path, which every other test here avoids.
+class TestDetectEpistasisIsThreadIndependent:
+    """``threads`` is advisory, so it must not be able to change the answer.
 
-    ``detect_epistasis`` used a thread pool under 2048 pairs and a process pool
-    above it, so a small synthetic fixture never reached the process code at
-    all. The one bug that lived there -- an initializer needing shared tables
-    but never being given them -- was therefore invisible to the whole suite and
-    only appeared as "a process in the pool was terminated abruptly" on a real
-    4,371-pair run. These tests force the process path so it stays covered.
+    The stage used to pick between a thread pool and a process pool on pair count.
+    Pooling it lost -- the pool spent its life paying ``spawn`` import costs
+    against a small amount of real work -- so it now resolves every pair with one
+    Gram matrix per universe and one Fisher test per *distinct* 2x2 table. The
+    flag survives for compatibility, which only holds if it is genuinely inert.
     """
 
-    def test_the_process_path_runs_and_matches_the_serial_path(self, monkeypatch):
-        monkeypatch.setattr(epistasis, "_SERIAL_PAIR_LIMIT", 0)
-        parallel = detect_epistasis(_mutations(), _qc(), threads=2)
-        serial = detect_epistasis(_mutations(), _qc(), threads=1)
-        pd.testing.assert_frame_equal(parallel, serial)
+    def test_threads_does_not_change_the_output(self):
+        one = detect_epistasis(_mutations(), _qc(), threads=1)
+        eight = detect_epistasis(_mutations(), _qc(), threads=8)
 
-    def test_the_process_path_returns_the_expected_columns(self, monkeypatch):
-        monkeypatch.setattr(epistasis, "_SERIAL_PAIR_LIMIT", 0)
-        frame = detect_epistasis(_mutations(), _qc(), threads=2)
+        pd.testing.assert_frame_equal(one, eight)
+
+    def test_the_stage_does_not_import_a_pool(self):
+        """A regression guard, not a style preference.
+
+        Reintroducing a pool would look fine in every output and cost seconds of
+        spawn time per run, so nothing else would catch it.
+        """
+        assert not hasattr(epistasis, "parallel_map")
+
+
+class TestDistinctTableMemoisation:
+    """The memoised Fisher test must agree with testing every pair directly.
+
+    ``fisher_exact`` is a pure function of the integer 2x2 table, so testing each
+    distinct table once is exact rather than approximate. This pins that: the
+    compressed path is compared against an explicit per-pair recomputation.
+    """
+
+    def _reference_counts(self, mutations, qc):
+        """Compute every pair's counts the obvious, slow way."""
+        eligible = {}
+        for _, row in qc[qc["Status"] == "called"].iterrows():
+            eligible.setdefault(str(row["Gene"]), set()).add(str(row["Accession"]))
+
+        carriers = {}
+        gene_of = {}
+        for _, row in mutations.iterrows():
+            key = f"{row['Gene']}:{row['Mutation']}"
+            carriers.setdefault(key, set()).add(str(row["Accession"]))
+            gene_of[key] = str(row["Gene"])
+
+        variants = sorted(carriers)
+        counts = {}
+        for i, a in enumerate(variants):
+            for b in variants[i + 1 :]:
+                gene_a, gene_b = gene_of[a], gene_of[b]
+                shared = (
+                    eligible.get(gene_a, set())
+                    if gene_a == gene_b
+                    else eligible.get(gene_a, set()) & eligible.get(gene_b, set())
+                )
+                if not shared:
+                    continue
+                in_a = carriers[a] & shared
+                in_b = carriers[b] & shared
+                n11 = len(in_a & in_b)
+                n10 = len(in_a - in_b)
+                n01 = len(in_b - in_a)
+                counts[(a, b)] = (n11, n10, n01, len(shared) - n11 - n10 - n01)
+        return counts
+
+    def test_counts_match_a_direct_per_pair_recomputation(self):
+        mutations, qc = _cohort()
+        expected = self._reference_counts(mutations, qc)
+
+        variants = sorted({f"{r.Gene}:{r.Mutation}" for r in mutations.itertuples()})
+        from itertools import combinations
+
+        pairs = list(combinations(variants, 2))
+        gene_of = {f"{r.Gene}:{r.Mutation}": str(r.Gene) for r in mutations.itertuples()}
+        carriers = {}
+        for r in mutations.itertuples():
+            carriers.setdefault(f"{r.Gene}:{r.Mutation}", set()).add(str(r.Accession))
+        eligible = {}
+        for r in qc.itertuples():
+            if r.Status == "called":
+                eligible.setdefault(str(r.Gene), set()).add(str(r.Accession))
+
+        tables = epistasis._resolve_pair_tables(variants, pairs, carriers, gene_of, eligible)
+        got = {(t.variant_a, t.variant_b): (t.n11, t.n10, t.n01, t.n00) for t in tables}
+
+        assert len(got) > 100, "fixture should produce a meaningful number of pairs"
+        assert got == expected
+
+    def test_one_test_per_distinct_table_not_per_pair(self):
+        """The compression is the whole point; assert it actually happens."""
+        mutations, qc = _cohort()
+        from itertools import combinations
+
+        variants = sorted({f"{r.Gene}:{r.Mutation}" for r in mutations.itertuples()})
+        pairs = list(combinations(variants, 2))
+        gene_of = {f"{r.Gene}:{r.Mutation}": str(r.Gene) for r in mutations.itertuples()}
+        carriers = {}
+        for r in mutations.itertuples():
+            carriers.setdefault(f"{r.Gene}:{r.Mutation}", set()).add(str(r.Accession))
+        eligible = {}
+        for r in qc.itertuples():
+            if r.Status == "called":
+                eligible.setdefault(str(r.Gene), set()).add(str(r.Accession))
+
+        tables = epistasis._resolve_pair_tables(variants, pairs, carriers, gene_of, eligible)
+        distinct = {(t.n11, t.n10, t.n01, t.n00) for t in tables}
+
+        assert len(tables) > 100
+        assert len(distinct) * 5 < len(tables)
+
+    def test_the_cohort_runs_end_to_end(self):
+        mutations, qc = _cohort()
+        frame = detect_epistasis(mutations, qc)
+
         assert list(frame.columns) == list(EPISTASIS_COLUMNS)
         assert not frame.empty
+        # Every retained pair must be scored against genomes where both genes
+        # were actually called, or N_Eligible would not be its own denominator.
+        assert (frame["N_Eligible"] > 0).all()
+        assert (
+            frame["N_Both"] + frame["N_A_only"] + frame["N_B_only"] + frame["N_Neither"]
+            == frame["N_Eligible"]
+        ).all()
+
+    def test_identical_tables_share_a_p_value(self):
+        frame = detect_epistasis(_mutations(), _qc())
+        by_table = frame.groupby(["N_Both", "N_A_only", "N_B_only", "N_Neither"])
+
+        for _, group in by_table:
+            assert group["P_value"].nunique() == 1
+
+
+class TestMinCountFiltersBeforeCorrection:
+    """``min_count`` changes ``n``, so it must be applied before BH.
+
+    Filtering afterwards would leave every q-value in the file subtly wrong while
+    still looking plausible. The stage now also uses min_count to skip Fisher
+    tests entirely, so both halves of that are pinned here.
+    """
+
+    def test_q_values_reflect_the_filtered_pair_count(self):
+        loose = detect_epistasis(_mutations(), _qc(), min_count=1)
+        tight = detect_epistasis(_mutations(), _qc(), min_count=99)
+
+        assert len(loose) > len(tight) == 0
+
+    def test_a_tighter_threshold_never_lowers_a_q_value(self):
+        loose = detect_epistasis(_mutations(), _qc(), min_count=1)
+        tight = detect_epistasis(_mutations(), _qc(), min_count=2)
+
+        merged = loose.merge(tight, on=["Variant_A", "Variant_B"], suffixes=("_loose", "_tight"))
+
+        assert not merged.empty
+        assert (merged["Q_value_tight"] >= merged["Q_value_loose"] - 1e-12).all()
 
 
 class TestEpistasisNetworks:

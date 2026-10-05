@@ -156,20 +156,38 @@ def mutation_severity(mutations: pd.DataFrame) -> pd.DataFrame:
             ]
         )
 
+    # compute_severity is a pure function of the two residues, so there are at
+    # most a few hundred distinct answers however many mutation rows there are.
+    # Memoising it turns ~66k calls at cohort scale into a few hundred, which is
+    # the same exactness argument used for the epistasis contingency tables.
+    # iterrows is avoided for the same reason: it boxes every row into a Series.
+    cache: dict[tuple[str, str], dict] = {}
+    accessions = mutations["Accession"].tolist() if "Accession" in mutations.columns else []
+    genes = mutations["Gene"].tolist() if "Gene" in mutations.columns else []
+    mutations_col = mutations["Mutation"].tolist() if "Mutation" in mutations.columns else []
+
     records: list[dict] = []
-    for _, row in mutations.iterrows():
-        mut = str(row.get("Mutation", ""))
+    for accession, gene, raw in zip(accessions, genes, mutations_col, strict=True):
+        mut = str(raw)
         if len(mut) < 2:
             continue
         ref_aa = mut[0]
         alt_aa = mut[-1]
-        s = compute_severity(ref_aa, alt_aa)
-        s["Accession"] = row["Accession"]
-        s["Gene"] = row["Gene"]
-        s["Mutation"] = mut
-        s["Ref_AA"] = ref_aa
-        s["Alt_AA"] = alt_aa
-        records.append(s)
+        key = (ref_aa, alt_aa)
+        metrics = cache.get(key)
+        if metrics is None:
+            metrics = compute_severity(ref_aa, alt_aa)
+            cache[key] = metrics
+        records.append(
+            {
+                **metrics,
+                "Accession": accession,
+                "Gene": gene,
+                "Mutation": mut,
+                "Ref_AA": ref_aa,
+                "Alt_AA": alt_aa,
+            }
+        )
 
     frame = pd.DataFrame(records)
     cols = [

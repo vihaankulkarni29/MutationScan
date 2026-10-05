@@ -99,8 +99,9 @@ mutationscan config-check --config config/config.yaml
 | `--cooccurrence-level gene,variant` | also count pairs at `gene:mutation` resolution |
 | `--min-count 3` | only report pairs co-mutated in ≥ 3 genomes |
 | `--taxid 1234` | fetch a missing reference from UniProt for that organism |
-| `--threads 8` | concurrent `tblastn` processes (extraction stage) |
+| `--threads 8` | how wide the run is: extraction `tblastn` concurrency, and the default for the CPU-bound stages |
 | `--variant-threads 8` | worker processes for variant calling (alignment stage) |
+| `--epistasis-threads 8` | worker processes for pairwise epistasis testing (defaults to `--threads`) |
 | `--config FILE` | start from a YAML config; flags override it |
 
 Extraction and variant calling are separate stages that do not overlap, so
@@ -108,6 +109,60 @@ Extraction and variant calling are separate stages that do not overlap, so
 count to keep every core busy throughout. Variant calling is CPU-bound in
 Biopython, so raising `--variant-threads` is what shortens it — measured at
 ~5x on 4 workers over 598 (genome, gene) pairs, with byte-identical output.
+
+Extraction batches the whole gene panel into **one `tblastn` call per genome**,
+because `tblastn` re-translates all six reading frames of the subject on every
+invocation — so one call per gene translated each whole genome 15 times over.
+Over a 570-genome cohort that is 570 calls instead of 8,550; measured per genome
+at a single thread it is 8.5–11x faster on its own, independent of how many
+workers you use.
+
+A full 570-genome cohort at 12 threads:
+
+| stage | time |
+|---|---|
+| preflight | 2.7s |
+| extraction | 87.8s |
+| variants | 49.1s |
+| co-occurrence | 0.1s |
+| epistasis | 9.3s |
+| **total** | **152s** |
+
+Epistasis no longer uses a process pool. It resolves every pair's 2×2 counts with
+one Gram matrix per gene-universe and runs one Fisher exact test per *distinct*
+table, which on this cohort took 146,070 tests down to ~1,700: a pair's
+denominator depends only on its two genes, so there are ~27 distinct universes
+rather than 146,070, and identical 2×2 tables must yield identical results.
+`epistasis.threads` is still accepted and still recorded, but it no longer
+changes what runs.
+
+Where the remaining time goes is extraction, and that is `tblastn` itself: it
+translates all six reading frames of each whole genome, once per genome, no matter
+how many queries it is given.
+
+### Checking what actually ran
+
+`--threads` is a request, not a guarantee. To see what each stage really used:
+
+```bash
+mutationscan config-check --config config/config.yaml
+```
+
+which prints the resolved plan alongside the rest of the run layout:
+
+```
+parallelism (12 core(s) available):
+  extraction       thread, 4 requested, 4 effective
+  variant calling  process, 4 requested, 4 effective
+  co-occurrence    not parallelised (O(genes^2) over a small panel; not worth a pool)
+  epistasis        not parallelised (exact counts + one test per distinct table; no pool); 4 requested, advisory only
+```
+
+The same plan is recorded in `run_summary.json` under `parallelism`, next to
+`timings_seconds` (wall-clock per stage, which is how you find out *where* a run
+went slow rather than just that it was slow). Both report **requested** and
+**effective** worker counts separately, so a stage that ran narrower than you
+asked says so instead of quietly underdelivering.
 
 The epistasis stage runs automatically at the end of `mutationscan run`. To
 run it separately on an existing mutations table:
@@ -148,8 +203,13 @@ cooccurrence:
 epistasis:
   fdr_threshold: 0.05             # Benjamini-Hochberg q-value cutoff
   min_count: 1                    # require >= this many co-occurring genomes
-  threads: 1                       # parallel pairwise Fisher tests
+  # threads is omitted on purpose: it inherits `threads` unless set here.
 ```
+
+`threads` is the run's width. `variant_threads` and `epistasis.threads` both
+default to it, so setting one number widens every stage that can benefit, and
+the config file and the `--threads` flag cannot disagree about how wide a stage
+runs. Override either to make one stage narrower.
 
 Unknown keys are rejected with a message naming the valid ones, so a typo fails
 before the run starts rather than silently doing the wrong thing.
@@ -169,7 +229,7 @@ All under `data/output/{job_name}/`:
 | `genome_mutation_map.csv` | One row per genome with all its mutations listed (`gene:mut | gene:mut …`). Written by the epistasis stage. |
 | `mutation_severity.csv` | Per-mutation biochemical severity (BLOSUM62, charge, hydropathy, volume, composite score). |
 | `epistasis_networks.csv` | Ranked epistatic pairs: Fisher's exact p-value, BH-adjusted q-value, odds ratio, sign (positive/negative/neutral), and composite pair severity. |
-| `run_summary.json` | Versions, settings, per-stage status counts, and the numerator and denominator behind every count. Attach this to a manuscript. |
+| `run_summary.json` | Versions, settings, per-stage status counts, the numerator and denominator behind every count, per-stage wall-clock times, and the requested-vs-effective parallelism of each stage. Attach this to a manuscript. |
 | `refs/`, `proteins/` | The exact reference used for every call, and every protein extracted. |
 
 ## Epistasis output

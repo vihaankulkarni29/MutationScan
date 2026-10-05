@@ -52,6 +52,8 @@ cooccurrence:
 epistasis:
   fdr_threshold: 0.05   # Benjamini-Hochberg q-value cutoff
   min_count: 1          # require at least this many co-occurring genomes
-  # threads: inherits the run's `threads` when omitted. Pairwise testing is
-  # CPU-bound Python, so it scales; below ~2048 variant pairs it runs
-  # in-process regardless, because pool start-up costs more than it saves.
+  # threads: inherits the run's `threads` when omitted. Accepted for
+  # compatibility but currently advisory: epistasis resolves every pair's 2x2
+  # counts with one Gram matrix per gene-universe and runs one Fisher test per
+  # *distinct* table, so it no longer uses a process pool. On the 570-genome
+  # cohort that took it from 146,070 tests to ~1,700 and removed the pool.

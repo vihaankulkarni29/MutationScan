@@ -185,15 +185,10 @@ def measure_fisher_cost(repeats: int = 200) -> float:
 def verify_thresholds(measurements: Sequence[Measurement], startup: float) -> int:
     """Check that the empirical thresholds still hold on this machine.
 
-    Guards two regressions that are invisible in output and only show up as
-    "parallelism is mysteriously slow":
-
-    1. chunk sizing that collapses a small cohort into one batch, stranding every
-       worker but one;
-    2. a serial/pool threshold set below the pool's own start-up cost.
+    Guards a regression that is invisible in output and only shows up as
+    "parallelism is mysteriously slow": chunk sizing that collapses a small
+    cohort into one batch, stranding every worker but one.
     """
-    from mutation_scan.epistasis import _SERIAL_PAIR_LIMIT
-
     failures = []
 
     print("threshold check")
@@ -216,24 +211,30 @@ def verify_thresholds(measurements: Sequence[Measurement], startup: float) -> in
                 f"yields {batches} batch(es)"
             )
 
+    # Epistasis used to be guarded by a serial/pool pair threshold. That check
+    # is gone with the pool: the stage now resolves counts with one Gram matrix
+    # per universe and runs one test per distinct 2x2 table, which took the
+    # 570-genome run from 146,070 tests to ~1,700. What is worth guarding now is
+    # that no pool creeps back in -- it was measurably a net loss, and nothing in
+    # the output would reveal it if someone reintroduced one.
+    import mutation_scan.epistasis as epistasis
+
     fisher = measure_fisher_cost()
-    epistasis_work = _SERIAL_PAIR_LIMIT * fisher
-    verdict = "past" if epistasis_work > startup else "BELOW"
-    print(
-        f"  epistasis threshold  : {_SERIAL_PAIR_LIMIT} pairs x {fisher * 1e6:.0f}us "
-        f"= {epistasis_work:.2f}s -> {verdict} break-even"
-    )
-    if epistasis_work <= startup:
+    print(f"  fisher_exact         : {fisher * 1e6:.0f}us per distinct table")
+
+    if hasattr(epistasis, "parallel_map"):
         failures.append(
-            f"epistasis _SERIAL_PAIR_LIMIT={_SERIAL_PAIR_LIMIT} is only "
-            f"{epistasis_work:.2f}s of work, below the {startup:.2f}s pool start-up"
+            "epistasis imports parallel_map again: the stage resolved every pair "
+            "with one Fisher test per distinct table, so a pool only adds spawn cost"
         )
+    else:
+        print("  epistasis            : no process pool (exact counts + memoised tests)")
 
     for failure in failures:
         print(f"  FAIL: {failure}")
     if failures:
         return 1
-    print("  OK: both empirical thresholds hold on this machine")
+    print("  OK: empirical thresholds hold on this machine")
     return 0
 
 

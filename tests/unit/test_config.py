@@ -280,3 +280,36 @@ def test_epistasis_threads_do_not_disturb_the_other_settings(tmp_path):
     tuned = _run_config(tmp_path, "--threads", "4")
     assert tuned.epistasis.fdr_threshold == 0.05
     assert tuned.epistasis.min_count == 1
+
+
+# -- the README must document a config the tool accepts ----------------------
+
+
+def test_the_readme_config_block_still_loads(tmp_path):
+    """Keep the documented schema honest.
+
+    The README used to show `epistasis.threads: 1`, which parsed fine and was
+    quietly wrong: it documented the exact value that left the stage serial
+    while the rest of the run went parallel. A doc block that the loader rejects
+    would be obvious; one that loads but means something stale is not, which is
+    why this also asserts the *resolved* values rather than just parseability.
+    """
+    import re
+    from pathlib import Path
+
+    from mutation_scan.config import load_config
+
+    readme = Path(__file__).resolve().parents[2] / "README.md"
+    blocks = re.findall(r"```yaml\n(.*?)```", readme.read_text(encoding="utf-8"), re.S)
+    assert blocks, "no yaml config block found in the README"
+
+    block = tmp_path / "readme.yaml"
+    block.write_text(blocks[0], encoding="utf-8")
+
+    config = load_config(block, base_dir=tmp_path)
+
+    # The documented defaults must all resolve to the same width, or the README
+    # is telling a user to run a narrower stage than it implies.
+    assert config.epistasis.threads == config.threads
+    assert config.epistasis.fdr_threshold > 0
+    assert config.epistasis.min_count >= 1

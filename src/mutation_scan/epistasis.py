@@ -22,7 +22,6 @@ import numpy as np
 import pandas as pd
 from scipy.stats import fisher_exact
 
-from .parallel import WORKLOAD_PROCESS, parallel_map
 from .scoring import build_severity_index, pair_severity
 
 logger = logging.getLogger(__name__)
@@ -94,21 +93,32 @@ def genome_mutation_map(
 
     called_pairs: set[tuple[str, str]] = set()
     if not qc.empty and "Status" in qc.columns:
-        called_pairs = {
-            (str(row["Accession"]), str(row["Gene"]))
-            for _, row in qc[qc["Status"] == "called"].iterrows()
-        }
+        called = qc[qc["Status"] == "called"]
+        called_pairs = set(
+            zip(
+                called["Accession"].astype(str),
+                called["Gene"].astype(str),
+                strict=True,
+            )
+        )
 
     rows = []
     for accession, group in mutations.groupby("Accession", sort=True):
         filtered = group
         if called_pairs:
-            filtered = group[
-                group.apply(
-                    lambda r: (str(r["Accession"]), str(r["Gene"])) in called_pairs,
-                    axis=1,
+            # The membership test is pure Python either way; a row-wise apply
+            # just adds pandas' per-row overhead on top of it. Once the pairwise
+            # stage stopped looping over pairs this filter became the most
+            # expensive thing left in the module.
+            keep = [
+                (acc, gene) in called_pairs
+                for acc, gene in zip(
+                    group["Accession"].astype(str),
+                    group["Gene"].astype(str),
+                    strict=True,
                 )
             ]
+            filtered = group[keep]
         if filtered.empty:
             continue
         genes = sorted(filtered["Gene"].astype(str).unique())
@@ -148,112 +158,170 @@ def _benjamini_hochberg(p_values: Sequence[float]) -> np.ndarray:
     return q_values
 
 
-def _pair_epistasis(n11: int, n10: int, n01: int, n00: int) -> dict:
-    """Fisher's exact test for one mutation pair.
-
-    Handles degenerate tables (zero cells) by computing Fisher's exact on
-    the integer table when possible, and falling back to a Haldane-Anscombe
-    correction (+0.5 to every cell) for the p-value when the table has a
-    structural zero. The odds ratio is computed directly from the (possibly
-    corrected) counts so it never returns NaN.
-    """
-    n = n11 + n10 + n01 + n00
-
-    # Try the raw table first
-    table = [[n11, n10], [n01, n00]]
-    odds_ratio, p_value = fisher_exact(table, alternative="two-sided")
-
-    if np.isnan(odds_ratio):
-        # Haldane-Anscombe correction for structural zeros
-        c11, c10, c01, c00 = n11 + 0.5, n10 + 0.5, n01 + 0.5, n00 + 0.5
-        _, p_value = fisher_exact([[c11, c10], [c01, c00]], alternative="two-sided")
-        denom = c10 * c01
-        odds_ratio = (c11 * c00) / denom if denom else float("inf")
-
-    expected = ((n11 + n10) * (n11 + n01)) / n if n else 0.0
-    return {
-        "N_Both": n11,
-        "N_A_only": n10,
-        "N_B_only": n01,
-        "N_Neither": n00,
-        "N_Eligible": n,
-        "Observed": n11,
-        "Expected": round(expected, 4),
-        "Odds_Ratio": round(float(odds_ratio), 4),
-        "P_value": float(p_value),
-    }
-
-
-#: Below this many pairs, test them in-process.
+#: Per-pair epistasis work is resolved in two exact stages -- a Gram matrix for
+#: the co-occurrence counts, and one Fisher test per *distinct* 2x2 table -- so
+#: the stage no longer spawns a process pool. `threads` is still accepted so
+#: existing scripts and config files keep working; it no longer changes what runs.
 #:
-#: A Fisher exact test is not the cheap call it looks like: measured on this
-#: workload it costs ~160us for a balanced small table and ~1.5ms for a rare
-#: co-mutation in a large cohort (``benchmarks/parallel_bench.py --verify-thresholds``
-#: re-checks this). Even at the cheap end, 2048 pairs is ~0.3s of work against a
-#: ~0.2s pool start-up under the ``spawn`` start method that Windows forces, so
-#: this threshold sits just past break-even even in the most favourable case, and
-#: well past it for anything but a small balanced cohort.
-#:
-#: Erring low is the safe direction: running serially when a pool might have
-#: given 1.5x costs almost nothing, whereas starting a pool that then gains
-#: nothing costs the same 0.2s every time.
-_SERIAL_PAIR_LIMIT = 2048
-
-#: Per-process epistasis state, installed once by the pool initializer.
-#:
-#: A closure would be simpler but cannot be pickled, and shipping the three
-#: tables to every task would pickle the whole cohort once per pair. Handing them
-#: to the initializer instead costs one copy per *worker*.
-_EPISTASIS_STATE: dict[str, object] = {}
+#: The escalation path for much larger cohorts is to pool over distinct tables
+#: rather than pairs, since that is now the parallelisable unit and it has a
+#: flat per-task payload. At 541 variants over 570 genomes there are 146,070
+#: pairs but only ~1,700 distinct tables after min_count, so the vectorised path
+#: is not close to needing it.
 
 
-def _init_epistasis_worker(
+@dataclass(frozen=True)
+class _PairTable:
+    """One pair's 2x2 contingency counts, resolved but not yet tested."""
+
+    index: int
+    variant_a: str
+    variant_b: str
+    gene_a: str
+    gene_b: str
+    n11: int
+    n10: int
+    n01: int
+    n00: int
+
+
+def _universe_for(
+    gene_a: str,
+    gene_b: str,
     eligible: dict[str, set[str]],
-    mutated: dict[str, set[str]],
-    gene_of: dict[str, str],
-) -> None:
-    """Pool initializer: install the shared tables in this worker."""
-    _EPISTASIS_STATE["eligible"] = eligible
-    _EPISTASIS_STATE["mutated"] = mutated
-    _EPISTASIS_STATE["gene_of"] = gene_of
+) -> frozenset[str] | None:
+    """The genome set a pair is scored against, or ``None`` if it is empty.
 
-
-def _test_variant_pair(pair: tuple[str, str]) -> dict | None:
-    """Build the 2x2 table for one variant pair and run Fisher's exact test.
-
-    Module level, and therefore picklable, so a process pool can call it.
-    Returns ``None`` for a pair with no shared denominator, which is the same
-    signal the serial path used.
+    Depends only on the two genes, so the number of distinct universes is
+    bounded by the panel size rather than by the number of pairs.
     """
-    eligible = _EPISTASIS_STATE["eligible"]
-    mutated = _EPISTASIS_STATE["mutated"]
-    gene_of = _EPISTASIS_STATE["gene_of"]
-    assert isinstance(eligible, dict) and isinstance(mutated, dict)
-    assert isinstance(gene_of, dict)
-
-    variant_a, variant_b = pair
-    gene_a = gene_of[variant_a]
-    gene_b = gene_of[variant_b]
     if gene_a == gene_b:
         shared = eligible.get(gene_a, set())
     else:
         shared = eligible.get(gene_a, set()) & eligible.get(gene_b, set())
-    if not shared:
-        return None
+    return frozenset(shared) if shared else None
 
-    in_a = mutated[variant_a] & shared
-    in_b = mutated[variant_b] & shared
-    n11 = len(in_a & in_b)
-    n10 = len(in_a - in_b)
-    n01 = len(in_b - in_a)
-    n00 = len(shared) - n11 - n10 - n01
 
-    result = _pair_epistasis(n11, n10, n01, n00)
-    result["Variant_A"] = variant_a
-    result["Variant_B"] = variant_b
-    result["Gene_A"] = gene_a
-    result["Gene_B"] = gene_b
-    return result
+def _resolve_pair_tables(
+    variants: list[str],
+    pairs: list[tuple[str, str]],
+    mutated: dict[str, set[str]],
+    gene_of: dict[str, str],
+    eligible: dict[str, set[str]],
+) -> list[_PairTable]:
+    """Build every pair's 2x2 counts, batching each universe into one matmul.
+
+    The counts are pure arithmetic once the co-occurrence numbers are known:
+    ``n11`` is a set intersection, and ``n10``/``n01``/``n00`` follow from the
+    marginals. ``n11`` for *all* pairs in a universe is the Gram matrix of that
+    universe's 0/1 presence matrix, which BLAS computes in one pass instead of
+    once per pair.
+
+    Pairs are returned in the order given, which the caller relies on: the final
+    sort is stable, so equal ``(Q_value, Pair_Severity, N_Both)`` triples fall
+    back to this enumeration order to break the tie.
+    """
+    variant_index = {variant: i for i, variant in enumerate(variants)}
+    gene_of_pair = [(gene_of[a], gene_of[b]) for a, b in pairs]
+
+    # A pair's universe depends only on its two genes, so memoising on the gene
+    # pair turns 146k set intersections into at most panel_size**2 of them.
+    universe_cache: dict[tuple[str, str], frozenset[str] | None] = {}
+    by_universe: dict[frozenset[str], list[int]] = {}
+    universe_at: list[frozenset[str] | None] = []
+    for position, (gene_a, gene_b) in enumerate(gene_of_pair):
+        gene_pair = (gene_a, gene_b)
+        if gene_pair not in universe_cache:
+            universe_cache[gene_pair] = _universe_for(gene_a, gene_b, eligible)
+        shared = universe_cache[gene_pair]
+        universe_at.append(shared)
+        if shared is not None:
+            by_universe.setdefault(shared, []).append(position)
+
+    # One global presence matrix, sliced per universe. Building it per universe
+    # instead would re-walk every variant's accession set once per universe.
+    # Eligible genomes that carry no mutation still need a row: they belong to
+    # universes and contribute an all-zero row, which is exactly their weight.
+    accessions = sorted(
+        {a for carriers in mutated.values() for a in carriers}
+        | {a for gene_set in eligible.values() for a in gene_set}
+    )
+    acc_index = {accession: i for i, accession in enumerate(accessions)}
+    presence_all = np.zeros((len(accessions), len(variants)), dtype=np.float64)
+    for variant, carriers in mutated.items():
+        presence_all[[acc_index[a] for a in carriers], variant_index[variant]] = 1.0
+
+    n11_at: dict[int, int] = {}
+    n10_at: dict[int, int] = {}
+    n01_at: dict[int, int] = {}
+    for shared, positions in by_universe.items():
+        rows = [acc_index[a] for a in sorted(shared)]
+        presence = presence_all[rows]
+
+        # float64 is exact here (counts are bounded by the cohort size, far
+        # below 2**53), so the Gram matrix is bit-identical whatever thread
+        # count BLAS happens to use. G.T @ G is the variant-by-variant Gram
+        # matrix, i.e. the co-occurrence count for every pair at once.
+        cooccurrence = presence.T @ presence
+
+        # Column sums give each variant's carrier count within this universe, so
+        # n10 and n01 fall out of the intersection without further set work.
+        marginals = presence.sum(axis=0)
+        for position in positions:
+            variant_a, variant_b = pairs[position]
+            i, j = variant_index[variant_a], variant_index[variant_b]
+            both = int(cooccurrence[i, j])
+            n11_at[position] = both
+            n10_at[position] = int(marginals[i]) - both
+            n01_at[position] = int(marginals[j]) - both
+
+    tables: list[_PairTable] = []
+    for position, (variant_a, variant_b) in enumerate(pairs):
+        shared = universe_at[position]
+        if shared is None:
+            continue
+        n11, n10, n01 = n11_at[position], n10_at[position], n01_at[position]
+        tables.append(
+            _PairTable(
+                index=position,
+                variant_a=variant_a,
+                variant_b=variant_b,
+                gene_a=gene_of_pair[position][0],
+                gene_b=gene_of_pair[position][1],
+                n11=n11,
+                n10=n10,
+                n01=n01,
+                n00=len(shared) - n11 - n10 - n01,
+            )
+        )
+
+    return tables
+
+
+def _test_distinct_tables(
+    distinct: list[tuple[int, int, int, int]],
+) -> dict[tuple[int, int, int, int], tuple[float, float]]:
+    """Run Fisher's exact test once per *distinct* 2x2 table.
+
+    The test is a pure function of the integer counts, so pairs sharing a table
+    necessarily share a p-value and odds ratio. Memoising on the tuple is
+    therefore exact, and at cohort scale it collapses the number of tests by
+    more than an order of magnitude.
+    """
+    results: dict[tuple[int, int, int, int], tuple[float, float]] = {}
+    for table in distinct:
+        if table in results:
+            continue
+        n11, n10, n01, n00 = table
+        odds_ratio, p_value = fisher_exact([[n11, n10], [n01, n00]], alternative="two-sided")
+        if np.isnan(odds_ratio):
+            # Haldane-Anscombe correction for structural zeros.
+            c11, c10, c01, c00 = n11 + 0.5, n10 + 0.5, n01 + 0.5, n00 + 0.5
+            _, p_value = fisher_exact([[c11, c10], [c01, c00]], alternative="two-sided")
+            denom = c10 * c01
+            odds_ratio = (c11 * c00) / denom if denom else float("inf")
+        results[table] = (float(odds_ratio), float(p_value))
+    return results
 
 
 def detect_epistasis(
@@ -275,6 +343,14 @@ def detect_epistasis(
     4. Classify as *positive*, *negative*, or *neutral*.
     5. Rank by ``Q_value`` → ``Pair_Severity`` ↓ → ``N_Both`` ↓.
 
+    The pairwise work is resolved in three stages rather than as a loop over
+    pairs. A pair's denominator depends only on its two genes, so the pairs are
+    grouped into a handful of universes and each universe's co-occurrence counts
+    come from a single matrix product. The counts are then keyed by their 2×2
+    tuple so that Fisher's exact test runs once per *distinct* table rather than
+    once per pair. Both steps are exact rearrangements, not approximations: see
+    :func:`_resolve_pair_tables` and :func:`_test_distinct_tables`.
+
     Args:
         mutations: mutations table with Accession, Gene, Mutation, Position.
         qc: variant QC table with Accession, Gene, Status.
@@ -282,7 +358,8 @@ def detect_epistasis(
             If ``None``, pairs are ranked only by count and p-value.
         fdr_threshold: significance cut after FDR correction.
         min_count: drop pairs with ``N_Both`` below this threshold.
-        threads: parallel worker processes for the pairwise tests.
+        threads: retained for interface compatibility. The stage no longer
+            spawns a process pool; see the note in the module plan.
 
     Returns:
         Ranked epistasis network DataFrame.
@@ -299,8 +376,10 @@ def detect_epistasis(
     eligible: dict[str, set[str]] = {}
     if not qc.empty and "Status" in qc.columns:
         called = qc[qc["Status"] == "called"]
-        for _, row in called.iterrows():
-            eligible.setdefault(str(row["Gene"]), set()).add(str(row["Accession"]))
+        for accession, gene in zip(
+            called["Accession"].astype(str), called["Gene"].astype(str), strict=True
+        ):
+            eligible.setdefault(gene, set()).add(accession)
 
     # Mutation presence: variant_key -> set of accessions
     labelled = mutations.copy()
@@ -311,44 +390,59 @@ def detect_epistasis(
 
     gene_of = dict(zip(labelled["_variant"], labelled["Gene"].astype(str), strict=False))
 
-    # Pre-build severity lookup if provided
-    sev_lookup: dict[str, float] = {}
-    if severity is not None and not severity.empty:
-        for _, row in severity.iterrows():
-            key = f"{row['Gene']}:{row['Mutation']}"
-            sev_lookup[key] = float(row["severity_score"])
+    # Whether severity scoring was requested at all. Deliberately not a lookup
+    # dict: scoring itself goes through build_severity_index, which averages a
+    # variant's severity across every genome carrying it. Building a per-variant
+    # dict here would have kept whichever row came last instead, and cost an
+    # iterrows pass over the whole severity table to be thrown away.
+    score_pairs = severity is not None and not severity.empty
 
     variants = sorted(mutated.keys())
     pairs = list(combinations(variants, 2))
 
-    use_pool = threads > 1 and len(pairs) > _SERIAL_PAIR_LIMIT
-    if threads > 1 and not use_pool:
-        logger.info(
-            "Testing %d variant pair(s) in-process: below the %d-pair threshold "
-            "where pool start-up pays for itself",
-            len(pairs),
-            _SERIAL_PAIR_LIMIT,
-        )
-    else:
-        logger.info("Computing epistasis for %d variant pairs on %d thread(s)", len(pairs), threads)
+    logger.info("Computing epistasis for %d variant pairs", len(pairs))
+
+    tables = _resolve_pair_tables(variants, pairs, mutated, gene_of, eligible)
+    testable = len(tables)
+
+    # Apply min_count here rather than after building the frame. The filter runs
+    # before BH either way, so this is the same set of rows -- but a pair with
+    # N_Both == 0 can never reach the output, so there is no reason to test it.
+    # At cohort scale that is the majority of pairs, and the saving is exact.
+    tables = [table for table in tables if table.n11 >= min_count]
+
+    distinct = sorted({(t.n11, t.n10, t.n01, t.n00) for t in tables})
+    logger.info(
+        "Resolved %d testable pair(s), %d above min_count, across %d distinct 2x2 table(s)",
+        testable,
+        len(tables),
+        len(distinct),
+    )
+
+    tested = _test_distinct_tables(distinct)
 
     results: list[dict] = []
-    # Processes, not threads: scipy's exact tests and the set arithmetic are
-    # CPU-bound Python, and the GIL would serialise a thread pool. The shared
-    # tables ride along in initargs, so they are sent once per worker rather than
-    # once per task.
-    for result in parallel_map(
-        _test_variant_pair,
-        pairs,
-        threads=threads if use_pool else 1,
-        workload=WORKLOAD_PROCESS,
-        total=len(pairs),
-        initializer=_init_epistasis_worker,
-        initargs=(eligible, mutated, gene_of),
-        label="epistasis",
-    ):
-        if result is not None:
-            results.append(result)
+    for table in tables:
+        odds_ratio, p_value = tested[(table.n11, table.n10, table.n01, table.n00)]
+        n = table.n11 + table.n10 + table.n01 + table.n00
+        expected = ((table.n11 + table.n10) * (table.n11 + table.n01)) / n if n else 0.0
+        results.append(
+            {
+                "Variant_A": table.variant_a,
+                "Variant_B": table.variant_b,
+                "Gene_A": table.gene_a,
+                "Gene_B": table.gene_b,
+                "N_Both": table.n11,
+                "N_A_only": table.n10,
+                "N_B_only": table.n01,
+                "N_Neither": table.n00,
+                "N_Eligible": n,
+                "Observed": table.n11,
+                "Expected": round(expected, 4),
+                "Odds_Ratio": round(odds_ratio, 4),
+                "P_value": p_value,
+            }
+        )
 
     if not results:
         return pd.DataFrame(columns=list(EPISTASIS_COLUMNS))
@@ -367,7 +461,7 @@ def detect_epistasis(
     frame.loc[(frame["Odds_Ratio"] < 1) & (frame["Q_value"] < fdr_threshold), "Sign"] = "negative"
 
     frame["Pair_Severity"] = 0.0
-    if sev_lookup:
+    if score_pairs:
         # Build the (gene, mutation) -> mean severity lookup once. Scoring each
         # pair with its own scan of the severity table is quadratic, and at
         # cohort scale that scan outweighed the Fisher tests themselves.

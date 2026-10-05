@@ -265,11 +265,15 @@ def test_the_run_summary_records_the_resolved_parallelism(completed_run):
         assert "clamped" in entry, name
         assert "oversubscribed" in entry, name
 
-    # The fixture ran with --threads 2 --variant-threads 2, and epistasis
-    # inherits the run width, so all three parallel stages agree at 2.
+    # The fixture ran with --threads 2 --variant-threads 2, so the two pooled
+    # stages agree at 2. Epistasis and co-occurrence run in-process: epistasis
+    # resolves every pair with one test per distinct 2x2 table, so the inherited
+    # width is recorded but not spent.
     assert plan["extraction"]["effective_workers"] == 2
     assert plan["variant calling"]["effective_workers"] == 2
-    assert plan["epistasis"]["effective_workers"] == 2
+    assert plan["epistasis"]["effective_workers"] == 1
+    assert plan["epistasis"]["requested_workers"] == 2
+    assert plan["epistasis"]["not_parallelised"]
     assert plan["co-occurrence"]["not_parallelised"]
 
 

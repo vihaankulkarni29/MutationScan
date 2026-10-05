@@ -25,6 +25,7 @@ from . import __version__
 from .config import Config
 from .cooccurrence import CooccurrenceResult
 from .extract import STATUS_EXTRACTED
+from .parallel import available_cores
 from .parallel_plan import describe
 from .references import ReferenceSet
 from .variants import VARIANT_STATUS_CALLED
@@ -148,6 +149,11 @@ def build_run_summary(
             "network_pairs": _n_rows(config.epistasis_networks_csv),
         },
         "outputs": [str(path) for path in config.outputs()],
+        # Cores available is what makes requested-vs-effective interpretable: a
+        # run asking for 16 on a 4-core machine is a different run from one that
+        # asked for 16 and got them. config-check reports it too, but the summary
+        # is the artifact people attach to a manuscript, so it has to stand alone.
+        "cores_available": available_cores(),
         "parallelism": [stage.to_dict() for stage in describe(config)],
         "timings_seconds": dict(timings) if timings else {},
         "note": (

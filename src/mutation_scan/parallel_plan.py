@@ -83,11 +83,17 @@ class Stage:
         return payload
 
 
-#: Mirrors epistasis._SERIAL_PAIR_LIMIT. Duplicated deliberately: importing it
-#: from epistasis would pull scipy into every `config-check`, which must stay
-#: fast and dependency-light. test_parallel_plan_agrees_with_the_epistasis_limit
-#: fails the moment the two disagree.
-_EPIGASTIS_SERIAL_PAIR_LIMIT = 2048
+#: Why epistasis is no longer a pooled stage.
+#:
+#: It used to run one Fisher test per variant pair in a process pool. Pooling it
+#: was a net loss: the pool spent most of its life paying ``spawn`` import costs
+#: (~3.4s per worker measured) against ~50s of total test work, so it gained
+#: ~2x at four workers and ran *slower* at eight.
+#:
+#: The stage now resolves every pair's 2x2 counts with one Gram matrix per
+#: universe and runs one Fisher test per *distinct* table, which collapsed
+#: 146,070 tests to ~1,700 and removed the pool entirely.
+_EPIGASTIS_NOT_PARALLELISED = "exact counts + one test per distinct table; no pool"
 
 
 def describe(config: Config) -> list[Stage]:
@@ -117,12 +123,15 @@ def describe(config: Config) -> list[Stage]:
             1,
             not_parallelised="O(genes^2) over a small panel; not worth a pool",
         ),
+        # Epistasis is likewise not a pooled stage, but for the opposite reason:
+        # it was, and pooling lost. The requested width is still reported so a
+        # configured epistasis thread count is never silently discarded.
         Stage(
             "epistasis",
             WORKLOAD_PROCESS,
             config.epistasis.threads,
-            resolve_workers(config.epistasis.threads, WORKLOAD_PROCESS),
-            serial_below=_EPIGASTIS_SERIAL_PAIR_LIMIT,
+            1,
+            not_parallelised=_EPIGASTIS_NOT_PARALLELISED,
         ),
     ]
 
@@ -134,6 +143,12 @@ def format_plan(stages: list[Stage]) -> str:
     for stage in stages:
         if stage.not_parallelised:
             detail = f"not parallelised ({stage.not_parallelised})"
+            # A stage that was pooled once and is not any more may still carry a
+            # configured width. Say so explicitly rather than dropping it: a
+            # setting that is honoured by being irrelevant should read as
+            # irrelevant, not disappear.
+            if stage.requested > 1:
+                detail += f"; {stage.requested} requested, advisory only"
         else:
             detail = f"{stage.kind}, {stage.requested} requested, {stage.effective} effective"
             if stage.serial_below is not None:

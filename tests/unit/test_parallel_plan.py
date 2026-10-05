@@ -10,15 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from mutation_scan import epistasis
 from mutation_scan.config import Config
 from mutation_scan.parallel import _THREAD_CEILING, available_cores, resolve_workers
-from mutation_scan.parallel_plan import (
-    _EPIGASTIS_SERIAL_PAIR_LIMIT,
-    Stage,
-    describe,
-    format_plan,
-)
+from mutation_scan.parallel_plan import Stage, describe, format_plan
 
 STAGES = ("extraction", "variant calling", "co-occurrence", "epistasis")
 
@@ -96,21 +90,31 @@ class TestRequestedVersusEffective:
         assert plan["co-occurrence"].not_parallelised
 
 
-class TestEpistasisThresholdCannotDrift:
-    def test_the_duplicated_threshold_matches_the_real_one(self):
-        """`parallel_plan` deliberately does not import epistasis.
-
-        Importing it would pull scipy into every `config-check`, which has to
-        stay fast. The cost of that choice is a copied constant, so this test
-        fails the moment the two disagree -- which would make the plan promise a
-        serial fallback the stage does not actually have.
-        """
-        assert _EPIGASTIS_SERIAL_PAIR_LIMIT == epistasis._SERIAL_PAIR_LIMIT
-
-    def test_the_epistasis_stage_advertises_its_serial_fallback(self, tmp_path):
+class TestEpistasisIsAdvisory:
+    def test_epistasis_is_not_reported_as_a_pooled_stage(self, tmp_path):
         plan = {stage.name: stage for stage in describe(_config(tmp_path))}
 
-        assert plan["epistasis"].serial_below == epistasis._SERIAL_PAIR_LIMIT
+        assert plan["epistasis"].not_parallelised
+        assert plan["epistasis"].effective == 1
+
+    def test_a_configured_epistasis_width_is_still_reported(self, tmp_path):
+        """Option (a): the flag survives, and is honoured by being irrelevant.
+
+        Silently dropping a configured width is exactly the failure this module
+        exists to prevent, so the requested number has to stay visible.
+        """
+        config = Config.from_mapping({"epistasis": {"threads": 8}}, tmp_path)
+
+        plan = {stage.name: stage for stage in describe(config)}
+
+        assert plan["epistasis"].requested == 8
+
+    def test_the_advisory_width_is_explained_in_the_text(self, tmp_path):
+        config = Config.from_mapping({"epistasis": {"threads": 8}}, tmp_path)
+
+        text = format_plan(describe(config))
+
+        assert "advisory" in text
 
 
 class TestRendering:
@@ -141,10 +145,12 @@ class TestRendering:
         assert "clamped" not in text
         assert "oversubscribed" not in text
 
-    def test_the_serial_fallback_threshold_is_visible(self, tmp_path):
-        text = format_plan(describe(_config(tmp_path)))
+    def test_every_stage_accounts_for_its_own_width(self, tmp_path):
+        """No stage may quietly report a width nobody asked for."""
+        text = format_plan(describe(_config(tmp_path, threads=3, variant_threads=5)))
 
-        assert str(_EPIGASTIS_SERIAL_PAIR_LIMIT) in text
+        assert "3 requested" in text
+        assert "5 requested" in text
 
 
 class TestSerialisation:
