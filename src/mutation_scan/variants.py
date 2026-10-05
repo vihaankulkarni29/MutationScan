@@ -25,7 +25,7 @@ says, and nothing more.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +49,7 @@ __all__ = [
     "VARIANT_STATUS_LOW_IDENTITY",
     "VARIANT_STATUS_MISSING_PROTEIN",
     "VARIANT_STATUS_NO_REFERENCE",
+    "VARIANT_STATUS_NO_SPECIES_REFERENCE",
     "Comparison",
     "VariantResult",
     "build_aligner",
@@ -84,6 +85,7 @@ MUTATION_COLUMNS = (
 QC_COLUMNS = (
     "Accession",
     "Gene",
+    "Species",
     "Status",
     "Identity_pct",
     "Coverage_pct",
@@ -94,6 +96,13 @@ QC_COLUMNS = (
     "N_Inserted_Columns",
     "Detail",
 )
+
+#: The pair was not called because this genome's own species has no reference for
+#: the gene. Distinct from :data:`VARIANT_STATUS_NO_REFERENCE` (no reference was
+#: ever prepared) and from :data:`VARIANT_STATUS_NO_HIT` (the gene is absent from
+#: this genome): the point is that comparing it against some other species'
+#: protein would have produced confident nonsense.
+VARIANT_STATUS_NO_SPECIES_REFERENCE = "no_reference_for_species"
 
 
 def build_aligner() -> PairwiseAligner:
@@ -222,7 +231,13 @@ class VariantResult:
         return len(self.mutations)
 
 
-def _pairs_from_manifest(manifest: pd.DataFrame) -> Iterator[tuple[str, str]]:
+def _pairs_from_manifest(manifest: pd.DataFrame) -> Iterator[tuple[str, str, str]]:
+    """Yield ``(accession, gene, species)`` for every extracted pair.
+
+    The species comes from the manifest rather than being re-derived here:
+    extraction is the stage that decided which reference was valid, so re-deciding
+    it here would risk the two stages disagreeing about the same pair.
+    """
     missing = [
         column for column in ("Accession", "Gene", "Status") if column not in manifest.columns
     ]
@@ -231,9 +246,11 @@ def _pairs_from_manifest(manifest: pd.DataFrame) -> Iterator[tuple[str, str]]:
             return
         raise ValueError(f"Manifest is missing column(s): {', '.join(missing)}")
 
+    has_species = "Species" in manifest.columns
     extracted = manifest[manifest["Status"] == STATUS_EXTRACTED]
     for row in extracted.itertuples():
-        yield str(row.Accession), str(row.Gene)
+        species = str(getattr(row, "Species", "") or "") if has_species else ""
+        yield str(row.Accession), str(row.Gene), species
 
 
 def _pairs_from_directory(proteins_dir: Path) -> Iterator[tuple[str, str, Path]]:
@@ -279,10 +296,12 @@ def _qc_row(
     comparison: Comparison | None = None,
     n_mutations: int = 0,
     detail: str = "",
+    species: str = "",
 ) -> dict:
     return {
         "Accession": accession,
         "Gene": gene,
+        "Species": species,
         "Status": status,
         "Identity_pct": comparison.identity_pct if comparison else pd.NA,
         "Coverage_pct": comparison.coverage_pct if comparison else pd.NA,
@@ -343,6 +362,7 @@ class _VariantTask:
 
     accession: str
     gene: str
+    species: str = ""
     reference_path: str = ""
     protein_path: str = ""
     min_identity: float = 0.0
@@ -363,6 +383,7 @@ def _process_variant_task(task: _VariantTask) -> dict:
         return {
             "accession": task.accession,
             "gene": task.gene,
+            "species": task.species,
             "status": task.status,
             "comparison": None,
             "mutations": [],
@@ -379,6 +400,7 @@ def _process_variant_task(task: _VariantTask) -> dict:
         return {
             "accession": task.accession,
             "gene": task.gene,
+            "species": task.species,
             "status": VARIANT_STATUS_ERROR,
             "comparison": None,
             "mutations": [],
@@ -389,6 +411,7 @@ def _process_variant_task(task: _VariantTask) -> dict:
         return {
             "accession": task.accession,
             "gene": task.gene,
+            "species": task.species,
             "status": VARIANT_STATUS_LOW_IDENTITY,
             "comparison": comparison,
             "mutations": [],
@@ -399,6 +422,7 @@ def _process_variant_task(task: _VariantTask) -> dict:
         return {
             "accession": task.accession,
             "gene": task.gene,
+            "species": task.species,
             "status": VARIANT_STATUS_LOW_COVERAGE,
             "comparison": comparison,
             "mutations": [],
@@ -422,6 +446,7 @@ def _process_variant_task(task: _VariantTask) -> dict:
     return {
         "accession": task.accession,
         "gene": task.gene,
+        "species": task.species,
         "status": VARIANT_STATUS_CALLED,
         "comparison": comparison,
         "mutations": mutations,
@@ -438,6 +463,7 @@ def call_variants(
     mutations_csv: Path | str | None = None,
     qc_csv: Path | str | None = None,
     threads: int = 1,
+    species_refs_dirs: Mapping[str, Path | str] | None = None,
 ) -> VariantResult:
     """Call substitutions for every extracted protein.
 
@@ -451,6 +477,9 @@ def call_variants(
         min_coverage_percent: reject the pair below this coverage of the reference.
         mutations_csv / qc_csv: optional output paths.
         threads: number of parallel worker processes (default: 1).
+        species_refs_dirs: species key -> directory holding that species'
+            prepared references. When given, each pair is compared against the
+            reference for the genome's own species, never a different one's.
 
     Returns:
         :class:`VariantResult` -- the mutation table, and a QC row for every pair
@@ -461,9 +490,9 @@ def call_variants(
     refs_dir = Path(refs_dir)
 
     if manifest is not None:
-        pairs: Iterator[tuple[str, str, Path]] = (
-            (accession, gene, protein_path(proteins_dir, accession, gene))
-            for accession, gene in _pairs_from_manifest(manifest)
+        pairs: Iterator[tuple[str, str, str, Path]] = (
+            (accession, gene, species, protein_path(proteins_dir, accession, gene))
+            for accession, gene, species in _pairs_from_manifest(manifest)
         )
         total: int | None = (
             int((manifest["Status"] == STATUS_EXTRACTED).sum())
@@ -472,7 +501,7 @@ def call_variants(
         )
     else:
         discovered = list(_pairs_from_directory(proteins_dir))
-        pairs = iter(discovered)
+        pairs = iter([(accession, gene, "", path) for accession, gene, path in discovered])
         total = len(discovered)
 
     logger.info(
@@ -487,18 +516,23 @@ def call_variants(
     mutation_rows: list[dict] = []
     qc_rows: list[dict] = []
 
-    # Resolve each reference path once here, in the parent. Only the *path* is
-    # handed to workers, which read and memoise the sequence themselves: a
-    # reference is at most a few kB but a full cohort's worth of them would
-    # otherwise be pickled once per task.
-    reference_paths: dict[str, str | None] = {}
+    # Resolve each (species, gene) reference path once here, in the parent. Only
+    # the *path* is handed to workers, which read and memoise the sequence
+    # themselves: a reference is at most a few kB but a full cohort's worth of
+    # them would otherwise be pickled once per task.
+    reference_paths: dict[tuple[str, str], str | None] = {}
+    species_dirs = {key: Path(value) for key, value in (species_refs_dirs or {}).items()}
 
-    def reference_path_for(gene: str) -> str | None:
-        if gene not in reference_paths:
-            path = resolve_reference(refs_dir, gene)
+    def reference_path_for(gene: str, species: str) -> str | None:
+        # Keyed by species so two species' proteins for the same gene stay
+        # separate. In flat mode the key is "" and the lookup is unchanged.
+        key = (species if species_dirs else "", gene)
+        if key not in reference_paths:
+            directory = species_dirs.get(species, refs_dir) if species_dirs else refs_dir
+            path = resolve_reference(directory, gene)
             if path is None:
-                logger.error("No reference for %s in %s", gene, refs_dir)
-                reference_paths[gene] = None
+                logger.error("No reference for %s in %s", gene, directory)
+                reference_paths[key] = None
             else:
                 # Fail here rather than in every worker, so a bad reference is
                 # reported once instead of once per genome that lacks it.
@@ -506,20 +540,27 @@ def call_variants(
                     read_protein_sequence(path, gene)
                 except ValueError as exc:
                     logger.error("Unusable reference for %s: %s", gene, exc)
-                    reference_paths[gene] = None
+                    reference_paths[key] = None
                 else:
-                    reference_paths[gene] = str(path)
-        return reference_paths[gene]
+                    reference_paths[key] = str(path)
+        return reference_paths[key]
 
     def _tasks() -> Iterator[_VariantTask]:
         """Stream tasks. Nothing is accumulated, so memory is flat in cohort size."""
-        for accession, gene, faa_path in pairs:
-            reference = reference_path_for(gene)
+        for accession, gene, species, faa_path in pairs:
+            reference = reference_path_for(gene, species)
             if reference is None:
+                # The gene has a reference in the run, but not in the genome's own
+                # species. Say that plainly instead of borrowing another species'.
                 yield _VariantTask(
                     accession=accession,
                     gene=gene,
-                    status=VARIANT_STATUS_NO_REFERENCE,
+                    species=species,
+                    status=(
+                        VARIANT_STATUS_NO_SPECIES_REFERENCE
+                        if species_dirs
+                        else VARIANT_STATUS_NO_REFERENCE
+                    ),
                     detail="no usable reference",
                 )
                 continue
@@ -527,6 +568,7 @@ def call_variants(
                 yield _VariantTask(
                     accession=accession,
                     gene=gene,
+                    species=species,
                     status=VARIANT_STATUS_MISSING_PROTEIN,
                     detail=f"missing {faa_path.name}",
                 )
@@ -534,6 +576,7 @@ def call_variants(
             yield _VariantTask(
                 accession=accession,
                 gene=gene,
+                species=species,
                 reference_path=reference,
                 protein_path=str(faa_path),
                 min_identity=min_identity_percent,
@@ -586,6 +629,7 @@ def _collect_result(result: dict, qc_rows: list[dict], mutation_rows: list[dict]
     comparison = result["comparison"]
     mutations = result["mutations"]
     detail = result["detail"]
+    species = result.get("species", "")
 
     if status == VARIANT_STATUS_CALLED:
         mutation_rows.extend(mutations)
@@ -596,10 +640,11 @@ def _collect_result(result: dict, qc_rows: list[dict], mutation_rows: list[dict]
                 VARIANT_STATUS_CALLED,
                 comparison,
                 n_mutations=len(mutations),
+                species=species,
             )
         )
     else:
-        qc_rows.append(_qc_row(accession, gene, status, comparison, detail=detail))
+        qc_rows.append(_qc_row(accession, gene, status, comparison, detail=detail, species=species))
 
 
 def _log_summary(mutations: pd.DataFrame, qc: pd.DataFrame) -> None:

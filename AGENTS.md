@@ -34,3 +34,7 @@ serial-fallback thresholds. Not part of CI; run it after touching
 - Parallelism: `src/mutation_scan/parallel.py` (executor),
   `src/mutation_scan/parallel_plan.py` (what a run will actually use -- the
   run summary and `config-check` both read this, so change it in one place)
+- Species routing: `src/mutation_scan/species.py` (panel parsing + genome
+  assignment), and the `species:` block in `config/config.yaml`. A multi-species
+  cohort MUST configure this -- one reference panel across species silently calls
+  every interspecies difference a mutation, and RBH does not catch it.

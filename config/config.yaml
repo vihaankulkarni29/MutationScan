@@ -20,6 +20,38 @@ targets: []
 # missing from references_dir (e.g. "83333"). "" disables all network access.
 uniprot_taxid: ""
 
+# Species-aware reference routing. RECOMMENDED whenever the cohort spans more
+# than one species, and the difference is not cosmetic.
+#
+# A single reference panel applied across species is invalid. Aligning an E. coli
+# K-12 reference protein against a Klebsiella genome scores ~80-90% identity --
+# above an 80% gate -- and every ordinary difference between the two species is
+# then reported as an acquired mutation. Measured on a 570-genome three-species
+# cohort, that produced 61,858 Klebsiella mutations from E. coli reference genes
+# where the equivalent per-species runs produced 414, and 97.7% of all reported
+# mutations came from pairs below 95% identity.
+#
+# Note that a reciprocal-best-hit check does NOT fix this: E. coli acrB and
+# K. pneumoniae acrB are true orthologs, so RBH passes them. What is needed is to
+# compare each genome against a reference from its own species.
+#
+# Each genome is matched by fnmatch on its filename stem. A gene a species has no
+# reference for is reported as `no_reference_for_species` and never compared
+# against another species' protein. Genomes matching no pattern abort the run --
+# no reference can be trusted for them.
+#
+# Leave this block empty (the default) only for a genuinely single-species cohort.
+species:
+  # escherichia_coli:
+  #   genome_pattern: "Escherichia_coli_*"     # matched against the filename stem
+  #   references: "E_coli_k12"                 # relative to references_dir
+  # klebsiella_pneumoniae:
+  #   genome_pattern: "Klebsiella_pneumoniae_*"
+  #   references: "K_pneumoniae_MGH_78578"
+  # pseudomonas_aeruginosa:
+  #   genome_pattern: "Pseudomonas_aeruginosa_*"
+  #   references: "P_aeroginosa_PAO1"
+
 # Quality gates applied per (genome, gene) alignment before mutations are called.
 min_identity_percent: 80    # identity to the reference over reference length
 min_coverage_percent: 80    # fraction of reference positions the query covers

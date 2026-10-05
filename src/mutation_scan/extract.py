@@ -19,7 +19,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -29,6 +29,7 @@ import pandas as pd
 from .fasta import sanitize_protein_sequence, write_protein_record
 from .parallel import WORKLOAD_THREAD, parallel_map
 from .references import ReferenceSet, resolve_reference
+from .species import SpeciesPanel
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ __all__ = [
     "STATUS_EXTRACTED",
     "STATUS_NO_HIT",
     "STATUS_NO_REFERENCE",
+    "STATUS_NO_SPECIES_REFERENCE",
     "TBLASTN_THREADS",
     "TblastnError",
     "discover_genomes",
@@ -69,10 +71,19 @@ STATUS_NO_HIT = "no_hit"
 STATUS_NO_REFERENCE = "no_reference"
 STATUS_ERROR = "error"
 
+#: The gene exists in the run's panel, but this genome's own species has no
+#: reference for it. Deliberately distinct from :data:`STATUS_NO_REFERENCE`
+#: (nothing was ever prepared) and from :data:`STATUS_NO_HIT` (we looked in this
+#: genome and found nothing): here we deliberately declined to compare, because
+#: the only available reference belongs to a different species.
+STATUS_NO_SPECIES_REFERENCE = "no_reference_for_species"
+
 MANIFEST_COLUMNS = (
     "Accession",
     "Gene",
     "Status",
+    "Species",
+    "Ref_Source",
     "Pident",
     "Aln_Length",
     "Ref_Length",
@@ -331,24 +342,20 @@ def run_tblastn_batch(
 
 
 @dataclass(frozen=True)
-class _Task:
-    """One (genome, gene) pair, aligned by its own tblastn call."""
-
-    accession: str
-    genome: Path
-    gene: str
-    reference: Path | None
-
-
-@dataclass(frozen=True)
 class _GenomeTask:
-    """One genome against the whole gene panel."""
+    """One genome against the gene panel of its own species."""
 
     accession: str
     genome: Path
+    species: str
     #: ``(gene, reference)`` in panel order. ``reference`` is ``None`` for a gene
     #: with no prepared reference, which still owes the manifest a row.
     genes: tuple[tuple[str, Path | None], ...]
+    #: Status and detail for any gene in this task with no reference. One cause
+    #: per genome (the species has no reference for it, or no species matched), so
+    #: a single pair describes them all.
+    missing_status: str = STATUS_NO_REFERENCE
+    missing_detail: str = "no reference available"
 
 
 def _build_query_fasta(references: dict[str, Path | None], destination: Path) -> list[str]:
@@ -417,13 +424,13 @@ def _run_genome_task(
     binary: str,
     evalue: float,
 ) -> list[dict]:
-    """Align the whole panel against one genome; return one row per gene.
+    """Align one genome's own gene panel; return one row per gene.
 
     Module level so the thread pool can call it directly.
     """
-    no_ref = "no reference available"
+    no_ref = task.missing_detail
     results: dict[str, dict] = {
-        gene: _row(task.accession, gene, STATUS_NO_REFERENCE, no_ref)
+        gene: _row(task.accession, gene, task.missing_status, no_ref, species=task.species)
         for gene, reference in task.genes
         if reference is None
     }
@@ -442,21 +449,27 @@ def _run_genome_task(
             # found nothing" -- the distinction the manifest exists to preserve.
             logger.warning("%s: %s", task.accession, exc)
             return [
-                _row(task.accession, gene, STATUS_ERROR, str(exc))
+                _row(task.accession, gene, STATUS_ERROR, str(exc), species=task.species)
                 if reference is not None
-                else _row(task.accession, gene, STATUS_NO_REFERENCE, no_ref)
+                else results[gene]
                 for gene, reference in task.genes
             ]
 
     for gene in wanted:
         hit = hits.get(gene)
         if hit is None:
-            results[gene] = _row(task.accession, gene, STATUS_NO_HIT, "no alignment above e-value")
+            results[gene] = _row(
+                task.accession,
+                gene,
+                STATUS_NO_HIT,
+                "no alignment above e-value",
+                species=task.species,
+            )
             continue
 
         detail = _write_protein(task.accession, gene, proteins_dir, hit)
         if detail:
-            results[gene] = _row(task.accession, gene, STATUS_ERROR, detail, hit)
+            results[gene] = _row(task.accession, gene, STATUS_ERROR, detail, hit, task.species)
             continue
 
         if hit.internal_stops:
@@ -466,7 +479,7 @@ def _run_genome_task(
                 gene,
                 hit.internal_stops,
             )
-        results[gene] = _row(task.accession, gene, STATUS_EXTRACTED, "", hit)
+        results[gene] = _row(task.accession, gene, STATUS_EXTRACTED, "", hit, species=task.species)
 
     return [results[gene] for gene, _ in task.genes]
 
@@ -477,11 +490,15 @@ def _row(
     status: str,
     detail: str = "",
     hit: TblastnHit | None = None,
+    species: str = "",
+    ref_source: str = "",
 ) -> dict:
     return {
         "Accession": accession,
         "Gene": gene,
         "Status": status,
+        "Species": species,
+        "Ref_Source": ref_source,
         "Pident": hit.pident if hit else pd.NA,
         "Aln_Length": hit.aln_length if hit else pd.NA,
         "Ref_Length": hit.ref_length if hit else pd.NA,
@@ -493,37 +510,33 @@ def _row(
     }
 
 
-def _run_task(task: _Task, proteins_dir: Path, binary: str, evalue: float) -> dict:
-    """One (genome, gene) alignment via the single-query path.
+def _safe_name(key: str) -> str:
+    """A filesystem-safe stand-in for a species key."""
+    cleaned = "".join(char if char.isalnum() or char in "-_" else "_" for char in key)
+    return cleaned or "species"
 
-    Retained so the batched path can be checked against it, rather than only
-    against expectations.
+
+def _run_species_genome_task(
+    payload: tuple[_GenomeTask, dict],
+    proteins_dir: Path,
+    binary: str,
+    evalue: float,
+) -> list[dict]:
+    """Dispatch one genome to the query panel of its own species.
+
+    ``partial``-bound by the caller. Kept separate from :func:`_run_genome_task`
+    so that test can still drive the worker directly with a fixed panel.
     """
-    if task.reference is None:
-        return _row(task.accession, task.gene, STATUS_NO_REFERENCE, "no reference available")
-
-    try:
-        hit = run_tblastn(task.reference, task.genome, binary=binary, evalue=evalue)
-    except TblastnError as exc:
-        logger.warning("%s/%s: %s", task.accession, task.gene, exc)
-        return _row(task.accession, task.gene, STATUS_ERROR, str(exc))
-
-    if hit is None:
-        return _row(task.accession, task.gene, STATUS_NO_HIT, "no alignment above e-value")
-
-    detail = _write_protein(task.accession, task.gene, proteins_dir, hit)
-    if detail:
-        return _row(task.accession, task.gene, STATUS_ERROR, detail, hit)
-
-    if hit.internal_stops:
-        logger.info(
-            "%s/%s: %d internal stop codon(s) in the extracted protein",
-            task.accession,
-            task.gene,
-            hit.internal_stops,
-        )
-
-    return _row(task.accession, task.gene, STATUS_EXTRACTED, "", hit)
+    task, panels_needed = payload
+    query_faa, genes_in_query = panels_needed.get(task.species, (None, ()))
+    return _run_genome_task(
+        task,
+        proteins_dir,
+        query_faa,
+        tuple(genes_in_query),
+        binary,
+        evalue,
+    )
 
 
 def extract(
@@ -536,8 +549,16 @@ def extract(
     threads: int = 1,
     evalue: float = DEFAULT_EVALUE,
     genomes: Iterable[Path] | None = None,
+    panel: SpeciesPanel | None = None,
+    species_references: Mapping[str, ReferenceSet] | None = None,
 ) -> pd.DataFrame:
     """Extract every target protein from every genome.
+
+    All target genes for a given species are combined into a single query FASTA
+    and aligned with one ``tblastn`` call per genome. That is not a batching
+    convenience: ``tblastn`` translates all six reading frames of the subject on
+    every invocation, so one call per gene re-translates each whole genome once
+    per gene.
 
     Args:
         genomes_dir: directory of nucleotide assemblies (one file per genome).
@@ -547,10 +568,25 @@ def extract(
             returned by ``prepare_references``.
         manifest_csv: optional path to write the manifest to.
         threads: number of concurrent tblastn processes.
+        evalue: alignment e-value threshold.
         genomes: explicit genome file list, bypassing discovery (for tests).
+        panel: a :class:`~mutation_scan.species.SpeciesPanel`. When enabled, each
+            genome is aligned against its own species' references and a gene that
+            species lacks is reported as
+            :data:`STATUS_NO_SPECIES_REFERENCE` rather than compared against
+            another species' protein.
+        species_references: staged per-species reference sets, keyed by species.
 
     Returns:
-        The manifest: one row per attempted (genome, gene) pair.
+        The manifest: one row per attempted (genome, gene) pair, whatever the
+        outcome. Every pair attempted appears, so "not mutated here" stays
+        distinguishable from "never seen here".
+
+    Note:
+        Because one call covers the whole gene panel, a failure fails every gene
+        in that genome. Those rows are recorded as ``STATUS_ERROR`` with the
+        underlying message rather than as ``STATUS_NO_HIT``, so a broken genome
+        is never mistaken for a genome that genuinely has none of the genes.
     """
     refs_dir = Path(refs_dir)
     proteins_out = Path(proteins_out)
@@ -569,21 +605,93 @@ def extract(
     if not gene_names:
         logger.warning("No target genes to extract")
 
-    # Resolve each reference once, not once per genome.
-    references = {gene: resolve_reference(refs_dir, gene) for gene in gene_names}
-    for gene, path in references.items():
-        if path is None:
-            logger.error("No prepared reference for %s in %s", gene, refs_dir)
+    # Resolve each reference once, not once per genome. Only in flat mode: in
+    # species mode the flat refs_dir holds one subdirectory per species and has
+    # no {gene}_WT.faa at its top level, so resolving against it would report
+    # every gene as missing.
+    species_mode = bool(species_references) and panel is not None and panel.enabled
+    references: dict[str, Path | None] = {}
+    if not species_mode:
+        references = {gene: resolve_reference(refs_dir, gene) for gene in gene_names}
+        for gene, path in references.items():
+            if path is None:
+                logger.error("No prepared reference for %s in %s", gene, refs_dir)
 
-    tasks = [
-        _GenomeTask(
-            accession=genome.stem,
-            genome=genome,
-            genes=tuple((gene, references[gene]) for gene in gene_names),
-        )
-        for genome in genome_files
-    ]
+    # Species-aware: each genome is aligned against the panel of its *own*
+    # species, so a protein from another species is never used as its reference.
+    # Per-species query FASTAs keep the batching -- genomes of one species still
+    # share a single panel, and still cost one tblastn call each.
+    panel_by_species: dict[str, dict[str, Path | None]] = {}
+    species_panel: SpeciesPanel | None = None
+    if species_mode:
+        assert panel is not None
+        assert species_references is not None
+        species_panel = panel
+        for key, reference_set in species_references.items():
+            panel_by_species[key] = {
+                gene: resolve_reference(reference_set.refs_dir, gene) for gene in gene_names
+            }
 
+    assert species_panel is not None or not panel_by_species
+
+    tasks: list[_GenomeTask] = []
+    for genome in genome_files:
+        accession = genome.stem
+        if panel_by_species:
+            key = species_panel.species_for(genome)  # type: ignore[union-attr]
+            if key not in panel_by_species:
+                # No species matched: we cannot say which reference is valid, so
+                # nothing is called rather than something being called wrongly.
+                tasks.append(
+                    _GenomeTask(
+                        accession=accession,
+                        genome=genome,
+                        species=key,
+                        genes=tuple((gene, None) for gene in gene_names),
+                        missing_status=STATUS_NO_SPECIES_REFERENCE,
+                        missing_detail=(
+                            f"genome matched no configured species (patterns: "
+                            f"{', '.join(p.genome_pattern for p in panel.profiles)})"  # type: ignore[union-attr]
+                        ),
+                    )
+                )
+                continue
+            species_refs = panel_by_species[key]
+            absent = [gene for gene in gene_names if species_refs.get(gene) is None]
+            if absent:
+                logger.info(
+                    "%s: species %s has no reference for %d of %d panel gene(s) (%s); "
+                    "reported unavailable rather than compared against another "
+                    "species' protein",
+                    accession,
+                    key,
+                    len(absent),
+                    len(gene_names),
+                    ", ".join(absent[:4]) + ("..." if len(absent) > 4 else ""),
+                )
+            tasks.append(
+                _GenomeTask(
+                    accession=accession,
+                    genome=genome,
+                    species=key,
+                    genes=tuple((gene, species_refs.get(gene)) for gene in gene_names),
+                    missing_status=STATUS_NO_SPECIES_REFERENCE,
+                    missing_detail=f"{key} has no reference for this gene",
+                )
+            )
+        else:
+            tasks.append(
+                _GenomeTask(
+                    accession=accession,
+                    genome=genome,
+                    species="",
+                    genes=tuple((gene, references[gene]) for gene in gene_names),
+                )
+            )
+
+    # One query FASTA per distinct panel, so genomes sharing a species share a
+    # panel and the per-genome tblastn call is unchanged.
+    panels_needed: dict[str, tuple[Path | None, tuple[str, ...]]] = {}
     rows: list[dict] = []
     if tasks:
         verify_tblastn(tblastn_binary)
@@ -598,19 +706,27 @@ def extract(
         )
 
         with tempfile.TemporaryDirectory(prefix="mutationscan-") as tmp:
-            query_faa = Path(tmp) / "panel.faa"
-            genes_in_query = _build_query_fasta(references, query_faa)
-            if len(genes_in_query) < len(gene_names):
-                logger.warning(
-                    "%d of %d gene(s) had no prepared reference and were not aligned",
-                    len(gene_names) - len(genes_in_query),
-                    len(gene_names),
+            tmp_path = Path(tmp)
+            # Flat mode keeps the historical single panel.
+            if panel_by_species:
+                for key, species_refs in panel_by_species.items():
+                    usable: dict[str, Path | None] = dict(species_refs)
+                    query_faa = tmp_path / f"panel_{_safe_name(key)}.faa"
+                    panels_needed[key] = (
+                        query_faa,
+                        tuple(_build_query_fasta(usable, query_faa)),
+                    )
+            else:
+                query_faa = tmp_path / "panel.faa"
+                panels_needed[""] = (query_faa, tuple(_build_query_fasta(references, query_faa)))
+
+            for key, (_, written) in panels_needed.items():
+                logger.info(
+                    "Query panel %s: %d gene(s) in one FASTA, so each genome's six "
+                    "reading frames are translated once instead of once per gene",
+                    f"for {key}" if key else "",
+                    len(written),
                 )
-            logger.info(
-                "Query panel: %d gene(s) in one FASTA, so each genome's six reading "
-                "frames are translated once instead of once per gene",
-                len(genes_in_query),
-            )
 
             # Threads, not processes: tblastn is an external process, so the GIL
             # is released for essentially the whole task. A process pool would add
@@ -619,14 +735,12 @@ def extract(
             batches = list(
                 parallel_map(
                     partial(
-                        _run_genome_task,
+                        _run_species_genome_task,
                         proteins_dir=proteins_out,
-                        query_faa=query_faa,
-                        genes_in_query=tuple(genes_in_query),
                         binary=tblastn_binary,
                         evalue=evalue,
                     ),
-                    tasks,
+                    [(task, panels_needed) for task in tasks],
                     threads=threads,
                     workload=WORKLOAD_THREAD,
                     total=len(tasks),

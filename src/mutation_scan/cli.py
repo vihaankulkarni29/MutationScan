@@ -27,11 +27,12 @@ from .config import Config, ConfigError, EpistasisConfig, load_config
 from .cooccurrence import cooccurrence
 from .diagnostics import diagnose_empty_extraction, diagnose_empty_variants
 from .epistasis import epistasis_networks
-from .extract import STATUS_EXTRACTED, extract
+from .extract import STATUS_EXTRACTED, discover_genomes, extract
 from .parallel import available_cores
 from .parallel_plan import describe, format_plan
 from .preflight import preflight
-from .references import prepare_references
+from .references import ReferenceSet, prepare_references, prepare_species_references
+from .species import parse_species_panel
 from .summary import write_run_summary
 from .variants import VARIANT_STATUS_CALLED, call_variants
 
@@ -137,7 +138,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--epistasis-threads",
         type=int,
         metavar="N",
-        help="parallel processes for epistasis testing (default: same as --threads)",
+        help=(
+            "accepted for compatibility, but epistasis no longer uses a process "
+            "pool: it resolves every pair's counts with one Gram matrix per "
+            "universe and runs one Fisher test per distinct 2x2 table, so this "
+            "changes nothing. Recorded in the run summary as advisory "
+            "(default: same as --threads)"
+        ),
     )
     run_parser.add_argument(
         "--config", metavar="FILE", help="YAML config to start from; flags override it"
@@ -289,20 +296,97 @@ def run(config: Config, allow_empty: bool = False) -> int:
 
     # 1. Targets come from the reference filenames -- this is the only place the
     #    gene list is decided, and it is decided by the user's own directory.
-    targets = report.targets
+    #    With a species panel, targets are the union across species: a gene only
+    #    some species have is still worth analysing there, and the pairs it
+    #    cannot serve are reported rather than silently dropped.
+    panel = parse_species_panel(config.species_settings(), config.references_dir)
+    species_references: dict[str, ReferenceSet] = {}
+    species_refs_dirs: dict[str, Path] = {}
+
+    if panel.enabled:
+        logger.info(
+            "Species-aware run: %d species, each genome compared only against its "
+            "own species' references",
+            len(panel.profiles),
+        )
+        species_references = prepare_species_references(
+            config.references_dir, config.refs_dir, panel, config.uniprot_taxid
+        )
+        if not species_references:
+            logger.error(
+                "No usable per-species reference directory. Check the 'species' "
+                "block in the config."
+            )
+            return EXIT_USAGE
+        for key, reference_set in species_references.items():
+            species_refs_dirs[key] = reference_set.refs_dir
+
+        # Targets are the union across species, never the flat directory's guess: the
+        # flat listing includes genes no species provides, and adopting it would
+        # quietly reintroduce the cross-species comparison this run exists to stop.
+        targets = sorted(
+            {gene for reference_set in species_references.values() for gene in reference_set.genes}
+        )
+        unassigned = panel.unassigned(discover_genomes(config.genomes_dir))
+        if unassigned:
+            logger.error(
+                "%d genome(s) match no configured species pattern (e.g. %s). "
+                "Add a species entry covering them, or rename them. Nothing was "
+                "compared for these, because no reference can be trusted for them.",
+                len(unassigned),
+                unassigned[0].name,
+            )
+            return EXIT_USAGE
+    else:
+        targets = report.targets
+
     logger.info("Targets (%d): %s", len(targets), ", ".join(targets))
 
-    references = prepare_references(
-        config.references_dir, config.refs_dir, targets, config.uniprot_taxid
-    )
-    if references.missing:
-        logger.error(
-            "No reference available for: %s. Supply <gene>_WT.faa in %s, or set "
-            "--taxid to fetch from UniProt.",
-            ", ".join(references.missing),
-            config.references_dir,
+    if not panel.enabled:
+        references = prepare_references(
+            config.references_dir, config.refs_dir, targets, config.uniprot_taxid
         )
-        return EXIT_USAGE
+        if references.missing:
+            logger.error(
+                "No reference available for: %s. Supply <gene>_WT.faa in %s, or set "
+                "--taxid to fetch from UniProt.",
+                ", ".join(references.missing),
+                config.references_dir,
+            )
+            return EXIT_USAGE
+    else:
+        missing = sorted(
+            {
+                gene
+                for reference_set in species_references.values()
+                for gene in reference_set.missing
+            }
+        )
+        if missing:
+            logger.error("No reference available for: %s", ", ".join(missing))
+            return EXIT_USAGE
+
+        # A merged view of every species' references, so the shared reporting and
+        # summary path has one ReferenceSet to read. Built from the union rather
+        # than any single species, so no species' protein is presented as *the*
+        # reference for the run.
+        references = ReferenceSet(refs_dir=config.refs_dir)
+        seen: set[str] = set()
+        for reference_set in species_references.values():
+            for gene in reference_set.genes:
+                if gene.lower() not in seen:
+                    seen.add(gene.lower())
+                    references.genes.append(gene)
+            references.lengths.update(reference_set.lengths)
+            for gene in reference_set.missing:
+                if gene.lower() not in seen:
+                    seen.add(gene.lower())
+                    references.missing.append(gene)
+        references.sources = {
+            gene: f"species:{species}"
+            for species, reference_set in species_references.items()
+            for gene in reference_set.genes
+        }
 
     # Every stage is timed. A run summary that records what came out but not
     # where the time went is why a quadratic blow-up in the last stage went
@@ -318,10 +402,12 @@ def run(config: Config, allow_empty: bool = False) -> int:
         config.genomes_dir,
         config.refs_dir,
         config.proteins_dir,
-        references,
+        targets if panel.enabled else references,
         manifest_csv=config.manifest_csv,
         tblastn_binary=config.tblastn_binary,
         threads=config.threads,
+        panel=panel if panel.enabled else None,
+        species_references=species_references or None,
     )
     timings["extraction"] = round(stage("extraction") - mark, 3)
     mark = stage("variants")
@@ -346,6 +432,7 @@ def run(config: Config, allow_empty: bool = False) -> int:
         mutations_csv=config.mutations_csv,
         qc_csv=config.variant_qc_csv,
         threads=config.variant_threads,
+        species_refs_dirs=species_refs_dirs or None,
     )
     timings["variants"] = round(stage("variants") - mark, 3)
     mark = stage("cooccurrence")

@@ -55,6 +55,10 @@ _DEFAULTS: dict[str, Any] = {
     # points -- this file and the `--threads` flag -- read one already-resolved
     # value, so they cannot disagree about how wide epistasis runs.
     "epistasis": {"fdr_threshold": 0.05, "min_count": 1, "threads": None},
+    # Species -> {genome_pattern, references}. Empty means one flat reference
+    # set, which is only correct for a single-species cohort. See
+    # :mod:`mutation_scan.species` for why this is not a nicety.
+    "species": {},
 }
 
 
@@ -98,6 +102,10 @@ class Config:
     variant_threads: int
     cooccurrence: CooccurrenceConfig
     epistasis: EpistasisConfig
+    #: ``(key, genome_pattern, references)`` per species, sorted by key. Stored
+    #: as a tuple of tuples rather than a dict so the frozen Config stays
+    #: hashable and round-trips exactly through :meth:`to_dict`.
+    species: tuple[tuple[str, str, str], ...] = ()
 
     # -- derived run layout -------------------------------------------------
     # One folder per run; nothing else writes outside it.
@@ -191,12 +199,13 @@ class Config:
         working directory, which is what Snakemake sets to the workdir).
         """
         raw = dict(_DEFAULTS)
-        # Both nested mappings are re-created. dict(_DEFAULTS) is a shallow copy,
-        # so updating raw["epistasis"] in place would otherwise write through to
-        # the module-level defaults and every later Config in this process would
-        # inherit them.
+        # All three nested mappings are re-created. dict(_DEFAULTS) is a shallow
+        # copy, so updating raw["epistasis"] in place would otherwise write
+        # through to the module-level defaults and every later Config in this
+        # process would inherit them.
         raw["cooccurrence"] = dict(_DEFAULTS["cooccurrence"])
         raw["epistasis"] = dict(_DEFAULTS["epistasis"])
+        raw["species"] = dict(_DEFAULTS["species"])
 
         supplied = dict(mapping or {})
         unknown = sorted(set(supplied) - set(_DEFAULTS))
@@ -276,8 +285,20 @@ class Config:
                 min_count=_positive_int(raw["epistasis"]["min_count"], "epistasis.min_count"),
                 threads=_positive_int(epistasis_threads, "epistasis.threads"),
             ),
+            species=_clean_species(supplied.pop("species", None)),
         )
         return config
+
+    def species_settings(self) -> dict[str, dict[str, str]]:
+        """The ``species`` block as the mapping the CLI and config file use.
+
+        Stored as sorted triples so the frozen dataclass stays hashable; this is
+        the view that :func:`mutation_scan.species.parse_species_panel` consumes.
+        """
+        return {
+            key: {"genome_pattern": pattern, "references": references}
+            for key, pattern, references in self.species
+        }
 
     def with_overrides(self, **overrides: Any) -> Config:
         """Return a copy with fields replaced (used by the CLI)."""
@@ -321,6 +342,7 @@ class Config:
                 "min_count": self.epistasis.min_count,
                 "threads": self.epistasis.threads,
             },
+            "species": self.species_settings(),
         }
 
 
@@ -364,6 +386,27 @@ def _positive_int(value: Any, label: str) -> int:
     if number < 1:
         raise ConfigError(f"'{label}' must be >= 1, got {number}.")
     return number
+
+
+def _clean_species(value: Any) -> tuple[tuple[str, str, str], ...]:
+    """Normalise the ``species`` block into sorted ``(key, pattern, refs)`` triples.
+
+    Validated through :func:`mutation_scan.species.parse_species_panel` so the
+    config file and the runtime panel cannot disagree about what is valid; the
+    panel's resolved paths are discarded here because they depend on
+    ``references_dir``, which is only known once paths are resolved.
+    """
+    from .species import parse_species_panel
+
+    if not value:
+        return ()
+    panel = parse_species_panel(value, references_dir=".")
+    return tuple(
+        sorted(
+            (profile.key, profile.genome_pattern, str(profile.references_dir))
+            for profile in panel.profiles
+        )
+    )
 
 
 def _clean_targets(value: Any) -> tuple[str, ...]:

@@ -22,7 +22,7 @@ import urllib.request
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from .fasta import read_protein_sequence, sanitize_protein_sequence, write_protein_record
 
@@ -38,6 +38,7 @@ __all__ = [
     "load_reference_set",
     "missing_reference_genes",
     "prepare_references",
+    "prepare_species_references",
     "resolve_reference",
 ]
 
@@ -119,6 +120,18 @@ def discover_targets(
     discovered: dict[str, str] = {}
     for path in _reference_candidates(Path(references_dir)):
         gene = gene_from_ref_stem(path.stem)
+        # A file holding several records is a bundle, not one gene's reference.
+        # People keep these alongside the per-gene files, and treating one as a
+        # target made the run abort on an unreadable "reference" it never needed.
+        try:
+            read_protein_sequence(path, fallback_id=gene)
+        except ValueError as exc:
+            logger.info(
+                "Ignoring %s as a target source: %s",
+                path.name,
+                str(exc).split(".")[0].strip(),
+            )
+            continue
         # First file wins; _reference_candidates is sorted, so this is stable.
         discovered.setdefault(gene.lower(), gene)
     return [discovered[key] for key in sorted(discovered)]
@@ -275,6 +288,65 @@ def _origin_from_description(description: str) -> str:
         if token.startswith(_ORIGIN_PREFIXES):
             return token
     return ""
+
+
+def prepare_species_references(
+    references_root: Path | str,
+    refs_dir: Path | str,
+    panel: Any,
+    uniprot_taxid: str = "",
+) -> dict[str, ReferenceSet]:
+    """Stage each species' references under ``{refs_dir}/{species}/``.
+
+    The flat single-set layout cannot express "this protein belongs to that
+    species": ``{gene}_WT.faa`` has one slot per gene name for the whole cohort.
+    Staging per species gives each one its own namespace, so a gene absent from
+    a species is absent rather than silently borrowed from another.
+
+    Returns:
+        One :class:`ReferenceSet` per species, keyed by species key. Species whose
+        directory does not exist are absent from the mapping rather than raising,
+        so the caller can report the whole picture at once.
+    """
+    refs_dir = Path(refs_dir)
+    references_root = Path(references_root)
+
+    staged: dict[str, ReferenceSet] = {}
+    for profile in panel.profiles:
+        source_dir = profile.references_dir
+        if not source_dir.is_dir():
+            logger.error(
+                "Species %s references directory does not exist: %s",
+                profile.key,
+                source_dir,
+            )
+            continue
+
+        genes = discover_targets(source_dir)
+        if not genes:
+            logger.error(
+                "Species %s has no usable reference in %s (a combined multi-record "
+                "FASTA is not a target source; supply one %s file per gene)",
+                profile.key,
+                source_dir,
+                "<gene>",
+            )
+            continue
+
+        result = prepare_references(
+            source_dir,
+            refs_dir / profile.key,
+            genes,
+            uniprot_taxid,
+        )
+        staged[profile.key] = result
+        logger.info(
+            "Species %s: %d reference(s) from %s",
+            profile.key,
+            len(result),
+            source_dir,
+        )
+    return staged
 
 
 def load_reference_set(refs_dir: Path | str) -> ReferenceSet:
