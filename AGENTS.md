@@ -29,6 +29,12 @@ serial-fallback thresholds. Not part of CI; run it after touching
 ## Key paths
 - Source: `src/mutation_scan/`
 - Tests: `tests/unit/`, `tests/integration/`
+- Notes: `notes/`. `benchmarks.md` holds measured performance and how to
+  reproduce it; `developer-notes.md` records what changed and why. Read the
+  relevant note before optimising a stage or assuming a behaviour is
+  unintended -- several obvious explanations have already been measured and
+  eliminated, and some settled decisions look arbitrary until you know the
+  measurement behind them.
 - Workflow: `Snakefile`, `config/config.yaml`
 - Workflow scripts: `workflow/scripts/0*.py`
 - Parallelism: `src/mutation_scan/parallel.py` (executor),

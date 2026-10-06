@@ -1,0 +1,115 @@
+# Benchmarks
+
+Measured performance for MutationScan, with the commands to reproduce each
+number. Every figure here was taken on the machine described below; your own
+numbers will differ, and the *shape* of the results matters more than the
+absolute values.
+
+## Test machine
+
+| | |
+|---|---|
+| CPU | 12 logical cores |
+| OS | Windows (workload uses the `spawn` start method) |
+| Python | 3.13 |
+| tblastn | 2.17.0 |
+| Cohort | 570 genomes (`Beta Barrel Project`), 15 genes |
+
+**Read run-to-run variance before trusting a single figure.** This machine
+swung by up to 2x on identical work — the same full pipeline run reported
+148.9s and 165.2s, and one repeated micro-benchmark measured `fisher_exact` at
+787µs on one pass and 2581µs on another. Where a number moved, it is reported as
+best-of-N and labelled as such. Prefer running `benchmarks/parallel_bench.py`
+yourself before drawing conclusions.
+
+## Full pipeline
+
+570 genomes, `--threads 12 --variant-threads 12`, wall clock per stage:
+
+| stage | single reference panel | with `species:` routing |
+|---|---|---|
+| preflight | 2.7s | 0.9s |
+| extraction | 87.8s | 68.5s |
+| variants | 49.1s | 11.3s |
+| co-occurrence | 0.1s | 0.1s |
+| epistasis | 9.3s | 3.4s |
+| **total** | **~149–165s** | **84.1s** |
+
+Species routing roughly halves extraction and variant calling because each genome
+is then aligned only against the genes its own species has, rather than the whole
+panel. See `config/config.yaml` for the `species:` block.
+
+Extraction is now the dominant cost at ~59% of wall clock. That floor is
+`tblastn` itself: it translates all six reading frames of the subject on every
+invocation, once per genome, regardless of how many queries it is given.
+Batching to one multi-query call per genome already removed the per-gene
+multiplier (570 calls instead of 8,550).
+
+## Executor scaling
+
+`python benchmarks/parallel_bench.py --verify-thresholds` — CPU-bound process
+workload, 4 workers, serial as the baseline:
+
+| n | serial | parallel | speedup |
+|---|---|---|---|
+| 8 | 0.20s | 0.31s | 0.66x |
+| 32 | 2.18s | 0.54s | 4.04x |
+| 64 | 4.49s | 0.65s | 6.93x |
+| 128 | 8.87s | 0.99s | 8.98x |
+| 256 | 12.53s | 2.05s | 6.10x |
+| 512 | 33.77s | 5.31s | 6.36x |
+
+All sizes produced output identical to the serial run.
+
+Measured pool start-up: **382ms** for 4 workers, ~95ms per worker. The n=8
+regression is the expected shape — below roughly the start-up cost, a pool costs
+more than it saves. Chunk sizing keeps this from stranding workers at scale, and
+the threshold check fails if that regresses.
+
+## Extraction scaling
+
+60-genome subset, 900 alignments (15 genes × 60 genomes), best of 2:
+
+| threads | time | speedup |
+|---|---|---|
+| 1 | 96.0s | 1.00x |
+| 4 | 26.0s | 3.69x |
+| 8 | 15.6s | 6.16x |
+
+Near-linear, as expected: each `tblastn` call is ~1.6s of external work and pays
+process start-up once per *genome*, not once per alignment.
+
+## Epistasis stage
+
+Before the restructure (146,070 variant pairs, one Fisher test each, in a process
+pool): **115.1s** at 12 cores, with the pool spending most of its life paying
+`spawn` import costs rather than doing work.
+
+After, best of 3, same data:
+
+| component | time |
+|---|---|
+| `mutation_severity` | 0.44s |
+| `genome_mutation_map` | 3.43s |
+| `detect_epistasis` | 5.84s |
+| **stage total** | **9.71s** |
+
+12x on the stage. The win is algorithmic, not parallel: pair denominators depend
+only on the two genes involved, which yields ~27 distinct universes rather than
+146,070, and Fisher's exact test is a pure function of the integer 2×2 table, so
+tables are memoised and tested once each — 146,070 tests become ~1,700. Output
+was verified byte-identical.
+
+## Mutation counts
+
+Not a speed metric, but the largest behavioural change measured, and the one
+most likely to invalidate a comparison against older output.
+
+| configuration | mutations |
+|---|---|
+| one reference panel across a 3-species cohort | 66,416 |
+| `species:` routing | **4,157** |
+
+Per-species mean alignment identity after routing: 97.03% / 99.74% / 99.66%.
+The single-panel figure counts interspecies sequence differences as acquired
+mutations; see the `Species` section of the README for the mechanism.
