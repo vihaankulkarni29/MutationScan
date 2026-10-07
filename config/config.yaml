@@ -56,6 +56,10 @@ species:
 min_identity_percent: 80    # identity to the reference over reference length
 min_coverage_percent: 80    # fraction of reference positions the query covers
 
+# Share of the reference protein a truncation must remove downstream of
+# its stop codon to be flagged as a functional knockout in variant_qc.csv.
+knockout_lost_percent: 20
+
 # External binary (BLAST+). Override if tblastn is not on PATH.
 tblastn_binary: tblastn
 

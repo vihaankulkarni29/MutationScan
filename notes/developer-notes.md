@@ -8,6 +8,59 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-07 — Frameshift and premature-stop calling
+
+**Problem.** The variant caller reported only substitutions, deletions and
+insertions. A premature stop codon in the extracted protein was reported as a
+substitution to `*` (e.g. `E67*`), and an out-of-frame indel was invisible:
+it either aligned as a long stretch of mismatches or, when tblastn's best HSP
+ended at the disruption, as a plain coverage drop. Neither was distinguishable
+from ordinary divergence.
+
+**Fix.** `compare_sequences` walks the alignment once and calls two events
+alongside substitutions:
+
+- A query stop codon aligned against a reference residue is a **truncation**,
+  recorded as `(position, ref_aa, fraction_lost)` -- the fraction lost is the
+  share of the reference protein downstream of the stop -- and rendered
+  `Q30*`. A stop that matches the reference's own `*` is a match, not an
+  event.
+- An **internal** indel run whose length is not a multiple of three is a
+  **frameshift**, recorded as `(position, signed_length)` and rendered
+  `fs181 (-4)`. A run touching either end of the alignment is a coverage
+  overhang, not an indel, and is never reported: when a frame shift occurs,
+  tblastn's best HSP is the clean shifted-frame fragment, so the disruption
+  lands at an alignment end and the honest signal is the coverage drop.
+
+A truncation removing more than a fifth of the reference is a **functional
+knockout** (`knockout_lost_percent`, default 20, settable in `config.yaml`
+or `--knockout-lost-percent`; the Level 4 biophysical disruption tier).
+Stops are no longer substitutions: `mutations.csv` carries
+only residue-to-residue changes, and the events surface in `variant_qc.csv`
+as three new columns (`N_Frameshifts`, `N_Truncations`,
+`N_Functional_Knockouts`) with the event text in `Detail` for called pairs,
+e.g. `truncation E67* (68.8% lost) [functional knockout]`.
+
+**Notation.** Event positions are reference coordinates, matching the
+mutation table. The signed length in a frameshift event is measured in
+**amino-acid residues** -- the unit of the alignment -- not nucleotides;
+`fs181 (-4)` means a four-residue deletion starting at reference residue
+181. Indel runs are judged independently, so a gene carrying several
+out-of-frame runs reports each of them separately (and the QC counts
+them separately), which is the compound case. A run touching either end
+of the alignment is a coverage overhang, not an indel, and is never
+reported.
+
+**Verified by.** 303 unit tests (up from 285) and 19 tblastn
+integration tests. An end-to-end run with a planted TAA stop codon reports
+`truncation Q30* (76.0% lost) [functional knockout]` at 99.2% identity; a
+planted 1-bp insertion shows the coverage signal (84%) with no spurious
+event. On the 570-genome baseline: all 66,414 non-stop mutation rows and all
+nine pre-existing QC columns are byte-identical, and the only mutation rows
+lost are the two `acrR E67*` stop substitutions (a GCA/GCF mirror pair), now
+truncation events. The cohort carries 9 truncation pairs (8 knockouts) and
+5,152 frameshift pairs, 555 of them called.
+
 ## 2026-10-05 — Species-aware reference routing (`e3d8bc0`)
 
 **Problem.** The cohort spans three species (353 *Klebsiella pneumoniae*, 163
@@ -117,21 +170,37 @@ then removal of every trace of the study the tool was built from.
 
 Ordered by how much they affect published results.
 
-1. **Frameshift / premature-stop calling.** Internal indels are counted in QC
-   (`N_Deleted_Positions`, `N_Inserted_Columns`) but never reported as events. A
-   1-bp insertion currently presents as one deleted plus one inserted residue,
-   indistinguishable from two substitutions.
-2. **Within-*E. coli* identity.** 67% of the remaining 4,157 mutations come from
+1. **Loss-of-function alleles in the epistasis stage.** The new
+   truncation and frameshift events live in variant calling and QC only.
+   Open questions before wiring them in: should `acrR:E67*` be tested
+   for epistasis against `acrB:V139F`? Should frameshifts be compared
+   only to other frameshifts, or to every variant in the same gene?
+   And should a gene with a truncation in one genome and a frameshift
+   in another collapse into one loss-of-function allele class, so the
+   three frameshift carriers in a cohort test as one functional class
+   rather than three distinct variants? Note that the biochemical
+   severity scorer never sees these events today: it runs on
+   `mutations.csv`, which carries residue-to-residue changes only, so
+   BLOSUM62/charge/hydropathy scoring on a stop or frameshift allele
+   is undefined by construction and needs a separate severity model
+   (a knockout is already flagged in QC, which is the honest answer
+   until that model exists).
+2. **Promoter / intergenic frameshifts.** The frameshift detector works
+   on protein alignments, so it captures coding-sequence events only.
+   Regulatory frameshifts (e.g. in a promoter region of `ramA`) or
+   intergenic indels affecting transcriptional attenuation are
+   invisible. Absent as a stage: blocked on reference
+   promoter/operator sequences, which this dataset does not contain --
+   it needs a new input concept (nucleotide-aware alignments) rather
+   than a flag.
+3. **Within-*E. coli* identity.** 67% of the remaining 4,157 mutations come from
    pairs below 95% identity — genuine phylogroup diversity against K-12, but
    `tolC` averaged 80.12% identity, meaning the identity gate is doing real work
    it should not have to. Per-phylogroup references would resolve this.
-3. **Incomplete per-species reference coverage.** 7 *E. coli* genes, 2
+4. **Incomplete per-species reference coverage.** 7 *E. coli* genes, 2
    *Klebsiella*, 6 *Pseudomonas*. Routing reports the gap honestly instead of
    corrupting it, but the *Klebsiella* arm is currently 2 genes rather than 9.
    Acquiring the missing references is data work, not code.
-4. **Promoter / non-coding pass.** Absent. Blocked on reference promoter/operator
-   sequences, which this dataset does not contain — it needs a new input concept
-   rather than a flag.
 5. **Reference proteome for orthology checking.** The reference directory holds
    only the 15 target proteins. A meaningful reciprocal-best-hit check would need
    a full reference-strain proteome to supply competing paralogs.

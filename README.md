@@ -194,6 +194,9 @@ uniprot_taxid: ""                   # "" disables all network access
 
 min_identity_percent: 80
 min_coverage_percent: 80
+knockout_lost_percent: 20        # truncation losing more than this
+                                 # share of the reference protein is
+                                 # flagged as a functional knockout
 
 tblastn_binary: tblastn
 threads: 4                          # concurrent tblastn processes

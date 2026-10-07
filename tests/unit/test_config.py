@@ -13,6 +13,7 @@ def test_defaults_are_usable(tmp_path):
     assert config.job_name == "default_run"
     assert config.min_identity_percent == 80.0
     assert config.min_coverage_percent == 80.0
+    assert config.knockout_lost_percent == 20.0
     assert config.cooccurrence.levels == ("gene",)
     assert config.cooccurrence.min_count == 1
     assert config.targets == ()
@@ -81,6 +82,9 @@ def test_null_values_fall_back_to_defaults(tmp_path):
         {"min_identity_percent": 101},
         {"min_identity_percent": -1},
         {"min_coverage_percent": "abc"},
+        {"knockout_lost_percent": 101},
+        {"knockout_lost_percent": -1},
+        {"knockout_lost_percent": "abc"},
         {"threads": 0},
         {"cooccurrence": {"min_count": 0}},
         {"cooccurrence": {"levels": []}},
@@ -123,7 +127,10 @@ def test_require_inputs_rejects_a_file_where_a_directory_is_expected(tmp_path):
 def test_load_config_reads_yaml(tmp_path):
     config_file = tmp_path / "config.yaml"
     config_file.write_text(
-        "job_name: yaml_run\nmin_identity_percent: 95\ncooccurrence:\n  min_count: 3\n",
+        "job_name: yaml_run\n"
+        "min_identity_percent: 95\n"
+        "knockout_lost_percent: 50\n"
+        "cooccurrence:\n  min_count: 3\n",
         encoding="utf-8",
     )
 
@@ -131,6 +138,7 @@ def test_load_config_reads_yaml(tmp_path):
 
     assert config.job_name == "yaml_run"
     assert config.min_identity_percent == 95.0
+    assert config.knockout_lost_percent == 50.0
     assert config.cooccurrence.min_count == 3
     # Unspecified nested keys keep their defaults.
     assert config.cooccurrence.levels == ("gene",)
@@ -280,6 +288,18 @@ def test_epistasis_threads_do_not_disturb_the_other_settings(tmp_path):
     tuned = _run_config(tmp_path, "--threads", "4")
     assert tuned.epistasis.fdr_threshold == 0.05
     assert tuned.epistasis.min_count == 1
+
+
+def test_knockout_lost_percent_defaults_then_flag_wins(tmp_path):
+    """The 20% knockout bar is a setting, not a constant in the code."""
+    default = _run_config(tmp_path)
+    assert default.knockout_lost_percent == 20.0
+
+    tuned = _run_config(tmp_path, "--knockout-lost-percent", "5")
+    assert tuned.knockout_lost_percent == 5.0
+
+    strict = _run_config(tmp_path, "--knockout-lost-percent", "90")
+    assert strict.knockout_lost_percent == 90.0
 
 
 # -- the README must document a config the tool accepts ----------------------

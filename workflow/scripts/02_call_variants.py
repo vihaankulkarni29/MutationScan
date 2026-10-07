@@ -17,6 +17,7 @@ call_variants(
     manifest=read_manifest(snakemake.input.manifest),
     min_identity_percent=snakemake.params.min_identity_percent,
     min_coverage_percent=snakemake.params.min_coverage_percent,
+    knockout_lost_percent=snakemake.params.knockout_lost_percent,
     mutations_csv=snakemake.output.mutations,
     qc_csv=snakemake.output.qc,
     threads=snakemake.threads,

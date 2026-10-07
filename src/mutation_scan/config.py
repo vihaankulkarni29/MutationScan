@@ -46,6 +46,10 @@ _DEFAULTS: dict[str, Any] = {
     "uniprot_taxid": "",
     "min_identity_percent": 80.0,
     "min_coverage_percent": 80.0,
+    # Share of the reference protein that a truncation must remove
+    # downstream of a stop codon to count as a functional knockout.
+    # A percent, like the gates above: 20 means 20%.
+    "knockout_lost_percent": 20.0,
     "tblastn_binary": "tblastn",
     "threads": 1,
     "variant_threads": 1,
@@ -97,6 +101,9 @@ class Config:
     uniprot_taxid: str
     min_identity_percent: float
     min_coverage_percent: float
+    #: Share of the reference protein a truncation must remove
+    #: downstream of a stop codon to be called a functional knockout.
+    knockout_lost_percent: float
     tblastn_binary: str
     threads: int
     variant_threads: int
@@ -271,6 +278,7 @@ class Config:
             uniprot_taxid=str(raw["uniprot_taxid"]).strip(),
             min_identity_percent=_percent(raw["min_identity_percent"], "min_identity_percent"),
             min_coverage_percent=_percent(raw["min_coverage_percent"], "min_coverage_percent"),
+            knockout_lost_percent=_percent(raw["knockout_lost_percent"], "knockout_lost_percent"),
             tblastn_binary=str(raw["tblastn_binary"]).strip() or "tblastn",
             threads=threads,
             variant_threads=_positive_int(raw["variant_threads"], "variant_threads"),
@@ -330,6 +338,7 @@ class Config:
             "uniprot_taxid": self.uniprot_taxid,
             "min_identity_percent": self.min_identity_percent,
             "min_coverage_percent": self.min_coverage_percent,
+            "knockout_lost_percent": self.knockout_lost_percent,
             "tblastn_binary": self.tblastn_binary,
             "threads": self.threads,
             "variant_threads": self.variant_threads,

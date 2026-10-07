@@ -57,6 +57,7 @@ rule call_variants:
     params:
         min_identity_percent=CONFIG.min_identity_percent,
         min_coverage_percent=CONFIG.min_coverage_percent,
+        knockout_lost_percent=CONFIG.knockout_lost_percent,
     threads: CONFIG.variant_threads
     script:
         "workflow/scripts/02_call_variants.py"

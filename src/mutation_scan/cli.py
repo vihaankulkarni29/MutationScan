@@ -123,6 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-coverage", type=float, metavar="PCT", help="reject a protein below this %% coverage"
     )
     run_parser.add_argument(
+        "--knockout-lost-percent",
+        type=float,
+        metavar="PCT",
+        help=(
+            "share of the reference protein a truncation must lose "
+            "downstream of a stop codon to count as a functional "
+            "knockout (default: 20%%)"
+        ),
+    )
+    run_parser.add_argument(
         "--cooccurrence-level",
         metavar="LIST",
         help="'gene', 'variant', or 'gene,variant' (default: gene)",
@@ -248,6 +258,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         uniprot_taxid=args.taxid,
         min_identity_percent=args.min_identity,
         min_coverage_percent=args.min_coverage,
+        knockout_lost_percent=args.knockout_lost_percent,
         threads=args.threads,
         variant_threads=args.variant_threads,
         cooccurrence=cooccurrence_config,
@@ -429,6 +440,7 @@ def run(config: Config, allow_empty: bool = False) -> int:
         manifest=manifest,
         min_identity_percent=config.min_identity_percent,
         min_coverage_percent=config.min_coverage_percent,
+        knockout_lost_percent=config.knockout_lost_percent,
         mutations_csv=config.mutations_csv,
         qc_csv=config.variant_qc_csv,
         threads=config.variant_threads,

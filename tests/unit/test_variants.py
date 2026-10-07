@@ -100,13 +100,165 @@ def test_terminal_truncation_lowers_coverage_not_identity_of_the_aligned_part():
     assert comparison.identity_pct == pytest.approx(50.0, abs=1.0)
 
 
-def test_internal_stop_is_reported_as_a_substitution_to_star():
+def test_internal_stop_is_reported_as_a_truncation():
+    """A stop codon is a truncation event, not a substitution to ``*``."""
     reference = "MKTIALSY"
     query = "MKT*ALSY"
 
     comparison = compare_sequences(reference, query)
 
-    assert comparison.mutations == (("I", 4, "*"),)
+    assert comparison.mutations == ()
+    assert comparison.truncations == ((4, "I", 0.5),)
+    assert comparison.functional_knockouts == (4,)
+
+
+def test_a_terminal_stop_loses_nothing_downstream():
+    reference = "MKTIALSY"
+    query = "MKTIALS*"
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.truncations == ((8, "Y", 0.0),)
+    assert comparison.functional_knockouts == ()
+
+
+def test_a_stop_that_matches_the_reference_is_no_truncation():
+    """A reference carrying its own stop cannot be truncated by a match."""
+    reference = "MKT*ALSY"
+    query = "MKT*ALSY"
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.mutations == ()
+    assert comparison.truncations == ()
+
+
+def test_a_truncation_losing_exactly_a_fifth_is_not_a_knockout():
+    reference = "MKTAQPLYWN"  # 10 residues; a stop at 8 loses exactly 20%
+    query = "MKTAQPL*WN"
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.truncations == ((8, "Y", 0.2),)
+    assert comparison.functional_knockouts == ()
+
+
+def test_a_truncation_losing_more_than_a_fifth_is_a_knockout():
+    reference = "MKTAQPLYWN"
+    query = "MKTAQ*YWN"  # stop at 7: 30% of the coding sequence is lost
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.truncations == ((7, "L", 0.3),)
+    assert comparison.functional_knockouts == (7,)
+
+
+def test_the_knockout_threshold_is_a_setting():
+    """The same truncation crosses the bar only when the bar is low enough."""
+    reference = "MKTAQPLYWN"
+    query = "MKTAQ*YWN"  # stop at 7: 30% of the coding sequence is lost
+
+    assert compare_sequences(reference, query).functional_knockouts == (7,)
+    # A stricter bar -- past 30% -- leaves it a plain truncation.
+    strict = compare_sequences(reference, query, knockout_lost_fraction=0.5)
+    assert strict.functional_knockouts == ()
+    assert strict.truncations == ((7, "L", 0.3),)
+
+
+def test_call_variants_takes_the_knockout_threshold(run_dirs):
+    refs, proteins = run_dirs
+    query = PROTEIN_ALPHA[:40] + PROTEIN_ALPHA[41:]
+    query = query[:40] + "*" + query[41:]
+    put_protein(proteins, "g1", "alphaX", query)
+
+    lenient = call_variants(
+        proteins,
+        refs,
+        manifest=manifest_for([("g1", "alphaX")]),
+        min_identity_percent=0,
+        min_coverage_percent=0,
+        knockout_lost_percent=10,
+    )
+    assert lenient.qc.iloc[0]["N_Functional_Knockouts"] == 1
+
+    strict = call_variants(
+        proteins,
+        refs,
+        manifest=manifest_for([("g1", "alphaX")]),
+        min_identity_percent=0,
+        min_coverage_percent=0,
+        knockout_lost_percent=90,
+    )
+    assert strict.qc.iloc[0]["N_Functional_Knockouts"] == 0
+    # The truncation itself is reported either way; the threshold
+    # only decides whether it counts as a knockout.
+    assert strict.qc.iloc[0]["N_Truncations"] == 1
+
+
+# A reference with no repeated residues, so the aligner can only
+# place an indel where it actually is.
+_DISTINCT = "MKTAQPLYWNDCH"
+
+
+def test_an_out_of_frame_deletion_is_a_frameshift():
+    reference = _DISTINCT
+    query = _DISTINCT[:6] + _DISTINCT[7:]  # residue 7 deleted
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.deleted_positions == 1
+    assert comparison.frameshifts == ((7, -1),)
+
+
+def test_an_in_frame_deletion_is_not_a_frameshift():
+    reference = _DISTINCT
+    query = _DISTINCT[:6] + _DISTINCT[9:]  # residues 7-9: a whole codon
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.deleted_positions == 3
+    assert comparison.frameshifts == ()
+
+
+def test_an_out_of_frame_insertion_is_a_frameshift():
+    reference = _DISTINCT
+    query = _DISTINCT[:5] + "GG" + _DISTINCT[5:]  # GG inserted after position 5
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.inserted_columns == 2
+    assert comparison.frameshifts == ((5, 2),)
+
+
+def test_an_in_frame_insertion_is_not_a_frameshift():
+    reference = _DISTINCT
+    query = _DISTINCT[:5] + "GGG" + _DISTINCT[5:]
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.inserted_columns == 3
+    assert comparison.frameshifts == ()
+
+
+def test_a_terminal_deletion_is_not_a_frameshift():
+    """A run at the alignment end is a coverage overhang, not an indel."""
+    reference = _DISTINCT
+    query = _DISTINCT[:-1]  # last residue missing
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.deleted_positions == 1
+    assert comparison.frameshifts == ()
+
+
+def test_a_terminal_insertion_is_not_a_frameshift():
+    reference = _DISTINCT
+    query = _DISTINCT + "GG"  # extends past the reference end
+
+    comparison = compare_sequences(reference, query)
+
+    assert comparison.inserted_columns == 2
+    assert comparison.frameshifts == ()
 
 
 def test_unknown_residues_do_not_abort_the_comparison():
@@ -225,6 +377,51 @@ def test_coverage_gate_rejects_a_truncated_protein(run_dirs):
     row = result.qc.iloc[0]
     assert row["Status"] == VARIANT_STATUS_LOW_COVERAGE
     assert "coverage" in row["Detail"]
+
+
+def test_called_pairs_report_frameshift_and_truncation_events(run_dirs):
+    """Events are part of the QC row for a pair that passes the gates."""
+    refs, proteins = run_dirs
+    # One residue deleted (out of frame) and a stop codon near the
+    # middle of the reference, past the knockout threshold.
+    query = PROTEIN_ALPHA[:40] + PROTEIN_ALPHA[41:]
+    query = query[:40] + "*" + query[41:]
+    put_protein(proteins, "g1", "alphaX", query)
+
+    result = call_variants(
+        proteins,
+        refs,
+        manifest=manifest_for([("g1", "alphaX")]),
+        min_identity_percent=0,
+        min_coverage_percent=0,
+    )
+
+    row = result.qc.iloc[0]
+    assert row["Status"] == VARIANT_STATUS_CALLED
+    assert row["N_Frameshifts"] == 1
+    assert row["N_Truncations"] == 1
+    assert row["N_Functional_Knockouts"] == 1
+    assert "frameshift fs" in row["Detail"]
+    assert "truncation" in row["Detail"]
+    assert "knockout" in row["Detail"]
+
+
+def test_events_are_not_substitutions_and_leave_the_mutation_table(run_dirs):
+    refs, proteins = run_dirs
+    query = PROTEIN_ALPHA[:40] + PROTEIN_ALPHA[41:]
+    query = query[:40] + "*" + query[41:]
+    put_protein(proteins, "g1", "alphaX", query)
+
+    result = call_variants(
+        proteins,
+        refs,
+        manifest=manifest_for([("g1", "alphaX")]),
+        min_identity_percent=0,
+        min_coverage_percent=0,
+    )
+
+    assert result.mutations.empty
+    assert "truncation" not in result.mutations.columns
 
 
 def test_lowering_the_gates_lets_a_borderline_pair_through(run_dirs):
