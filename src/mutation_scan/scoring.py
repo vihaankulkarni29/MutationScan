@@ -19,18 +19,29 @@ from collections.abc import Mapping
 import pandas as pd
 from Bio.Align import substitution_matrices
 
+from .variants import LOF_ALLELE
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "CHARGE",
     "HYDROPATHY",
     "VOLUME",
+    "LOF_SEVERITY",
     "compute_severity",
     "mutation_severity",
     "pair_severity",
 ]
 
 _BLOSUM62 = substitution_matrices.load("BLOSUM62")
+
+#: Loss-of-function is a categorical class, not a substitution, so it carries
+#: no per-residue biochemical delta. It scores at the top of the 0-100 scale:
+#: a knockout or frameshift destroys (or near-destroys) the protein's
+#: structure, which is the maximal functional impact the severity model can
+#: express. A pair's severity is the mean of its two variants' severity
+#: scores, so a LoF paired with anything inherits most of that impact.
+LOF_SEVERITY = 100.0
 
 CHARGE: Mapping[str, int] = {
     "A": 0,
@@ -169,6 +180,26 @@ def mutation_severity(mutations: pd.DataFrame) -> pd.DataFrame:
     records: list[dict] = []
     for accession, gene, raw in zip(accessions, genes, mutations_col, strict=True):
         mut = str(raw)
+        if mut == LOF_ALLELE:
+            # A loss-of-function allele is not a substitution, so it has no
+            # Ref_Alt residues to score with BLOSUM62. Without this guard the
+            # "L" and "F" of the literal "LoF" parse as a Leu->Phe change and
+            # emit a bogus biochemical score. Severity is categorical.
+            records.append(
+                {
+                    "blosum62_score": 0,
+                    "charge_delta": 0,
+                    "kd_delta": 0.0,
+                    "volume_delta": 0,
+                    "severity_score": LOF_SEVERITY,
+                    "Accession": accession,
+                    "Gene": gene,
+                    "Mutation": LOF_ALLELE,
+                    "Ref_AA": "",
+                    "Alt_AA": "",
+                }
+            )
+            continue
         if len(mut) < 2:
             continue
         ref_aa = mut[0]

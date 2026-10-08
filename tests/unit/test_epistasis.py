@@ -14,11 +14,13 @@ from mutation_scan.epistasis import (
     read_epistasis,
 )
 from mutation_scan.scoring import (
+    LOF_SEVERITY,
     build_severity_index,
     compute_severity,
     mutation_severity,
     pair_severity,
 )
+from mutation_scan.variants import LOF_ALLELE, VARIANT_STATUS_CALLED
 
 # -- scoring ----------------------------------------------------------------
 
@@ -527,3 +529,156 @@ class TestSeverityIndex:
         )
 
         assert index[(gene, mutation)] == pytest.approx(expected)
+
+
+# -- loss-of-function -------------------------------------------------------
+
+
+def _qc_with_event(accession: str, gene: str, status: str = "called", **events: int) -> dict:
+    row = {
+        "Accession": accession,
+        "Gene": gene,
+        "Species": "species",
+        "Status": status,
+        "Identity_pct": 95.0,
+        "Coverage_pct": 95.0,
+        "Ref_Length": 100,
+        "Query_Length": 100,
+        "N_Mutations": 0,
+        "N_Deleted_Positions": 0,
+        "N_Inserted_Columns": 0,
+        "N_Frameshifts": events.get("N_Frameshifts", 0),
+        "N_Truncations": events.get("N_Truncations", 0),
+        "N_Functional_Knockouts": events.get("N_Functional_Knockouts", 0),
+        "Detail": events.get("Detail", ""),
+    }
+    return row
+
+
+class TestLoFSeverity:
+    def test_lof_is_not_parsed_as_a_leucine_to_phenylalanine_substitution(self):
+        """The 'L' and 'F' of the literal 'LoF' must not score as a BLOSUM swap."""
+        mutations = pd.DataFrame(
+            [{"Accession": "g1", "Gene": "acrB", "Mutation": "LoF", "Position": 67}]
+        )
+        frame = mutation_severity(mutations)
+
+        row = frame.iloc[0]
+        assert row["Mutation"] == "LoF"
+        assert row["severity_score"] == LOF_SEVERITY
+        assert row["Ref_AA"] == ""
+        assert row["Alt_AA"] == ""
+
+    def test_lof_collapses_to_maximal_severity(self):
+        assert LOF_SEVERITY == 100.0
+
+    def test_pair_severity_averages_lof_with_a_partner(self):
+        sev = pd.DataFrame(
+            [
+                {"Gene": "acrB", "Mutation": "LoF", "severity_score": LOF_SEVERITY},
+                {"Gene": "acrA", "Mutation": "R50H", "severity_score": 40.0},
+            ]
+        )
+        expected = round((LOF_SEVERITY + 40.0) / 2.0, 2)
+        assert pair_severity("acrB:LoF", "acrA:R50H", sev) == expected
+
+
+class TestLoFEpistasis:
+    def test_a_lof_pair_enters_the_network(self):
+        """acrB:LoF co-occurring with acrA:R50H is tested, not skipped."""
+        mutations = pd.DataFrame(
+            [
+                {"Accession": "g1", "Gene": "acrB", "Mutation": "H596N", "Position": 596},
+                {"Accession": "g1", "Gene": "acrA", "Mutation": "R50H", "Position": 50},
+            ]
+        )
+        qc = pd.DataFrame(
+            [
+                _qc_with_event("g1", "acrB", N_Functional_Knockouts=1),
+                _qc_with_event("g1", "acrA", N_Functional_Knockouts=1),
+            ]
+        )
+        frame = detect_epistasis(mutations, qc, threads=1)
+
+        assert "acrB:LoF" in set(frame["Variant_A"]) | set(frame["Variant_B"])
+        assert (frame["N_Eligible"] > 0).all()
+
+    def test_lof_only_genome_still_sits_in_the_denominator(self):
+        """Genomes carrying only a LoF must keep the shared denominator honest."""
+        mutations = pd.DataFrame(
+            [
+                {"Accession": "g1", "Gene": "acrB", "Mutation": "H596N", "Position": 596},
+                {"Accession": "g2", "Gene": "acrB", "Mutation": "H596N", "Position": 596},
+            ]
+        )
+        qc = pd.DataFrame(
+            [
+                _qc_with_event("g1", "acrB", N_Functional_Knockouts=1),
+                _qc_with_event("g2", "acrB", status=VARIANT_STATUS_CALLED),
+            ]
+        )
+        frame = detect_epistasis(mutations, qc, threads=1)
+
+        assert not frame.empty
+        assert (frame["N_Eligible"] > 0).all()
+
+    def test_a_pair_with_lof_is_ranked(self):
+        """A LoF pair survives min_count and FDR ranking, with an honest denominator."""
+        mutations = pd.DataFrame(
+            [
+                {"Accession": "g1", "Gene": "acrB", "Mutation": "H596N", "Position": 596},
+                {"Accession": "g1", "Gene": "acrA", "Mutation": "R50H", "Position": 50},
+            ]
+        )
+        qc = pd.DataFrame(
+            [
+                _qc_with_event("g1", "acrB", N_Functional_Knockouts=1),
+                _qc_with_event("g1", "acrA", N_Functional_Knockouts=1),
+            ]
+        )
+        frame = detect_epistasis(mutations, qc, threads=1)
+
+        pair = frame[
+            (frame["Variant_A"] == "acrA:R50H") & (frame["Variant_B"] == "acrB:LoF")
+            | (frame["Variant_A"] == "acrB:LoF") & (frame["Variant_B"] == "acrA:R50H")
+        ]
+        assert len(pair) == 1
+        row = pair.iloc[0]
+        assert int(row["N_Both"]) == 1
+        assert int(row["N_Eligible"]) == 1
+        assert row["Q_value"] == row["Q_value"]  # not NaN
+        assert float(row["Q_value"]) >= 0.0
+
+    def test_lof_is_idempotent_through_epistasis_networks(self, tmp_path):
+        """A table already carrying LoF rows is not double-merged."""
+        from mutation_scan.epistasis import epistasis_networks
+        from mutation_scan.variants import with_loss_of_function
+
+        mut = pd.DataFrame(
+            [
+                {"Accession": "g1", "Gene": "acrB", "Mutation": "LoF", "Position": 67},
+                {"Accession": "g1", "Gene": "acrA", "Mutation": "R50H", "Position": 50},
+                {"Accession": "g2", "Gene": "acrA", "Mutation": "R50H", "Position": 50},
+            ]
+        )
+        qc = pd.DataFrame(
+            [
+                _qc_with_event("g1", "acrB", N_Functional_Knockouts=1),
+                _qc_with_event("g1", "acrA", status=VARIANT_STATUS_CALLED),
+                _qc_with_event("g2", "acrA", status=VARIANT_STATUS_CALLED),
+            ]
+        )
+        mut.to_csv(tmp_path / "mutations.csv", index=False)
+        pd.DataFrame(qc).to_csv(tmp_path / "qc.csv", index=False)
+
+        result = epistasis_networks(
+            tmp_path / "mutations.csv", tmp_path / "qc.csv", tmp_path / "out", threads=1
+        )
+
+        networks = read_epistasis(result["networks"])
+        assert "acrB:LoF" in set(networks["Variant_A"]) | set(networks["Variant_B"])
+
+        # Idempotency: a second merge must not add a second acrB:LoF row.
+        once = with_loss_of_function(mut, qc)
+        twice = with_loss_of_function(once, qc)
+        assert ((twice["Gene"] == "acrB") & (twice["Mutation"] == LOF_ALLELE)).sum() == 1

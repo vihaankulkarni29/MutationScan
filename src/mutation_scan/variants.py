@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "GAP",
+    "LOF_ALLELE",
     "MUTATION_COLUMNS",
     "QC_COLUMNS",
     "VARIANT_STATUS_CALLED",
@@ -798,6 +799,97 @@ def read_variant_qc(qc_csv: Path | str) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Variant QC {qc_csv} is missing column(s): {', '.join(missing)}")
     return qc
+
+
+#: The collapsed class label for a loss-of-function allele. A truncation
+#: past the knockout bar and a frameshift collapse into this one class
+#: so that a knockout in one genome and a frameshift in another test as
+#: the same functional category; the original event records ride along in
+#: the ``LoF_Events`` column so the collapsed class can be stratified by
+#: event type later (see :func:`loss_of_function_alleles`).
+LOF_ALLELE = "LoF"
+
+
+def loss_of_function_alleles(qc: pd.DataFrame | None) -> pd.DataFrame:
+    """Collapse each (genome, gene)'s loss-of-function events into one allele.
+
+    A called pair contributes one LoF allele when it carries a functional
+    knockout (a truncation removing more than the knockout threshold of the
+    reference) or a frameshift. A truncation below the knockout bar does not
+    qualify: most of the protein is intact, and whether such a stop is
+    tolerated is a case-by-case call the framework should not make silently.
+    Pairs rejected by a gate are not evaluated, so their events never qualify.
+
+    The class is deliberately collapsed -- one ``LoF`` allele per
+    (genome, gene), whatever the event mix -- because a frameshift and a
+    nonsense mutation usually share a biological endpoint (a severely
+    truncated or degraded protein), and separate labels would spend the
+    statistical power the collapse buys. The original event records ride
+    along in ``LoF_Events`` for exactly the stratification the collapse
+    makes possible.
+
+    Args:
+        qc: the variant QC table. A table from before the event columns
+            existed (or without them) yields no alleles.
+
+    Returns:
+        A frame with ``Accession``, ``Gene``, ``Mutation`` (always ``LoF``)
+        and ``LoF_Events``, preserving QC order.
+    """
+    columns = ["Accession", "Gene", "Mutation", "LoF_Events"]
+    if qc is None or qc.empty:
+        return pd.DataFrame(columns=columns)
+    if {"Accession", "Gene", "Status"} - set(qc.columns):
+        return pd.DataFrame(columns=columns)
+
+    def _count(name: str) -> pd.Series:
+        if name not in qc.columns:
+            return pd.Series(0.0, index=qc.index)
+        return pd.to_numeric(qc[name], errors="coerce").fillna(0.0)
+
+    called = qc[qc["Status"].astype(str) == VARIANT_STATUS_CALLED]
+    carries = (_count("N_Functional_Knockouts").loc[called.index] > 0) | (
+        _count("N_Frameshifts").loc[called.index] > 0
+    )
+    carriers = called[carries]
+    if carriers.empty:
+        return pd.DataFrame(columns=columns)
+
+    if "Detail" in carriers.columns:
+        details = carriers["Detail"].astype("string").fillna("")
+    else:
+        details = pd.Series("", index=carriers.index, dtype="string")
+
+    rows = [
+        {
+            "Accession": str(accession),
+            "Gene": str(gene),
+            "Mutation": LOF_ALLELE,
+            "LoF_Events": str(detail) if detail else "",
+        }
+        for accession, gene, detail in zip(
+            carriers["Accession"], carriers["Gene"], details, strict=True
+        )
+    ]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def with_loss_of_function(mutations: pd.DataFrame, qc: pd.DataFrame | None) -> pd.DataFrame:
+    """The substitution stream plus one collapsed LoF allele per carrier.
+
+    Downstream stages -- co-occurrence, the genome map, epistasis -- answer
+    "is this gene mutated in this genome?", so the LoF class must ride in
+    the same stream as substitutions or the stages disagree about the same
+    genome. Merging is idempotent: a frame that already carries ``LoF``
+    rows is returned unchanged, so a stage cannot double-count its own
+    output.
+    """
+    alleles = loss_of_function_alleles(qc)
+    if alleles.empty:
+        return mutations
+    if not mutations.empty and (mutations["Mutation"].astype(str) == LOF_ALLELE).any():
+        return mutations
+    return pd.concat([mutations, alleles], ignore_index=True)
 
 
 def read_mutations(mutations_csv: Path | str) -> pd.DataFrame:

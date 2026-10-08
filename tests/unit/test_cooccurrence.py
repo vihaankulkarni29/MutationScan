@@ -366,3 +366,90 @@ def test_no_inference_columns_are_emitted():
 
     forbidden = ("p_value", "pvalue", "odds", "enrich", "severity", "score", "significan")
     assert not [column for column in columns if any(word in column.lower() for word in forbidden)]
+
+
+# -- loss-of-function --------------------------------------------------------
+
+
+def _qc_event_row(accession: str, gene: str, status: str, **events: int) -> dict:
+    row = {
+        "Accession": accession,
+        "Gene": gene,
+        "Species": "species",
+        "Status": status,
+        "Identity_pct": 95.0,
+        "Coverage_pct": 95.0,
+        "Ref_Length": 100,
+        "Query_Length": 100,
+        "N_Mutations": 0,
+        "N_Deleted_Positions": 0,
+        "N_Inserted_Columns": 0,
+        "N_Frameshifts": events.get("N_Frameshifts", 0),
+        "N_Truncations": events.get("N_Truncations", 0),
+        "N_Functional_Knockouts": events.get("N_Functional_Knockouts", 0),
+        "Detail": events.get("Detail", ""),
+    }
+    return row
+
+
+def _qc_with_events(rows):
+    return pd.DataFrame(rows)
+
+
+def test_a_lof_carrier_counts_as_mutated_in_the_gene_denominator():
+    """A genome with no substitutions but a knockout still mutates the gene."""
+    mutations = mutations_frame([("g1", "alphaX", "A1V")])
+    qc = _qc_with_events(
+        [
+            _qc_event_row("g1", "alphaX", VARIANT_STATUS_CALLED),
+            _qc_event_row("g2", "alphaX", VARIANT_STATUS_CALLED),
+            _qc_event_row("g1", "betaQ", VARIANT_STATUS_CALLED),
+            _qc_event_row("g2", "betaQ", VARIANT_STATUS_CALLED, N_Functional_Knockouts=1),
+        ]
+    )
+
+    result = cooccurrence(mutations, qc, levels=("gene", "variant"), min_count=0)
+    assert result.gene_totals["alphaX"] == 1  # g1 via substitution
+    assert result.gene_totals["betaQ"] == 1  # g2 via LoF
+    assert result.variants is not None
+    variant_labels = {str(v) for v in result.variants["Variant_A"]} | {
+        str(v) for v in result.variants["Variant_B"]
+    }
+    assert "betaQ:LoF" in variant_labels
+
+
+def test_lof_carrier_joined_with_a_substitution_in_the_other_gene():
+    """Co-occurrence fraction counts the LoF genome as a real carrier."""
+    mutations = mutations_frame([("g1", "alphaX", "A1V"), ("g2", "alphaX", "A1V")])
+    qc = _qc_with_events(
+        [
+            _qc_event_row("g1", "alphaX", VARIANT_STATUS_CALLED),
+            _qc_event_row("g2", "alphaX", VARIANT_STATUS_CALLED),
+            _qc_event_row("g1", "betaQ", VARIANT_STATUS_CALLED),
+            _qc_event_row("g2", "betaQ", VARIANT_STATUS_CALLED, N_Frameshifts=1),
+        ]
+    )
+
+    result = cooccurrence(mutations, qc, levels=("gene", "variant"))
+    row = result.genes.iloc[0]
+    assert (row["Gene_A"], row["Gene_B"]) == ("alphaX", "betaQ")
+    assert int(row["N_A"]) == 2
+    assert int(row["N_B"]) == 1  # the LoF genome
+    assert int(row["N_Both"]) == 1  # g2 carries both alphaX:A1V and betaQ:LoF
+    assert float(row["Frac_B_given_A"]) == 0.5
+
+
+def test_rejected_lof_pair_does_not_count():
+    mutations = mutations_frame([])
+    qc = _qc_with_events(
+        [
+            _qc_event_row("g1", "alphaX", "low_coverage", N_Functional_Knockouts=1),
+            _qc_event_row("g2", "alphaX", VARIANT_STATUS_CALLED),
+            _qc_event_row("g1", "betaQ", VARIANT_STATUS_CALLED),
+            _qc_event_row("g2", "betaQ", VARIANT_STATUS_CALLED),
+        ]
+    )
+
+    result = cooccurrence(mutations, qc, min_count=0)
+    assert result.gene_totals["alphaX"] == 0  # g1's LoF was rejected, not counted
+    assert result.gene_totals["betaQ"] == 0

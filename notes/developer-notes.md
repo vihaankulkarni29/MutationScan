@@ -61,6 +61,80 @@ lost are the two `acrR E67*` stop substitutions (a GCA/GCF mirror pair), now
 truncation events. The cohort carries 9 truncation pairs (8 knockouts) and
 5,152 frameshift pairs, 555 of them called.
 
+## 2026-10-07 — Loss-of-function alleles in the epistasis stage (LoEPI)
+
+**Problem.** The frameshift, truncation and functional-knockout events live in
+`variant_qc.csv` only. Co-occurrence, the genome map and epistasis still saw
+substitutions alone, so a knockout such as `acrR E67*` was invisible to every
+stage after variant calling: `acrR:LoF` never entered a Fisher table against
+`acrB:V139F`, and the severity scorer on `mutations.csv` could never see it.
+
+**Change.** Loss-of-function is a collapsed allele class that rides in the same
+stream as substitutions, so the downstream stages answer "is this gene mutated
+in this genome?" with one consistent denominator.
+
+- `variants.loss_of_function_alleles(qc)` emits one `LoF` row per called
+  `(genome, gene)` carrying a functional knockout or a frameshift; the original
+  event text rides along in `LoF_Events` so the collapsed class can be
+  stratified by event type later. Non-knockout truncations (the protein is
+  mostly intact) stay in QC only and do **not** cross the LoF bar.
+- `variants.with_loss_of_function(mutations, qc)` merges that stream in and is
+  idempotent: a frame that already carries `LoF` rows is returned unchanged, so
+  a stage cannot double-count its own output.
+- `cooccurrence`, `genome_mutation_map` and `detect_epistasis` each merge once on
+  entry; `epistasis_networks` merges for `mutation_severity` and lets the other
+  two no-op on the already-merged frame. `GENOME_MAP_COLUMNS` gained `N_LoF`.
+- `scoring`: `compute_severity`/`mutation_severity` now guard on
+  `Mutation == "LoF"` before parsing the residue string. Without the guard the
+  literal "LoF" parses as L→F and emits a bogus BLOSUM62 score; a
+  loss-of-function allele is not a substitution, so it is scored categorically
+  at `LOF_SEVERITY = 100.0` (maximal functional impact) with empty
+  `Ref_AA`/`Alt_AA` and zeroed biochemical deltas. `pair_severity` then averages
+  that 100 with the partner's score.
+
+**Design decisions (agreed with review).** Frameshifts and nonsense/truncations
+collapse into a single `LoF` class for statistical power; the event-type records
+are retained in `LoF_Events` for the stratification escape hatch. A gene with a
+truncation in one genome and a frameshift in another tests as one functional
+class.
+
+**Caveat — frameshift composition.** The detector runs on the *protein*
+alignment, so a flagged "frameshift" is a residue gap run whose length is not a
+multiple of three. On this cohort that turns out to be **in-frame nucleotide
+indels** (a residue gap of L is 3L nucleotides, always in-frame): 732 flagged
+events are all lengths {1, 2, 4, 8, 64} residues (483x1, 194x4, 27x2, 24x64),
+none a multiple of three. True nucleotide frameshifts (1–2 nt) scramble the
+translation and surface instead as alignment breaks → coverage drops,
+which the detector treats as coverage overhangs and never tags as frameshifts.
+So the `LoF` class here leans on (mostly short) in-frame deletions plus rare
+true premature-stop knockouts; `LoF_Events` preserves the distinction so the
+collapsed signal can be re-split if it proves noisy.
+
+**Verified by.** `tests/unit/test_variants.py` (LoF extraction, knockout bar,
+rejected-pair exile, idempotence, end-to-end through `call_variants`),
+`tests/unit/test_epistasis.py` (LoF in the genome map and pair tables, severity
+guard, idempotent merge), `tests/unit/test_cooccurrence.py` (LoF carriers count
+as mutated, rejected LoF excluded). 353 unit + 19 integration tests green; ruff
+and mypy clean.
+
+**Regression on the 570-genome baseline** (re-run `call_variants` on the cohort
+proteins + references; no `tblastn` required for this stage):
+
+- Substitution stream byte-identical (66,414 rows) to the committed variant
+  layer; the only rows that layer moves to events are the two `acrR E67*` stop
+  substitutions.
+- 557 called pairs carry a `LoF` allele (555 frameshifts + 2 functional
+  knockouts; no pair carries both). 484 genomes carry ≥1; 557 severity rows
+  emitted at `severity_score = 100.0`.
+- 960 `gene:LoF` pairs enter the epistasis network; every one co-occurs
+  (`N_Both > 0`).
+- **Non-regression:** the 49,052 pre-existing (non-LoF) variant pairs keep
+  byte-identical `N_Both`/`N_A`/`N_B`/`N_Eligible`/`Odds_Ratio`/`P_value`;
+  gene-level co-occurrence is byte-identical (0 genes gain a carrier set);
+  non-carrier genome-map rows are identical. The only drift on common pairs is
+  `Q_value` (max 0.0019, the FDR family grows by 960 tests) with **0**
+  significance-class (`Sign`) flips.
+
 ## 2026-10-05 — Species-aware reference routing (`e3d8bc0`)
 
 **Problem.** The cohort spans three species (353 *Klebsiella pneumoniae*, 163
@@ -170,21 +244,7 @@ then removal of every trace of the study the tool was built from.
 
 Ordered by how much they affect published results.
 
-1. **Loss-of-function alleles in the epistasis stage.** The new
-   truncation and frameshift events live in variant calling and QC only.
-   Open questions before wiring them in: should `acrR:E67*` be tested
-   for epistasis against `acrB:V139F`? Should frameshifts be compared
-   only to other frameshifts, or to every variant in the same gene?
-   And should a gene with a truncation in one genome and a frameshift
-   in another collapse into one loss-of-function allele class, so the
-   three frameshift carriers in a cohort test as one functional class
-   rather than three distinct variants? Note that the biochemical
-   severity scorer never sees these events today: it runs on
-   `mutations.csv`, which carries residue-to-residue changes only, so
-   BLOSUM62/charge/hydropathy scoring on a stop or frameshift allele
-   is undefined by construction and needs a separate severity model
-   (a knockout is already flagged in QC, which is the honest answer
-   until that model exists).
+1. **Loss-of-function alleles in the epistasis stage.** — resolved, see the "2026-10-07 — Loss-of-function alleles in the epistasis stage" entry above. The three open questions were answered in design review: `acrR:E67*` tests against the same gene-pair space as `acrB:V139F`; frameshifts + nonsense collapse into one `LoF` class with the event type retained in `LoF_Events` for stratification; a truncation in one genome and a frameshift in another are one functional class.
 2. **Promoter / intergenic frameshifts.** The frameshift detector works
    on protein alignments, so it captures coding-sequence events only.
    Regulatory frameshifts (e.g. in a promoter region of `ramA`) or

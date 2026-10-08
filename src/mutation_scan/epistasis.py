@@ -23,6 +23,7 @@ import pandas as pd
 from scipy.stats import fisher_exact
 
 from .scoring import build_severity_index, pair_severity
+from .variants import LOF_ALLELE, with_loss_of_function
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ GENOME_MAP_COLUMNS = (
     "N_Mutated_Genes",
     "Mutated_Genes",
     "N_Mutations",
+    "N_LoF",
     "Mutation_Map",
 )
 
@@ -88,6 +90,7 @@ def genome_mutation_map(
     Returns:
         One-row-per-genome DataFrame.
     """
+    mutations = with_loss_of_function(mutations, qc)
     if mutations.empty:
         return pd.DataFrame(columns=list(GENOME_MAP_COLUMNS))
 
@@ -130,6 +133,7 @@ def genome_mutation_map(
                 "N_Mutated_Genes": len(genes),
                 "Mutated_Genes": ";".join(genes),
                 "N_Mutations": len(filtered),
+                "N_LoF": int((filtered["Mutation"].astype(str) == LOF_ALLELE).sum()),
                 "Mutation_Map": " | ".join(mutation_list),
             }
         )
@@ -369,6 +373,13 @@ def detect_epistasis(
         missing = sorted(required - set(mutations.columns))
         raise ValueError(f"mutations table missing column(s): {', '.join(missing)}")
 
+    # LoF alleles collapse into the substitution stream here so a direct
+    # caller of detect_epistasis (one passing raw mutations + a QC table
+    # that carries event columns) still sees LoF pairs. epistasis_networks
+    # merges once for mutation_severity; with_loss_of_function is idempotent,
+    # so the merge here is a no-op when the frame already carries LoF rows.
+    mutations = with_loss_of_function(mutations, qc)
+
     if mutations.empty or len(mutations) < 2:
         return pd.DataFrame(columns=list(EPISTASIS_COLUMNS))
 
@@ -508,7 +519,12 @@ def epistasis_networks(
     mutations = pd.read_csv(mutations_csv)
     qc = pd.read_csv(qc_csv) if qc_csv and Path(qc_csv).is_file() else pd.DataFrame()
 
-    logger.info("Loaded %d mutations for epistasis analysis", len(mutations))
+    mutations = with_loss_of_function(mutations, qc)
+    logger.info(
+        "Loaded %d mutations for epistasis analysis (%d loss-of-function)",
+        len(mutations),
+        int((mutations["Mutation"].astype(str) == LOF_ALLELE).sum()) if not mutations.empty else 0,
+    )
 
     genome_map = genome_mutation_map(mutations, qc)
 

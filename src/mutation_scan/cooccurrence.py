@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .variants import VARIANT_STATUS_CALLED
+from .variants import VARIANT_STATUS_CALLED, with_loss_of_function
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +290,7 @@ def cooccurrence(
         mutations = pd.DataFrame(columns=list(required))
 
     mutations = mutations.astype({"Accession": str, "Gene": str, "Mutation": str})
+    mutations = with_loss_of_function(mutations, qc)
 
     eligible = eligibility_from_qc(qc) if qc is not None else {}
     if not eligible:
