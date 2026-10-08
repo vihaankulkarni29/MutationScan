@@ -8,6 +8,30 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-08 — Summary provenance for loss-of-function-only genomes
+
+**Problem.** `build_run_summary` recorded `genomes_with_any_mutation` from
+`mutations.csv` alone. A genome whose only called allele is a LoF knockout or
+frameshift was counted in the co-occurrence genome map and the epistasis
+network (both LoF-aware from `a447db3`) but dropped from the run summary's
+mutated-genome count, so the provenance record under-reported mutated genomes
+and offered no LoF fields at all.
+
+**Fix.** `summary.build_run_summary` now merges LoF alleles through the same
+`variants.with_loss_of_function(mutations, qc)` entry point the downstream
+stages already use, so `genomes_with_any_mutation` sees LoF-only genomes too.
+The merge is a no-op on a `None` mutations stream (a dry/partial run) and on a
+QC lacking the event columns (an older run), so pre-existing summaries are
+unchanged. Three fields were touched: `loss_of_function_alleles`,
+`genomes_with_loss_of_function`, and the now-LoF-augmented
+`genomes_with_any_mutation`. `mutations` itself stays substitution-only
+(`int(len(mutations))`) so the two counts remain independently auditable.
+
+**Verified by.** `tests/unit/test_summary.py` (5 cases: LoF-only genome counted,
+older QC without event columns is a no-op, empty substitutions + LoF carrier,
+`None` mutations reports zero, pure substitution run unaffected). `mypy` and
+`ruff` clean. All 328 unit + 19 integration tests pass.
+
 ## 2026-10-07 — Frameshift and premature-stop calling
 
 **Problem.** The variant caller reported only substitutions, deletions and
