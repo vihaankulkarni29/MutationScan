@@ -93,3 +93,8 @@ epistasis:
   # counts with one Gram matrix per gene-universe and runs one Fisher test per
   # *distinct* table, so it no longer uses a process pool. On the 570-genome
   # cohort that took it from 146,070 tests to ~1,700 and removed the pool.
+
+# Lineage manifest: optional TSV/CSV mapping Accession -> Lineage (ST, phylogroup).
+# When provided, epistatic pairs are annotated with their lineage distribution
+# and classified as Clonal (single lineage) or Convergent (multiple lineages).
+# lineage_manifest: "data/lineage_manifest.tsv"

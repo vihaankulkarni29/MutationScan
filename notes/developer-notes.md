@@ -8,6 +8,38 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-09 — Lineage tagging & dN/dS selection pressure
+
+**Problem.** The reviewer warned that population structure can confound epistasis:
+if a pandemic clone (e.g. ST131) dominates the cohort, shared mutations by
+descent inflate Fisher-exact p-values. A companion requirement was evidence
+of positive selection on mutated genes (dN/dS > 1).
+
+**Fix (lineage).** A new `lineage_manifest` config option (TSV/CSV mapping
+Accession → Lineage/ST) wires into the pipeline:
+- Genome mutation map gains a `Lineage` column.
+- Epistasis networks gain `Lineage_Distribution` (e.g. `ST131:3,ST11:2`)
+  and `Clonality` columns (`Clonal` = single lineage, `Convergent` =
+  ≥2 lineages). Convergent pairs are the gold standard for true
+  biological epistasis.
+
+**Fix (dN/dS).** A new `evolution` module computes per-gene dN/dS:
+- Extracts actual CDS from genome FASTA using the tblastn coordinates now
+  recorded in the extraction manifest (`Nucleotide_Start`, `Nucleotide_End`).
+- Back-translates the reference protein with the standard genetic code to
+  obtain a reference CDS.
+- Compares codon-by-codon to count synonymous (dS) and non-synonymous (dN)
+  nucleotide differences.
+- Outputs `dn_ds.csv` with per-gene `N_Sites`, `S_Sites`, `dN`, `dS`,
+  `dN_dS`, `N_Substitutions`, `N_Genomes_Evaluated`. Genes under positive
+  selection (dN/dS > 1) appear first.
+
+**Verified by.** `tests/unit/test_lineage.py` (14 cases: manifest parsing,
+distribution counting, clonal/convergent classification, genome map and
+epistasis annotation), `tests/unit/test_evolution.py` (14 cases: genetic
+code completeness, codon site counting, back-translation, empty/edge cases).
+All 375 tests pass (356 unit + 19 integration). `ruff` + `mypy` clean.
+
 ## 2026-10-08 — Summary provenance for loss-of-function-only genomes
 
 **Problem.** `build_run_summary` recorded `genomes_with_any_mutation` from

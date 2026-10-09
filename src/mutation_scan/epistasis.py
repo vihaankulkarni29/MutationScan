@@ -498,12 +498,14 @@ def epistasis_networks(
     fdr_threshold: float = 0.05,
     min_count: int = 1,
     threads: int = 1,
+    lineage_manifest: Path | str | None = None,
 ) -> dict:
     """Run the full epistasis pipeline.
 
     1. Build a per-genome mutation map.
     2. Compute per-mutation biochemical severity.
     3. Detect epistatic pairs and rank them.
+    4. *(optional)* annotate with lineage information.
 
     Args:
         mutations_csv: path to ``mutations.csv``.
@@ -512,9 +514,13 @@ def epistasis_networks(
         fdr_threshold: Benjamini-Hochberg significance threshold.
         min_count: minimum ``N_Both`` to retain a pair.
         threads: parallel threads for pairwise tests.
+        lineage_manifest: optional path to a TSV/CSV mapping Accession ->
+            Lineage. When provided, the genome map gains a ``Lineage``
+            column and the networks table gains ``Lineage_Distribution``
+            and ``Clonality`` columns.
 
     Returns:
-        Dictionary with paths to the three output files.
+        Dictionary with paths to the output files.
     """
     mutations = pd.read_csv(mutations_csv)
     qc = pd.read_csv(qc_csv) if qc_csv and Path(qc_csv).is_file() else pd.DataFrame()
@@ -532,6 +538,22 @@ def epistasis_networks(
 
     severity = mutation_severity(mutations)
     networks = detect_epistasis(mutations, qc, severity, fdr_threshold, min_count, threads)
+
+    if lineage_manifest:
+        from .lineage import (
+            annotate_epistasis,
+            annotate_genome_map,
+            read_lineage_manifest,
+        )
+
+        lineage_map = read_lineage_manifest(lineage_manifest)
+        if lineage_map:
+            genome_map = annotate_genome_map(genome_map, lineage_map)
+            networks = annotate_epistasis(networks, mutations, lineage_map)
+            logger.info(
+                "Annotated epistasis outputs with lineage data (%d genomes mapped)",
+                len(lineage_map),
+            )
 
     output_dir = Path(output_dir) if output_dir else Path(".")
     output_dir.mkdir(parents=True, exist_ok=True)

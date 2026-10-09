@@ -160,6 +160,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--config", metavar="FILE", help="YAML config to start from; flags override it"
     )
     run_parser.add_argument(
+        "--lineage-manifest",
+        metavar="FILE",
+        help=(
+            "TSV/CSV mapping Accession -> Lineage (e.g. ST, phylogroup). "
+            "Enables clonal vs. convergent classification of epistatic pairs."
+        ),
+    )
+    run_parser.add_argument(
         "--allow-empty",
         action="store_true",
         help=(
@@ -266,6 +274,11 @@ def _config_from_args(args: argparse.Namespace) -> Config:
             fdr_threshold=config.epistasis.fdr_threshold,
             min_count=config.epistasis.min_count,
             threads=epistasis_threads,
+        ),
+        lineage_manifest=(
+            Path(args.lineage_manifest).expanduser().resolve()
+            if getattr(args, "lineage_manifest", None)
+            else None
         ),
     )
 
@@ -487,8 +500,27 @@ def run(config: Config, allow_empty: bool = False) -> int:
         fdr_threshold=config.epistasis.fdr_threshold,
         min_count=config.epistasis.min_count,
         threads=config.epistasis.threads,
+        lineage_manifest=config.lineage_manifest,
     )
     timings["epistasis"] = round(stage("epistasis") - mark, 3)
+    mark = stage("dn_ds")
+
+    # 6. dN/dS -- per-gene selection pressure from nucleotide CDS.
+    from .evolution import compute_dn_ds
+
+    dn_ds_frame = compute_dn_ds(
+        mutations=variants.mutations,
+        manifest=manifest,
+        refs_dir=config.refs_dir,
+        genomes_dir=config.genomes_dir,
+        genes=list(config.targets) if config.targets else None,
+    )
+    if dn_ds_frame is not None and not dn_ds_frame.empty:
+        dn_ds_path = config.dn_ds_csv
+        dn_ds_path.parent.mkdir(parents=True, exist_ok=True)
+        dn_ds_frame.to_csv(dn_ds_path, index=False)
+        logger.info("Wrote dN/dS: %s (%d genes)", dn_ds_path, len(dn_ds_frame))
+    timings["dn_ds"] = round(stage("dn_ds") - mark, 3)
     timings["total"] = round(stage("done"), 3)
 
     write_run_summary(

@@ -63,6 +63,11 @@ _DEFAULTS: dict[str, Any] = {
     # set, which is only correct for a single-species cohort. See
     # :mod:`mutation_scan.species` for why this is not a nicety.
     "species": {},
+    # Optional path to a TSV/CSV mapping Accession -> Lineage (e.g. ST,
+    # phylogroup). Enables population-structure control: epistatic pairs are
+    # annotated with their lineage distribution and classified as Clonal
+    # (single lineage) or Convergent (multiple lineages).
+    "lineage_manifest": "",
 }
 
 
@@ -113,6 +118,7 @@ class Config:
     #: as a tuple of tuples rather than a dict so the frozen Config stays
     #: hashable and round-trips exactly through :meth:`to_dict`.
     species: tuple[tuple[str, str, str], ...] = ()
+    lineage_manifest: Path | None = None
 
     # -- derived run layout -------------------------------------------------
     # One folder per run; nothing else writes outside it.
@@ -175,6 +181,10 @@ class Config:
     def run_summary_json(self) -> Path:
         return self.run_dir / "run_summary.json"
 
+    @property
+    def dn_ds_csv(self) -> Path:
+        return self.run_dir / "dn_ds.csv"
+
     def outputs(self) -> tuple[Path, ...]:
         """Files a complete run is expected to produce."""
         paths = [
@@ -187,6 +197,7 @@ class Config:
             self.mutation_severity_csv,
             self.epistasis_networks_csv,
             self.run_summary_json,
+            self.dn_ds_csv,
         ]
         if "variant" in self.cooccurrence.levels:
             paths.append(self.cooccurrence_variants_csv)
@@ -249,6 +260,16 @@ class Config:
 
         root = Path(base_dir) if base_dir is not None else Path.cwd()
 
+        def _resolve_optional_path(key: str) -> Path | None:
+            raw_val = supplied.get(key)
+            if raw_val is None:
+                return None
+            value = str(raw_val).strip()
+            if not value:
+                return None
+            path = Path(value).expanduser()
+            return path if path.is_absolute() else (root / path)
+
         def _resolve(key: str) -> Path:
             value = str(raw[key]).strip()
             if not value:
@@ -294,6 +315,7 @@ class Config:
                 threads=_positive_int(epistasis_threads, "epistasis.threads"),
             ),
             species=_clean_species(supplied.pop("species", None)),
+            lineage_manifest=_resolve_optional_path("lineage_manifest"),
         )
         return config
 
@@ -352,6 +374,7 @@ class Config:
                 "threads": self.epistasis.threads,
             },
             "species": self.species_settings(),
+            "lineage_manifest": str(self.lineage_manifest) if self.lineage_manifest else None,
         }
 
 

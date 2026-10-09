@@ -91,6 +91,8 @@ MANIFEST_COLUMNS = (
     "Extracted_Length",
     "Internal_Stops",
     "Contig",
+    "Nucleotide_Start",
+    "Nucleotide_End",
     "Detail",
 )
 
@@ -172,6 +174,12 @@ class TblastnHit:
     ref_coverage_pct: float
     contig: str
     internal_stops: int
+    #: Nucleotide coordinates of the HSP on the subject contig (1-based,
+    #: inclusive). ``send`` may be less than ``sstart`` on the reverse strand.
+    #: Captured so downstream stages (e.g. dN/dS) can extract the actual CDS
+    #: rather than relying on a back-translation approximation.
+    nucleotide_start: int | None = None
+    nucleotide_end: int | None = None
 
 
 def _parse_row(line: str) -> tuple[str, float, TblastnHit | None]:
@@ -191,6 +199,7 @@ def _parse_row(line: str) -> tuple[str, float, TblastnHit | None]:
     pident = float(fields[2])
     aln_length = int(fields[3])
     qstart, qend = int(fields[6]), int(fields[7])
+    sstart, send = int(fields[8]), int(fields[9])
     ref_length = int(fields[12])
     aligned_seq = fields[14]
     bitscore = float(fields[11])
@@ -213,6 +222,8 @@ def _parse_row(line: str) -> tuple[str, float, TblastnHit | None]:
             ref_coverage_pct=round(coverage, 2),
             contig=contig,
             internal_stops=sequence.count("*"),
+            nucleotide_start=sstart,
+            nucleotide_end=send,
         ),
     )
 
@@ -506,6 +517,8 @@ def _row(
         "Extracted_Length": len(hit.sequence) if hit else pd.NA,
         "Internal_Stops": hit.internal_stops if hit else pd.NA,
         "Contig": hit.contig if hit else "",
+        "Nucleotide_Start": hit.nucleotide_start if hit else pd.NA,
+        "Nucleotide_End": hit.nucleotide_end if hit else pd.NA,
         "Detail": detail,
     }
 
