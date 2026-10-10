@@ -8,6 +8,45 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-10 — Fragmentation stress test: 40% sensitivity loss at 2 contigs/gene
+
+**Problem.** Real assemblies are fragmented; a gene may span multiple
+contigs. MutationScan uses tblastn directly on nucleotide FASTA with no
+GFF3 annotation to tell it which contig a gene lives on. The question:
+how much sensitivity is lost when a gene is split across contigs?
+
+**Probe.** A new `benchmarks/fragmentation.py`:
+- Generates a synthetic cohort with exact ground truth (same as the
+  AMR benchmark).
+- Re-writes each genome's CDS at increasing fragmentation levels
+  (1, 2, 4, 8 contigs per gene) by cutting at random internal points
+  and joining with N gaps.
+- Runs MutationScan on each fragmented cohort and scores against the
+  original ground truth.
+
+**Finding.** 2 genomes × 5 genes, seed 7:
+- 1 contig/gene (baseline): sensitivity = 1.000
+- 2 contigs/gene: **sensitivity = 0.600** (40% drop)
+- Precision remains 1.000 at all levels (no false positives).
+
+**Mechanism.** tblastn reports one best HSP per query. When a gene is
+split across contigs, the pipeline extracts only the highest-scoring
+fragment. Mutations on the other fragment(s) are invisible. This is an
+annotation-independent limit: without a GFF3 to say "the rest of this
+gene is on contig N", the pipeline cannot recover the missing piece.
+
+**GFF3 tools.** AMRFinderPlus, Kleborate, Mykrobe and StarAMR need a GFF3
+to map contigs to genes. Prokka/Bakta are not installed, so their
+fragmentation sensitivity could not be measured. The MutationScan-only
+result above is the distinctive claim: *tblastn-based extraction loses
+mutations when a gene crosses contig boundaries, and no annotation
+exists to help.*
+
+**Verified by.** `ruff check` + `ruff format --check` + `mypy` clean on
+the new fragmentation module. 359 unit tests pass. Sensitivity drop is
+reproducible across runs (0.600 at 2 fragments/gene in two independent
+measurements).
+
 ## 2026-10-10 — Resource-scaling benchmark & real peak-RSS measurement
 
 **Problem.** The harness measured sensitivity, precision and dN/dS but

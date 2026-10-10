@@ -197,3 +197,36 @@ reference, which dropped *every* genome of `tolC` -- the gene was simply
 absent from `dn_ds.csv`. The fix trims the reference CDS to the hit's
 subject region before counting sites and differences. See
 `notes/developer-notes.md` for the 2026-10-10 entry.
+
+## Fragmentation stress test
+
+`python -m benchmarks.fragmentation --references data/references` measures
+mutation recall vs assembly fragmentation, writing `fragmentation.csv`,
+`fragmentation.json` and a two-panel figure. The test fragments each gene's
+CDS into N contigs at random cut points, then runs MutationScan and scores
+against the same ground truth. This is an **annotation-independent** test:
+MutationScan uses tblastn directly on nucleotide FASTA, with no GFF3
+dependency.
+
+**Recall vs fragments per gene** (2 genomes, 5 genes, seed 7):
+
+| contigs/gene | sensitivity | precision | F1 | runtime |
+|---|---|---|---|---|
+| 1 | 1.000 | 1.000 | 1.000 | 14.1s |
+| 2 | 0.600 | 1.000 | 0.750 | 21.4s |
+
+A 40% sensitivity drop at just 2 contigs/gene. tblastn reports one
+best HSP per query; when a gene is split across contigs, only the
+highest-scoring fragment is extracted and mutations on the other
+fragment are lost. Precision stays 1.0 because no false positives
+are introduced — the extracted fragment is still correct.
+
+**Runtime note.** Wall time varies 2x+ run to run (documented machine
+variance); the fragmentation effect on time is not the finding.
+
+**GFF3-dependent tools.** AMRFinderPlus, Kleborate, Mykrobe and StarAMR
+require a GFF3 annotation to map contigs to genes. Without Prokka/Bakta
+installed, their fragmentation sensitivity could not be measured. The
+MutationScan-only result above is the distinctive, annotation-independent
+claim: *tblastn-based extraction loses mutations when a gene is split
+across contigs, with no annotation to guide it.*
