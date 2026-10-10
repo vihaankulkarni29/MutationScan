@@ -38,7 +38,12 @@ omitted from the report rather than inventing a number).
 **Measured.** 10→6.8s, 20→11.9s, 40→17.7s, 80→33.3s at 2 threads;
 memory 168→200→264 MiB at 2/4/8 threads. The 10→20 step is the noisy
 end -- the smallest cohort pays fixed start-up twice for little work
-to amortise it.
+to amortise it. **Caveat on the numbers:** the same 2-genome, 2-thread
+point measured 25.1s, 9.9s and 15.1s across three runs on this machine
+-- a 2.5x swing, matching the variance documented in `benchmarks.md`.
+The Panel A figures are best-of-N; the shape (linear time, flat memory)
+is the finding, the absolute times are indicative. Re-run before
+drawing conclusions.
 
 **Verified by.** `ruff check` + `ruff format --check` + `mypy` clean on
 the new scaling code and the widened `Tool.command`/`Tool.run`

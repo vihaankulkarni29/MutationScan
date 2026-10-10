@@ -123,7 +123,8 @@ are regenerated at each size, so the measurement reflects a real run end
 to end -- generation is excluded from both time and memory, which is the
 honest cost of the pipeline itself.
 
-**Panel A -- cohort size vs. wall-clock, at 2 threads:**
+**Panel A -- cohort size vs. wall-clock, at 2 threads** (best of N;
+see the variance note below):
 
 | genomes | time | genomes/hour |
 |---|---|---|
@@ -149,6 +150,13 @@ Flat under 2 GiB. The parallelism is process-level (`tblastn`), so each
 worker loads its own copy of the reference panel into memory rather than
 sharing it; the curve is the honest footprint, not a shared-memory
 optimisation.
+
+**Run-to-run variance.** The same 2-genome, 2-thread point measured
+25.1s, 9.9s and 15.1s across three runs on this machine -- a 2.5x swing,
+matching the variance documented above for the full pipeline. The
+Panel A figures are best-of-N; treat the shape (linear, flat memory)
+as the finding and the absolute times as indicative. Re-run
+`python -m benchmarks.scaling` before drawing conclusions.
 
 Peak RSS is now measured, not reported as 0: `Tool.run` spawns the child
 with `Popen` and samples the summed RSS of the process tree on a
