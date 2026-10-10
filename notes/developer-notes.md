@@ -8,6 +8,63 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-10 — AMR benchmarking harness & signal-peptide dN/dS fix
+
+**Problem.** MutationScan had no way to answer "how does it compare to the
+tools a reader would reach for?" -- AMRFinderPlus, Mykrobe, Kleborate,
+StarAMR. Each speaks its own dialect, and a sensitivity number means
+something different in each. Separately, the dN/dS stage silently dropped
+every gene whose tblastn hit did not span the whole reference.
+
+**Fix (harness).** A new `benchmarks/` package, run as
+`python -m benchmarks.run_benchmark --dataset synthetic`:
+
+- `schemas.py` -- canonical mutation/epistasis/dN/dS/lineage records, so a
+  match is a string comparison and every tool is scored by the same code.
+- `tools/` -- one wrapper per external tool, each normalising its native
+  output (AMRFinderPlus TSV, Mykrobe JSON, Kleborate per-genome TSV,
+  StarAMR ResFinder/PointFinder TSVs). A wrapper's `available` check skips
+  a tool whose binary is absent, so a missing tool is never scored as
+  "found nothing".
+- `amr_benchmark.py` -- metrics: sensitivity/precision/specificity/novel
+  recall at the mutation level, precision/recall/F1 at the epistasis level
+  (matched on *gene* pairs, so a tool reporting variant pairs is comparable
+  to gene-level ground truth), Pearson/Spearman/MAE at the dN/dS level,
+  lineage concordance, and performance (wall time, peak RSS, throughput).
+- `download_data.py` -- a synthetic spike-in generator with exact ground
+  truth: it back-translates each reference to a CDS, introduces a known
+  mix of non-synonymous substitutions (the mutations under test) and
+  silent changes (so dS is non-zero), and records every change. Because the
+  genome *is* the CDS, tblastn finds it at 1..N and the pipeline's own
+  dN/dS stage reads back exactly what was written -- so a disagreement is a
+  bug, not a coordinate artefact.
+- `report.py` -- Markdown + HTML comparison tables.
+- `.github/workflows/amr-benchmark.yml` -- weekly + push CI.
+
+**Fix (dN/dS).** `compute_dn_ds` used to skip any genome whose extracted
+CDS length differed from the reference, which dropped *every* genome of a
+gene whose tblastn hit was partial. The benchmark surfaced this: `tolC`
+carries a signal peptide (`MKKLLPILIGLSLSGFSSLS`, hydrophobic N-terminus)
+that tblastn's low-complexity filter masks, so the alignment starts at
+residue 21 and the extracted CDS is 1419 nt against a 1479 nt reference.
+The fix trims the reference CDS to the hit's subject region (using
+`Nucleotide_Start`) before counting sites and differences, and accumulates
+site counts per genome so different hit regions cannot collide. Genes are
+no longer silently absent from `dn_ds.csv`.
+
+**Verified by.** Self-benchmark on a 20-genome synthetic cohort: sensitivity
+1.0, precision 1.0, dN/dS Pearson 0.991 (MAE 0.031), lineage concordance
+1.0. `tests/unit/test_evolution.py` gained three partial-hit cases. All 378
+tests (359 unit + 19 integration) pass; `ruff` + `mypy` clean.
+
+**Known limitation.** The synthetic ground-truth dN/dS is computed over
+the full CDS while the pipeline computes over the tblastn-aligned region,
+so for a gene with a masked N-terminus the absolute values differ slightly
+(the correlation is what the metric reports, and it is 0.991). The
+epistasis precision is conservative: the ground truth records only the
+*designed* co-mutating pairs, while the pipeline also reports genuinely
+significant random co-associations in a small cohort.
+
 ## 2026-10-09 — Lineage tagging & dN/dS selection pressure
 
 **Problem.** The reviewer warned that population structure can confound epistasis:

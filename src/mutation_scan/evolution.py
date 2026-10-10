@@ -282,14 +282,28 @@ DN_DS_COLUMNS = (
 
 def _gene_dn_ds(
     reference_protein: str,
-    genome_cdna: list[tuple[str, str]],
+    genome_cdna: list[tuple[str, str, int]],
 ) -> dict:
     """Compute dN/dS for one gene.
 
     Args:
         reference_protein: the wild-type reference AA sequence.
-        genome_cdna: list of ``(accession, nucleotide_cds)`` for genomes
-            that carry this gene.
+        genome_cdna: list of ``(accession, nucleotide_cds,
+            nucleotide_start)`` for genomes that carry this
+            gene.  ``nucleotide_start`` is the 1-based
+            subject coordinate tblastn reported, and is used
+            to trim the reference CDS to the same region the
+            genome CDS was extracted from.
+
+    A tblastn hit does not always span the whole reference:
+    low-complexity regions (a signal peptide, for instance)
+    are masked, so the alignment -- and therefore the
+    extracted CDS -- starts partway into the gene. Comparing
+    a full-length reference against a partial CDS would
+    misalign every codon, so the reference is trimmed to the
+    hit's region before counting sites and differences. The
+    site counts are accumulated per genome, because different
+    genomes of the same gene can have different hit regions.
     """
     if not reference_protein:
         return _empty_dn_ds_result()
@@ -298,14 +312,6 @@ def _gene_dn_ds(
     if not ref_cdna or len(ref_cdna) % 3 != 0:
         return _empty_dn_ds_result()
 
-    ref_codons = [ref_cdna[i : i + 3] for i in range(0, len(ref_cdna), 3)]
-    n_sites = 0.0
-    s_sites = 0.0
-    for codon in ref_codons:
-        n, s = codon_sites(codon)
-        n_sites += n
-        s_sites += s
-
     if genome_cdna is None or not genome_cdna:
         return _empty_dn_ds_result()
 
@@ -313,13 +319,32 @@ def _gene_dn_ds(
     ds_count = 0
     substitutions = 0
     n_evaluated = 0
+    total_n_sites = 0.0
+    total_s_sites = 0.0
 
-    for _accession, genome_cds in genome_cdna:
+    for _accession, genome_cds, nucleotide_start in genome_cdna:
         if not genome_cds or len(genome_cds) % 3 != 0:
             continue
-        if len(genome_cds) != len(ref_cdna):
+        # Trim the reference to the region the genome CDS was
+        # extracted from. The subject coordinate is 1-based;
+        # the reference CDS is the back-translation of the
+        # whole protein, so the hit at subject position N
+        # corresponds to reference CDS offset N-1.
+        start = max(0, (nucleotide_start or 1) - 1)
+        trimmed_ref = ref_cdna[start : start + len(genome_cds)]
+        if len(trimmed_ref) != len(genome_cds):
             continue
-        n_diffs, s_diffs = _compare_codons(ref_cdna, genome_cds)
+
+        n_sites = 0.0
+        s_sites = 0.0
+        for i in range(0, len(trimmed_ref), 3):
+            n, s = codon_sites(trimmed_ref[i : i + 3])
+            n_sites += n
+            s_sites += s
+        total_n_sites += n_sites
+        total_s_sites += s_sites
+
+        n_diffs, s_diffs = _compare_codons(trimmed_ref, genome_cds)
         if n_diffs == 0 and s_diffs == 0:
             n_evaluated += 1
             continue
@@ -328,18 +353,16 @@ def _gene_dn_ds(
         substitutions += 1  # at least one codon differed
         n_evaluated += 1
 
-    n_evaluated = n_evaluated
-
     if substitutions == 0:
         return _empty_dn_ds_result(n_evaluated=n_evaluated)
 
-    dN = dn_count / n_sites if n_sites > 0 else 0.0
-    dS = ds_count / s_sites if s_sites > 0 else 0.0
+    dN = dn_count / total_n_sites if total_n_sites > 0 else 0.0
+    dS = ds_count / total_s_sites if total_s_sites > 0 else 0.0
     dn_ds = dN / dS if dS > 0 else float("inf")
 
     return {
-        "N_Sites": round(n_sites, 1),
-        "S_Sites": round(s_sites, 1),
+        "N_Sites": round(total_n_sites, 1),
+        "S_Sites": round(total_s_sites, 1),
         "dN": round(dN, 6),
         "dS": round(dS, 6),
         "dN_dS": dn_ds if dn_ds != float("inf") else float("inf"),
@@ -414,8 +437,13 @@ def compute_dn_ds(
         & manifest["Nucleotide_End"].notna()
     ]
 
-    # Group CDS by gene across genomes.
-    by_gene: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    # Group CDS by gene across genomes. Each entry carries
+    # the subject start coordinate so _gene_dn_ds can trim
+    # the reference CDS to the region that was actually
+    # extracted -- a masked N-terminus (a signal peptide,
+    # say) otherwise makes the extracted CDS shorter than
+    # the reference and the gene is dropped entirely.
+    by_gene: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
     manifest_cols = {"Accession", "Gene", "Contig", "Nucleotide_Start", "Nucleotide_End"}
     if manifest_cols.issubset(extracted.columns):
         for row in extracted.itertuples(index=False):
@@ -435,7 +463,7 @@ def compute_dn_ds(
                 continue
             cdna = extract_cds(genome_path, contig, ns, ne)
             if cdna:
-                by_gene[gene].append((accession, cdna))
+                by_gene[gene].append((accession, cdna, ns))
 
     from .fasta import read_protein_sequence
 

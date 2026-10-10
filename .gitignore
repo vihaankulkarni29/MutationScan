@@ -78,3 +78,9 @@ logs/
 
 # Docker
 docker-compose.override.yml
+
+# Benchmark generated artifacts: synthetic cohorts, ground truth,
+# reports and tool run outputs are reproducible, not source.
+benchmarks/data/
+benchmarks/results/
+benchmarks/runs/

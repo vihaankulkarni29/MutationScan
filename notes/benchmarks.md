@@ -113,3 +113,35 @@ most likely to invalidate a comparison against older output.
 Per-species mean alignment identity after routing: 97.03% / 99.74% / 99.66%.
 The single-panel figure counts interspecies sequence differences as acquired
 mutations; see the `Species` section of the README for the mechanism.
+
+## AMR tool comparison
+
+`python -m benchmarks.run_benchmark --dataset synthetic` scores MutationScan
+against AMRFinderPlus, Mykrobe, Kleborate and StarAMR on a shared ground
+truth. Synthetic spike-in (default) is the only source with exact ground
+truth for sensitivity, specificity and dN/dS; PATRIC and NCTC 3000 are
+stubs pending manual download. 20 genomes, 5 genes (`data/references`):
+
+| metric | MutationScan |
+|---|---|
+| sensitivity | 1.000 |
+| precision | 1.000 |
+| dN/dS Pearson | 0.991 |
+| lineage concordance | 1.000 |
+
+The synthetic generator back-translates each reference to a CDS, introduces
+a known mix of non-synonymous substitutions (the mutations under test) and
+silent changes (so dS is non-zero), and records every change. Because the
+genome *is* the CDS, tblastn finds it at 1..N and the pipeline's own dN/dS
+stage reads back exactly what was written, so a disagreement is a bug rather
+than a coordinate artefact.
+
+**A finding this harness caught.** `tolC` carries a signal peptide
+(`MKKLLPILIGLSLSGFSSLS`, a hydrophobic N-terminus) that tblastn's
+low-complexity filter masks, so the alignment starts at residue 21 and the
+extracted CDS is 1419 nt against a 1479 nt reference. The old
+`compute_dn_ds` skipped any genome whose CDS length differed from the
+reference, which dropped *every* genome of `tolC` -- the gene was simply
+absent from `dn_ds.csv`. The fix trims the reference CDS to the hit's
+subject region before counting sites and differences. See
+`notes/developer-notes.md` for the 2026-10-10 entry.
