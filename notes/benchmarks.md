@@ -114,6 +114,50 @@ Per-species mean alignment identity after routing: 97.03% / 99.74% / 99.66%.
 The single-panel figure counts interspecies sequence differences as acquired
 mutations; see the `Species` section of the README for the mechanism.
 
+## Resource scaling
+
+`python -m benchmarks.scaling --references data/references` measures
+wall-clock and peak RSS across cohort sizes and thread counts, writing
+`scaling.csv`, `scaling.json` and a two-panel figure. Synthetic cohorts
+are regenerated at each size, so the measurement reflects a real run end
+to end -- generation is excluded from both time and memory, which is the
+honest cost of the pipeline itself.
+
+**Panel A -- cohort size vs. wall-clock, at 2 threads:**
+
+| genomes | time | genomes/hour |
+|---|---|---|
+| 10 | 6.8s | 5,294 |
+| 20 | 11.9s | 6,050 |
+| 40 | 17.7s | 13,559 |
+| 80 | 33.3s | 8,649 |
+
+Linear `O(N)`: doubling the cohort roughly doubles the time, as expected
+when the dominant cost is one `tblastn` call per genome. The 10→20 step
+is the noisy end -- the smallest cohort pays fixed start-up twice for
+little work to amortise it.
+
+**Panel B -- CPU cores vs. peak RSS, at 10 genomes:**
+
+| cores | peak RSS |
+|---|---|
+| 2 | 168 MiB |
+| 4 | 200 MiB |
+| 8 | 264 MiB |
+
+Flat under 2 GiB. The parallelism is process-level (`tblastn`), so each
+worker loads its own copy of the reference panel into memory rather than
+sharing it; the curve is the honest footprint, not a shared-memory
+optimisation.
+
+Peak RSS is now measured, not reported as 0: `Tool.run` spawns the child
+with `Popen` and samples the summed RSS of the process tree on a
+background thread at 50 ms, started *before* `communicate()`. The old
+`peak_memory_mb` returned 0 on every platform except Linux, where it
+reached for `/usr/bin/time -v`; the benchmark now records a real number
+wherever `psutil` is installed. See `notes/developer-notes.md` for the
+2026-10-10 entry.
+
 ## AMR tool comparison
 
 `python -m benchmarks.run_benchmark --dataset synthetic` scores MutationScan

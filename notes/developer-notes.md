@@ -8,6 +8,46 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-10 — Resource-scaling benchmark & real peak-RSS measurement
+
+**Problem.** The harness measured sensitivity, precision and dN/dS but
+said nothing about the resource cost of running MutationScan -- the
+question a reviewer asks before trusting a number on 570 genomes. The
+existing `peak_memory_mb` returned 0 on every platform except Linux
+(where it reached for `/usr/bin/time -v`), so the comparison table's
+memory column was invented rather than measured.
+
+**Fix.** A new `benchmarks/scaling.py` measures two curves from one run:
+
+- **Panel A** -- cohort size vs. wall-clock at a fixed thread count,
+  the linear `O(N)` claim. Cohorts regenerate at each size so the run
+  is end to end; generation is excluded from both time and memory.
+- **Panel B** -- CPU cores vs. peak RSS at a fixed cohort size, the
+  flat-under-2 GiB claim. The parallelism is process-level (`tblastn`),
+  so each worker loads its own copy of the reference panel.
+
+Peak RSS is now measured rather than reported as 0: `Tool.run` spawns
+the child with `Popen` and samples the summed RSS of the process tree
+on a background thread at 50 ms, started *before* `communicate()`. The
+sampler walks `psutil.Process(pid).children(recursive=True)` and sums
+`memory_info().rss`, so a tool's footprint includes the `tblastn`
+sub-process it shells out to. `psutil>=5.9` is a dev dependency; the
+harness still runs without it (the sampler no-ops and the column is
+omitted from the report rather than inventing a number).
+
+**Measured.** 10→6.8s, 20→11.9s, 40→17.7s, 80→33.3s at 2 threads;
+memory 168→200→264 MiB at 2/4/8 threads. The 10→20 step is the noisy
+end -- the smallest cohort pays fixed start-up twice for little work
+to amortise it.
+
+**Verified by.** `ruff check` + `ruff format --check` + `mypy` clean on
+the new scaling code and the widened `Tool.command`/`Tool.run`
+signatures (`dict[str, Path]` → `dict[str, Any]`, since `threads: int`
+is a legitimate input). 359 unit tests pass.
+
+**Also in this commit.** Removed a dead `back_translate` import from
+`scaling.py` (the synthetic generator back-translates internally).
+
 ## 2026-10-10 — AMR benchmarking harness & signal-peptide dN/dS fix
 
 **Problem.** MutationScan had no way to answer "how does it compare to the
