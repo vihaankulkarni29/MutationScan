@@ -17,6 +17,7 @@ data/genomes/*
 !data/genomes/.gitkeep
 data/references/*
 !data/references/.gitkeep
+!data/references/*_WT.faa
 data/databases/*
 !data/databases/.gitkeep
 data/output/*
