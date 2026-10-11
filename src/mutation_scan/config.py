@@ -186,7 +186,7 @@ class Config:
         return self.run_dir / "dn_ds.csv"
 
     def outputs(self) -> tuple[Path, ...]:
-        """Files a complete run is expected to produce."""
+        """Files a complete Snakemake run is expected to produce."""
         paths = [
             self.manifest_csv,
             self.mutations_csv,
@@ -197,7 +197,6 @@ class Config:
             self.mutation_severity_csv,
             self.epistasis_networks_csv,
             self.run_summary_json,
-            self.dn_ds_csv,
         ]
         if "variant" in self.cooccurrence.levels:
             paths.append(self.cooccurrence_variants_csv)

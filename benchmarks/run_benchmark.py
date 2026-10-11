@@ -23,12 +23,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from .amr_benchmark import BenchmarkHarness, GroundTruth
-from .download_data import generate_synthetic
-from .report import write_report
-from .tools import build_tool
+from benchmarks.amr_benchmark import BenchmarkHarness, GroundTruth
+from benchmarks.download_data import generate_synthetic
+from benchmarks.report import write_report
+from benchmarks.tools import build_tool
 
 __all__ = ["main"]
 
