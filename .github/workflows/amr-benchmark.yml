@@ -118,30 +118,30 @@ jobs:
             benchmarks/results/phenotypic/phenotypic.md
             benchmarks/results/phenotypic/phenotypic.json
 
-      - name: Check MutationScan sensitivity
+- name: Check MutationScan sensitivity
         # The synthetic cohort has exact ground truth,
         # so MutationScan's own sensitivity is a
         # regression signal: a drop means the pipeline
         # stopped calling mutations it used to call.
         run: |
           python - <<'PY'
-          import json, sys
-          from pathlib import Path
-           report = Path("benchmarks/results/benchmark_report.md")
-           text = report.read_text()
-           for line in text.splitlines():
-               if line.startswith("| MutationScan"):
-                   cells = [c.strip() for c in line.strip("|").split("|")]
-                   sensitivity = cells[2]
-                   if sensitivity in ("--", "0.0%"):
-                       print("::error::MutationScan sensitivity is zero")
-                       sys.exit(1)
-                   print(f"MutationScan sensitivity: {sensitivity}")
-                   break
-           else:
-               print("::error::MutationScan row not found in report")
-               sys.exit(1)
-           PY
+import json, sys
+from pathlib import Path
+report = Path("benchmarks/results/benchmark_report.md")
+text = report.read_text()
+for line in text.splitlines():
+    if line.startswith("| MutationScan"):
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        sensitivity = cells[2]
+        if sensitivity in ("--", "0.0%"):
+            print("::error::MutationScan sensitivity is zero")
+            sys.exit(1)
+        print(f"MutationScan sensitivity: {sensitivity}")
+        break
+else:
+    print("::error::MutationScan row not found in report")
+    sys.exit(1)
+PY
 
       - name: Check unfragmented recall
         # The fragmentation benchmark runs at 1 contig/gene as its
@@ -152,18 +152,18 @@ jobs:
         # different, contig-aware path.
         run: |
           python - <<'PY'
-          import csv, sys
-          from pathlib import Path
+import csv, sys
+from pathlib import Path
 
-          path = Path("benchmarks/results/fragmentation/fragmentation.csv")
-          rows = list(csv.DictReader(path.open()))
-          if not rows:
-              print("::error::fragmentation benchmark produced no rows")
-              sys.exit(1)
-          baseline = min(rows, key=lambda r: int(r["fragments_per_gene"]))
-          sensitivity = float(baseline["sensitivity"])
-          print(f"unfragmented sensitivity: {sensitivity:.3f} ({baseline['fragments_per_gene']} contigs/gene)")
-          if sensitivity < 0.95:
-              print(f"::error::unfragmented recall dropped to {sensitivity:.3f}")
-              sys.exit(1)
-          PY
+path = Path("benchmarks/results/fragmentation/fragmentation.csv")
+rows = list(csv.DictReader(path.open()))
+if not rows:
+    print("::error::fragmentation benchmark produced no rows")
+    sys.exit(1)
+baseline = min(rows, key=lambda r: int(r["fragments_per_gene"]))
+sensitivity = float(baseline["sensitivity"])
+print(f"unfragmented sensitivity: {sensitivity:.3f} ({baseline['fragments_per_gene']} contigs/gene)")
+if sensitivity < 0.95:
+    print(f"::error::unfragmented recall dropped to {sensitivity:.3f}")
+    sys.exit(1)
+PY
