@@ -8,6 +8,81 @@ For historical v2 → v3 rebuild documents see
 
 ---
 
+## 2026-10-11 — Phenotypic concordance harness (P4), code complete / data pending
+
+**Problem.** The strongest claim a variant caller can make is clinical:
+genomes carrying the mutations it calls should be the genomes the
+laboratory reports as resistant. MutationScan had no way to test that,
+because it needed two things the pipeline does not otherwise use -- a
+measured MIC per (genome, drug), and the breakpoint that dichotomises a
+concentration into a phenotype.
+
+**Fix.** A new `benchmarks/phenotypic.py`, run as
+`python -m benchmarks.phenotypic --mic ... --breakpoints ... [--rules ...
+] [--carriers ...]`. Three measurements, ordered by how much they assume:
+
+1. **Gene-drug association** (unsupervised) -- Fisher exact two-sided on
+   gene-mutation carriage vs. resistant phenotype, Benjamini-Hochberg
+   across the whole gene x drug family. Discovers from the cohort which
+   genes matter for which drugs; no curated knowledge involved.
+2. **Burden vs. MIC** (unsupervised) -- Spearman between the number of
+   mutated genes and the MIC on the log2 scale. Uses the concentration
+   rather than a dichotomised threshold, so it does not depend on the
+   breakpoint being right.
+3. **Concordance vs. curated rules** (supervised) -- given a curated
+   gene -> drug mapping, the very-major and major error rates. VME
+   (reported susceptible, measured resistant) and ME (reported
+   resistant, measured susceptible) are reported separately because
+   they are not interchangeable.
+
+**Classification.** Both standard forms are supported and the difference
+matters: EUCAST's `s_max`-only form means `S <= x, R > x` with no
+intermediate category, so anything above `s_max` is R; CLSI M100's
+three-column form has a real intermediate band, and a MIC between
+`i_max` and `r_min` is a gap the standard does not define. A MIC with no
+breakpoint, or in an undefined band, is `?` -- it is never defaulted to
+susceptible, because that would report perfect agreement against a cohort
+with no breakpoints at all.
+
+**Three real bugs the tests caught, worth recording:**
+
+1. `classify_mic` returned `?` for a MIC above `s_max` when `r_min` and
+   `i_max` were absent -- the EUCAST form read as a gap instead of
+   resistant. A break point-only row scored every resistant genome as
+   unknown.
+2. `csv.Sniffer().sniff()` raises "Could not determine delimiter" on
+   exactly the tables that matter: a handful of rows with an empty
+   optional column. Replaced with a header separator count (`_dialect_for`).
+3. `burden_correlation({...})` with an empty mapping meant "no gene is
+   phenotypically relevant" rather than "no filter", so a cohort with
+   nothing significant reported zero carriers. An empty mapping now
+   means no filter, and there is a regression test for it.
+
+The loaders also skip `#` comment lines and blank lines, so a benchmark
+table can carry its provenance and caveats inside the file. This was
+added while writing `benchmarks/data/breakpoints.example.tsv`, which
+documented itself and then failed to parse.
+
+**Status.** Code complete and tested (60 unit cases). **No real MIC data
+has been run** -- that needs a BV-BRC account and a downloaded
+breakpoint table, and neither is committed to this repository. The only
+run so far is a smoke test on eight synthetic genomes, which proved the
+arithmetic and nothing else. `breakpoints.example.tsv` is a documented
+format example, not a curated source.
+
+**Data sources when real data arrives.** MIC from BV-BRC (successor to
+PATRIC, free academic registration, `p3-get-phenotype-data` CLI or the
+`/api/` endpoints); breakpoints from EUCAST `clinical_breakpoints`
+(open) or CLSI M100 (paywalled) -- same column shape either way; rules
+from ResFinder or CARD.
+
+**Verified by.** `ruff` + `mypy` clean on 36 source files. 60 unit tests
+in `tests/unit/test_phenotypic.py`, covering classification edge cases
+(gaps, missing breakpoints, non-positive and non-finite MICs), loader
+tolerance (header aliases, both dialects, censored MICs, comment and blank
+lines, thresholdless rows), and degenerate cohorts (one genome, no
+carriers, no resistant genomes, no breakpoints, empty rule sets).
+
 ## 2026-10-10 — Fragmentation stress test: 40% sensitivity loss at 2 contigs/gene
 
 **Problem.** Real assemblies are fragmented; a gene may span multiple
@@ -464,3 +539,16 @@ Ordered by how much they affect published results.
 6. **Extraction below ~88s.** Now ~59% of wall clock and `tblastn`-bound. Would
    need contig splitting or letting `tblastn` use its own threads; gains are
    modest and there is a risk of altering results silently.
+7. **Phenotypic concordance data (P4).** The harness (`benchmarks/phenotypic.py`)
+   is written and tested, but it has never seen a real MIC. Needs: a BV-BRC
+   account with AMR phenotypes for the cohort, a downloaded EUCAST or CLSI
+   breakpoint table, and a curated gene -> drug rule set. All three are data
+   acquisition, not code. Until then the module is a format and a metric, not
+   a result.
+8. **Head-to-head tool comparison (P3).** Blocked on external tools
+   (AMRFinderPlus, Mykrobe, Kleborate, StarAMR) which are not installed; the
+   harness already skips them cleanly. Needs a bioconda-style install or a
+   Linux run, plus a real cohort (BV-BRC / NCTC 3000).
+9. **GFF3-dependent fragmentation comparison.** The MutationScan half of the
+   fragmentation claim is measured (40% sensitivity loss at 2 contigs/gene);
+   the external tools' half needs Prokka or Bakta, which are not installed.

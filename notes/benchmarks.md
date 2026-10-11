@@ -230,3 +230,71 @@ installed, their fragmentation sensitivity could not be measured. The
 MutationScan-only result above is the distinctive, annotation-independent
 claim: *tblastn-based extraction loses mutations when a gene is split
 across contigs, with no annotation to guide it.*
+
+## Phenotypic concordance
+
+`python -m benchmarks.phenotypic --mic MIC.tsv --breakpoints BREAKPOINTS.tsv
+[--rules RULES.tsv] [--carriers carriers.json]` answers the clinical
+question: does a called mutation predict the phenotype the laboratory
+measures?
+
+Three measurements, in increasing order of how much they assume about the
+biology. The unsupervised ones come first because they are the evidence
+that the calls carry *any* phenotypic signal, before a curated table has
+had a chance to shape the answer.
+
+1. **Gene-drug association** (unsupervised) — Fisher exact two-sided on
+   gene-mutation carriage vs. resistant phenotype, Benjamini-Hochberg
+   across the whole gene x drug family. Discovers from the cohort which
+   genes matter for which drugs; needs no curated knowledge.
+2. **Burden vs. MIC** (unsupervised) — Spearman between the number of
+   mutated genes carried and the MIC on the log2 scale. Uses the
+   concentration, not a dichotomised threshold, so it does not depend on
+   the breakpoint being right.
+3. **Concordance vs. curated rules** (supervised) — given a hand-curated
+   gene -> drug mapping, the very-major and major error rates. VME
+   (reported susceptible, measured resistant) and ME (reported resistant,
+   measured susceptible) are reported separately because they are not
+   interchangeable.
+
+**Two classification conventions are supported**, and the difference
+matters:
+
+| form | columns | behaviour |
+|---|---|---|
+| EUCAST | `s_max` only | `S <= x, R > x`; no intermediate category, so anything above `s_max` is R |
+| CLSI M100 | `s_max`, `i_max`, `r_min` | a MIC between `i_max` and `r_min` is a gap the standard does not define, reported `?` |
+
+A MIC with no breakpoint, or in an undefined band, is `?` rather than a
+default. A caller that treated `?` as susceptible would report perfect
+agreement against a cohort with no breakpoints at all — which is why it is
+a distinct outcome and not a silent fallback.
+
+**Status: code complete, data pending.** The module is written and tested
+(60 unit cases) but has **not been run on real MIC data** — that needs a
+BV-BRC account and a downloaded breakpoint table, neither of which this
+repository commits to. The only number produced so far is a smoke test on
+eight synthetic genomes, and it demonstrated nothing but that the
+arithmetic runs. No concordance figure here is a result.
+`benchmarks/data/breakpoints.example.tsv` is a documented format example,
+**not** a curated breakpoint source.
+
+### Where the data comes from
+
+* **MIC** — BV-BRC (formerly PATRIC), https://www.bv-brc.org/. Free
+  academic registration, then either the web UI (genome/phenotype
+  tables) or the API at `https://www.bv-brc.org/api/`. The
+  `p3-get-phenotype-data` CLI is part of the PATRIC command-line tools.
+  Table columns needed: `accession`, `drug`, `mic`, `organism`.
+* **Breakpoints** — EUCAST, https://www.eucast.org/clinical_breakpoints/
+  (open access, updated annually, default `standard` value), or CLSI
+  M100 (paywalled US standard). Both parse through the same loader.
+* **Rules** — a curated gene -> drug resistance mapping, one row per
+  relationship. ResFinder or CARD are the usual starting points.
+
+MIC values come off a doubling dilution series, so they are log2 steps —
+which is also the scale `burden_correlation` reports on. Censored
+readings (`<=0.25`, `>64`) collapse to a comparable concentration; the
+inequality is not reinterpreted as a different class.
+
+## AMR tool comparison
