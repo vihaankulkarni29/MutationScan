@@ -1,0 +1,43 @@
+# MIC fixture -- **synthetic, not real data.**
+#
+# Eight invented genomes, two drugs, shaped the way
+# `benchmarks/phenotypic.py` reads them: **accession, organism, drug,
+# mic**. Every number here is made up. The generator for the real
+# thing is MutationScan's own synthetic cohort
+# (`benchmarks/download_data.py`), which records exact ground truth;
+# this file exists so the module can be exercised end to end before
+# any real MIC arrives.
+#
+# The design is deliberately uneven -- gyrA/parC carriers sit at low
+# ciprofloxacin MICs, aac carriers sit at high gentamicin ones, and
+# acrB is uncorrelated -- so the gene-drug association test has
+# something to find and something to miss.
+#
+# Where to get the real thing: BV-BRC (successor to PATRIC) at
+# https://www.bv-brc.org/, free academic registration, then either the
+# web UI or `p3-get-phenotype-data`. Column names in a BV-BRC export
+# differ from these; the loader matches them case-insensitively and
+# accepts `genome`/`genome_id`/`assembly` for accession, `antibiotic`
+# for drug, and `mic_value`/`mic_ug_ml` for mic.
+#
+# MIC values are on a doubling dilution series, so they are log2 steps
+# -- the scale `burden_correlation` reports on. Censored readings
+# (`<=0.25`, `>64`) are accepted and collapse to a comparable
+# concentration.
+accession	organism	drug	mic
+SIM_0001	Escherichia coli	ciprofloxacin	0.03
+SIM_0002	Escherichia coli	ciprofloxacin	0.06
+SIM_0003	Escherichia coli	ciprofloxacin	0.125
+SIM_0004	Escherichia coli	ciprofloxacin	0.25
+SIM_0005	Escherichia coli	ciprofloxacin	0.5
+SIM_0006	Escherichia coli	ciprofloxacin	1.0
+SIM_0007	Escherichia coli	ciprofloxacin	2.0
+SIM_0008	Escherichia coli	ciprofloxacin	4.0
+SIM_0001	Escherichia coli	gentamicin	0.5
+SIM_0002	Escherichia coli	gentamicin	1.0
+SIM_0003	Escherichia coli	gentamicin	2.0
+SIM_0004	Escherichia coli	gentamicin	4.0
+SIM_0005	Escherichia coli	gentamicin	8.0
+SIM_0006	Escherichia coli	gentamicin	16.0
+SIM_0007	Escherichia coli	gentamicin	32.0
+SIM_0008	Escherichia coli	gentamicin	64.0

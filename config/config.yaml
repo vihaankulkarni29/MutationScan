@@ -20,15 +20,64 @@ targets: []
 # missing from references_dir (e.g. "83333"). "" disables all network access.
 uniprot_taxid: ""
 
+# Species-aware reference routing. RECOMMENDED whenever the cohort spans more
+# than one species, and the difference is not cosmetic.
+#
+# A single reference panel applied across species is invalid. Aligning an E. coli
+# K-12 reference protein against a Klebsiella genome scores ~80-90% identity --
+# above an 80% gate -- and every ordinary difference between the two species is
+# then reported as an acquired mutation. Measured on a 570-genome three-species
+# cohort, that produced 61,858 Klebsiella mutations from E. coli reference genes
+# where the equivalent per-species runs produced 414, and 97.7% of all reported
+# mutations came from pairs below 95% identity.
+#
+# Note that a reciprocal-best-hit check does NOT fix this: E. coli acrB and
+# K. pneumoniae acrB are true orthologs, so RBH passes them. What is needed is to
+# compare each genome against a reference from its own species.
+#
+# Each genome is matched by fnmatch on its filename stem. A gene a species has no
+# reference for is reported as `no_reference_for_species` and never compared
+# against another species' protein. Genomes matching no pattern abort the run --
+# no reference can be trusted for them.
+#
+# Leave this block empty (the default) only for a genuinely single-species cohort.
+species:
+  # escherichia_coli:
+  #   genome_pattern: "Escherichia_coli_*"     # matched against the filename stem
+  #   references: "E_coli_k12"                 # relative to references_dir
+  # klebsiella_pneumoniae:
+  #   genome_pattern: "Klebsiella_pneumoniae_*"
+  #   references: "K_pneumoniae_MGH_78578"
+  # pseudomonas_aeruginosa:
+  #   genome_pattern: "Pseudomonas_aeruginosa_*"
+  #   references: "P_aeroginosa_PAO1"
+
 # Quality gates applied per (genome, gene) alignment before mutations are called.
 min_identity_percent: 80    # identity to the reference over reference length
 min_coverage_percent: 80    # fraction of reference positions the query covers
+
+# Share of the reference protein a truncation must remove downstream of
+# its stop codon to be flagged as a functional knockout in variant_qc.csv.
+knockout_lost_percent: 20
 
 # External binary (BLAST+). Override if tblastn is not on PATH.
 tblastn_binary: tblastn
 
 # Parallel tblastn processes during extraction.
+#
+# `threads` is the run's width. `variant_threads` and `epistasis.threads` both
+# default to it, so setting one number widens every stage that can benefit and
+# leaves the two entry points (this file and the `--threads` flag) unable to
+# disagree. Override either to make one stage narrower.
+#
+# Roughly: speedup ~= the worker count, up to the core count. The stages do not
+# overlap, so several stages can all be your core count.
 threads: 4
+
+# Parallel worker processes during variant calling. The alignment is CPU-bound
+# in Biopython, so this is the setting that shortens the second stage. Omit it
+# to inherit `threads`.
+variant_threads: 4
 
 # Descriptive co-occurrence: raw counts only, no statistics or scoring.
 cooccurrence:
@@ -39,4 +88,13 @@ cooccurrence:
 epistasis:
   fdr_threshold: 0.05   # Benjamini-Hochberg q-value cutoff
   min_count: 1          # require at least this many co-occurring genomes
-  threads: 1            # parallel pairwise tests
+  # threads: inherits the run's `threads` when omitted. Accepted for
+  # compatibility but currently advisory: epistasis resolves every pair's 2x2
+  # counts with one Gram matrix per gene-universe and runs one Fisher test per
+  # *distinct* table, so it no longer uses a process pool. On the 570-genome
+  # cohort that took it from 146,070 tests to ~1,700 and removed the pool.
+
+# Lineage manifest: optional TSV/CSV mapping Accession -> Lineage (ST, phylogroup).
+# When provided, epistatic pairs are annotated with their lineage distribution
+# and classified as Clonal (single lineage) or Convergent (multiple lineages).
+# lineage_manifest: "data/lineage_manifest.tsv"

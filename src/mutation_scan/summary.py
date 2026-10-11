@@ -25,8 +25,10 @@ from . import __version__
 from .config import Config
 from .cooccurrence import CooccurrenceResult
 from .extract import STATUS_EXTRACTED
+from .parallel import available_cores
+from .parallel_plan import describe
 from .references import ReferenceSet
-from .variants import VARIANT_STATUS_CALLED
+from .variants import LOF_ALLELE, VARIANT_STATUS_CALLED, with_loss_of_function
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,21 @@ def _n_unique(frame: pd.DataFrame | None, column: str) -> int:
     if frame is None or frame.empty or column not in frame.columns:
         return 0
     return int(frame[column].nunique())
+
+
+def _loss_of_function_counts(mutations: pd.DataFrame | None) -> dict[str, int]:
+    """Allele and genome counts for loss-of-function rows of an integrated stream.
+
+    A separate helper keeps the summary block readable and means the LoF stream
+    is sliced once, not three times.
+    """
+    if mutations is None or mutations.empty or "Mutation" not in mutations.columns:
+        return {"alleles": 0, "genomes": 0}
+    is_lof = mutations["Mutation"].astype(str) == LOF_ALLELE
+    return {
+        "alleles": int(is_lof.sum()),
+        "genomes": int(mutations.loc[is_lof, "Accession"].nunique()) if is_lof.any() else 0,
+    }
 
 
 def _n_rows(path: Path | str | None) -> int:
@@ -68,11 +85,18 @@ def build_run_summary(
     mutations: pd.DataFrame | None = None,
     cooccurrence: CooccurrenceResult | None = None,
     tblastn_version: str = "",
+    timings: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Assemble the provenance record for one run.
 
     Every argument beyond *config* is optional so a partial run (or a dry run)
     still produces a readable summary rather than failing.
+
+    Args:
+        timings: wall-clock seconds per stage, as measured by the caller. The
+            summary is the only artifact a run leaves behind, so if it does not
+            record where the time went then nobody but whoever watched the log
+            can tell.
     """
     extracted = (
         manifest[manifest["Status"] == STATUS_EXTRACTED]
@@ -84,6 +108,13 @@ def build_run_summary(
         if qc is not None and not qc.empty and "Status" in qc.columns
         else None
     )
+
+    # Loss-of-function alleles ride in the variant QC, not in mutations.csv,
+    # so a genome whose only call is a knockout or frameshift must still show up
+    # in the counts. with_loss_of_function is a no-op on a QC without event
+    # columns (older runs) and on None, so pre-existing summaries are unchanged.
+    integrated = with_loss_of_function(mutations, qc) if mutations is not None else None
+    lof_counts = _loss_of_function_counts(integrated)
 
     summary: dict[str, Any] = {
         "mutation_scan_version": __version__,
@@ -111,7 +142,9 @@ def build_run_summary(
             "status_counts": _status_counts(qc),
             "pairs_called": int(len(called)) if called is not None else 0,
             "mutations": int(len(mutations)) if mutations is not None else 0,
-            "genomes_with_any_mutation": _n_unique(mutations, "Accession"),
+            "loss_of_function_alleles": lof_counts["alleles"],
+            "genomes_with_any_mutation": _n_unique(integrated, "Accession"),
+            "genomes_with_loss_of_function": lof_counts["genomes"],
             "gates": {
                 "min_identity_percent": config.min_identity_percent,
                 "min_coverage_percent": config.min_coverage_percent,
@@ -140,6 +173,13 @@ def build_run_summary(
             "network_pairs": _n_rows(config.epistasis_networks_csv),
         },
         "outputs": [str(path) for path in config.outputs()],
+        # Cores available is what makes requested-vs-effective interpretable: a
+        # run asking for 16 on a 4-core machine is a different run from one that
+        # asked for 16 and got them. config-check reports it too, but the summary
+        # is the artifact people attach to a manuscript, so it has to stand alone.
+        "cores_available": available_cores(),
+        "parallelism": [stage.to_dict() for stage in describe(config)],
+        "timings_seconds": dict(timings) if timings else {},
         "note": (
             "Co-occurrence counts are descriptive. They are not tests of "
             "interaction, selection or causation."

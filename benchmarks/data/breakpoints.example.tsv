@@ -1,0 +1,49 @@
+# Breakpoints for the drugs this project's reference genes bear on.
+#
+# Mechanical stubs, shaped the way `benchmarks/phenotypic.py` reads
+# them: **organism, drug, s_max, i_max, r_min, standard**. The numbers
+# below are the *shape* of a real table, not a curated source -- treat
+# this file as a worked example of the format, and replace it with a
+# downloaded EUCAST or CLSI table before drawing any conclusion.
+#
+# Two conventions are both supported, and the difference matters:
+#
+# * **EUCAST form** -- only `s_max`, as `S <= x, R > x`, with no
+#   intermediate category. Any MIC above `s_max` is resistant. Omit
+#   `i_max` and `r_min` entirely.
+# * **CLSI M100 form** -- all three. A MIC falling between `i_max` and
+#   `r_min` is a gap the standard does not define, so the module
+#   reports `?` rather than guessing.
+#
+# The reference genes here are efflux-pump and regulator components:
+# `acrA`, `acrB` and `tolC` form the AcrAB-TolC efflux pump, and
+# `acrR`/`marR` regulate it. Efflux down-regulates susceptibility to
+# many drug classes at once, which is why several rows share one gene
+# -- but the specific MIC for each is organism- and drug-dependent,
+# and that is the part this file does not supply.
+#
+# Where to get the real thing:
+#
+# * EUCAST -- https://www.eucast.org/clinical_breakpoints/ (open
+#   access, per-drug tables, updated annually). This is the default
+#   `standard` value here.
+# * CLSI M100 -- paywalled subscription (US standard). Same column
+#   shape, so switching is a matter of which file is loaded.
+#
+# CLSI M100's S/I/R are on a doubling dilution series, so MIC values
+# here are meant to be read as log2 steps, which is also the scale
+# `burden_correlation` reports on.
+organism	drug	s_max	i_max	r_min	standard
+Escherichia coli	ciprofloxacin	0.25		EUCAST
+Escherichia coli	levofloxacin	0.5		EUCAST
+Escherichia coli	ampicillin	8		EUCAST
+Escherichia coli	ampicillin-sulbactam	8	16	EUCAST
+Escherichia coli	tetracycline	8		EUCAST
+Escherichia coli	chloramphenicol	16		EUCAST
+Escherichia coli	gentamicin	2	4	8	CLSI
+Escherichia coli	amikacin	16	32		CLSI
+Escherichia coli	trimethoprim-sulfamethoxazole	2		CLSI
+Escherichia coli	cefazolin	0.5		CLSI
+Klebsiella pneumoniae	ciprofloxacin	0.25		EUCAST
+Klebsiella pneumoniae	ampicillin	8		EUCAST
+Klebsiella pneumoniae	gentamicin	2	4	8	CLSI

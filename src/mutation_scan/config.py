@@ -46,10 +46,28 @@ _DEFAULTS: dict[str, Any] = {
     "uniprot_taxid": "",
     "min_identity_percent": 80.0,
     "min_coverage_percent": 80.0,
+    # Share of the reference protein that a truncation must remove
+    # downstream of a stop codon to count as a functional knockout.
+    # A percent, like the gates above: 20 means 20%.
+    "knockout_lost_percent": 20.0,
     "tblastn_binary": "tblastn",
     "threads": 1,
+    "variant_threads": 1,
     "cooccurrence": {"levels": ["gene"], "min_count": 1},
-    "epistasis": {"fdr_threshold": 0.05, "min_count": 1, "threads": 1},
+    # `threads` defaults to None, meaning "inherit the run's `threads`". An
+    # explicit value still wins. Doing the inheritance here means both entry
+    # points -- this file and the `--threads` flag -- read one already-resolved
+    # value, so they cannot disagree about how wide epistasis runs.
+    "epistasis": {"fdr_threshold": 0.05, "min_count": 1, "threads": None},
+    # Species -> {genome_pattern, references}. Empty means one flat reference
+    # set, which is only correct for a single-species cohort. See
+    # :mod:`mutation_scan.species` for why this is not a nicety.
+    "species": {},
+    # Optional path to a TSV/CSV mapping Accession -> Lineage (e.g. ST,
+    # phylogroup). Enables population-structure control: epistatic pairs are
+    # annotated with their lineage distribution and classified as Clonal
+    # (single lineage) or Convergent (multiple lineages).
+    "lineage_manifest": "",
 }
 
 
@@ -63,7 +81,13 @@ class CooccurrenceConfig:
 
 @dataclass(frozen=True)
 class EpistasisConfig:
-    """Settings for the epistasis stage."""
+    """Settings for the epistasis stage.
+
+    ``threads`` is always a concrete worker count by the time a Config exists:
+    an unset value has already been resolved to the run's top-level ``threads``
+    in :meth:`Config.from_mapping`. Nothing downstream should have to know
+    whether the user asked for it or inherited it.
+    """
 
     fdr_threshold: float = 0.05
     min_count: int = 1
@@ -82,10 +106,19 @@ class Config:
     uniprot_taxid: str
     min_identity_percent: float
     min_coverage_percent: float
+    #: Share of the reference protein a truncation must remove
+    #: downstream of a stop codon to be called a functional knockout.
+    knockout_lost_percent: float
     tblastn_binary: str
     threads: int
+    variant_threads: int
     cooccurrence: CooccurrenceConfig
     epistasis: EpistasisConfig
+    #: ``(key, genome_pattern, references)`` per species, sorted by key. Stored
+    #: as a tuple of tuples rather than a dict so the frozen Config stays
+    #: hashable and round-trips exactly through :meth:`to_dict`.
+    species: tuple[tuple[str, str, str], ...] = ()
+    lineage_manifest: Path | None = None
 
     # -- derived run layout -------------------------------------------------
     # One folder per run; nothing else writes outside it.
@@ -148,8 +181,12 @@ class Config:
     def run_summary_json(self) -> Path:
         return self.run_dir / "run_summary.json"
 
+    @property
+    def dn_ds_csv(self) -> Path:
+        return self.run_dir / "dn_ds.csv"
+
     def outputs(self) -> tuple[Path, ...]:
-        """Files a complete run is expected to produce."""
+        """Files a complete Snakemake run is expected to produce."""
         paths = [
             self.manifest_csv,
             self.mutations_csv,
@@ -179,7 +216,13 @@ class Config:
         working directory, which is what Snakemake sets to the workdir).
         """
         raw = dict(_DEFAULTS)
+        # All three nested mappings are re-created. dict(_DEFAULTS) is a shallow
+        # copy, so updating raw["epistasis"] in place would otherwise write
+        # through to the module-level defaults and every later Config in this
+        # process would inherit them.
         raw["cooccurrence"] = dict(_DEFAULTS["cooccurrence"])
+        raw["epistasis"] = dict(_DEFAULTS["epistasis"])
+        raw["species"] = dict(_DEFAULTS["species"])
 
         supplied = dict(mapping or {})
         unknown = sorted(set(supplied) - set(_DEFAULTS))
@@ -216,6 +259,16 @@ class Config:
 
         root = Path(base_dir) if base_dir is not None else Path.cwd()
 
+        def _resolve_optional_path(key: str) -> Path | None:
+            raw_val = supplied.get(key)
+            if raw_val is None:
+                return None
+            value = str(raw_val).strip()
+            if not value:
+                return None
+            path = Path(value).expanduser()
+            return path if path.is_absolute() else (root / path)
+
         def _resolve(key: str) -> Path:
             value = str(raw[key]).strip()
             if not value:
@@ -229,6 +282,13 @@ class Config:
         if Path(job_name).name != job_name or job_name in {".", ".."}:
             raise ConfigError(f"'job_name' must be a single folder name, got {job_name!r}.")
 
+        threads = _positive_int(raw["threads"], "threads")
+        epistasis_threads = raw["epistasis"].get("threads")
+        if epistasis_threads is None:
+            # Inherit rather than defaulting to 1. Both entry points -- the CLI
+            # and the Snakefile -- read this one resolved value, so neither can
+            # disagree about how wide epistasis runs.
+            epistasis_threads = threads
         config = cls(
             job_name=job_name,
             genomes_dir=_resolve("genomes_dir"),
@@ -238,8 +298,10 @@ class Config:
             uniprot_taxid=str(raw["uniprot_taxid"]).strip(),
             min_identity_percent=_percent(raw["min_identity_percent"], "min_identity_percent"),
             min_coverage_percent=_percent(raw["min_coverage_percent"], "min_coverage_percent"),
+            knockout_lost_percent=_percent(raw["knockout_lost_percent"], "knockout_lost_percent"),
             tblastn_binary=str(raw["tblastn_binary"]).strip() or "tblastn",
-            threads=_positive_int(raw["threads"], "threads"),
+            threads=threads,
+            variant_threads=_positive_int(raw["variant_threads"], "variant_threads"),
             cooccurrence=CooccurrenceConfig(
                 levels=_clean_levels(raw["cooccurrence"]["levels"]),
                 min_count=_positive_int(raw["cooccurrence"]["min_count"], "cooccurrence.min_count"),
@@ -249,10 +311,23 @@ class Config:
                     raw["epistasis"]["fdr_threshold"], "epistasis.fdr_threshold"
                 ),
                 min_count=_positive_int(raw["epistasis"]["min_count"], "epistasis.min_count"),
-                threads=_positive_int(raw["epistasis"]["threads"], "epistasis.threads"),
+                threads=_positive_int(epistasis_threads, "epistasis.threads"),
             ),
+            species=_clean_species(supplied.pop("species", None)),
+            lineage_manifest=_resolve_optional_path("lineage_manifest"),
         )
         return config
+
+    def species_settings(self) -> dict[str, dict[str, str]]:
+        """The ``species`` block as the mapping the CLI and config file use.
+
+        Stored as sorted triples so the frozen dataclass stays hashable; this is
+        the view that :func:`mutation_scan.species.parse_species_panel` consumes.
+        """
+        return {
+            key: {"genome_pattern": pattern, "references": references}
+            for key, pattern, references in self.species
+        }
 
     def with_overrides(self, **overrides: Any) -> Config:
         """Return a copy with fields replaced (used by the CLI)."""
@@ -284,8 +359,10 @@ class Config:
             "uniprot_taxid": self.uniprot_taxid,
             "min_identity_percent": self.min_identity_percent,
             "min_coverage_percent": self.min_coverage_percent,
+            "knockout_lost_percent": self.knockout_lost_percent,
             "tblastn_binary": self.tblastn_binary,
             "threads": self.threads,
+            "variant_threads": self.variant_threads,
             "cooccurrence": {
                 "levels": list(self.cooccurrence.levels),
                 "min_count": self.cooccurrence.min_count,
@@ -295,6 +372,8 @@ class Config:
                 "min_count": self.epistasis.min_count,
                 "threads": self.epistasis.threads,
             },
+            "species": self.species_settings(),
+            "lineage_manifest": str(self.lineage_manifest) if self.lineage_manifest else None,
         }
 
 
@@ -338,6 +417,27 @@ def _positive_int(value: Any, label: str) -> int:
     if number < 1:
         raise ConfigError(f"'{label}' must be >= 1, got {number}.")
     return number
+
+
+def _clean_species(value: Any) -> tuple[tuple[str, str, str], ...]:
+    """Normalise the ``species`` block into sorted ``(key, pattern, refs)`` triples.
+
+    Validated through :func:`mutation_scan.species.parse_species_panel` so the
+    config file and the runtime panel cannot disagree about what is valid; the
+    panel's resolved paths are discarded here because they depend on
+    ``references_dir``, which is only known once paths are resolved.
+    """
+    from .species import parse_species_panel
+
+    if not value:
+        return ()
+    panel = parse_species_panel(value, references_dir=".")
+    return tuple(
+        sorted(
+            (profile.key, profile.genome_pattern, str(profile.references_dir))
+            for profile in panel.profiles
+        )
+    )
 
 
 def _clean_targets(value: Any) -> tuple[str, ...]:

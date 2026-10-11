@@ -19,18 +19,29 @@ from collections.abc import Mapping
 import pandas as pd
 from Bio.Align import substitution_matrices
 
+from .variants import LOF_ALLELE
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "CHARGE",
     "HYDROPATHY",
     "VOLUME",
+    "LOF_SEVERITY",
     "compute_severity",
     "mutation_severity",
     "pair_severity",
 ]
 
 _BLOSUM62 = substitution_matrices.load("BLOSUM62")
+
+#: Loss-of-function is a categorical class, not a substitution, so it carries
+#: no per-residue biochemical delta. It scores at the top of the 0-100 scale:
+#: a knockout or frameshift destroys (or near-destroys) the protein's
+#: structure, which is the maximal functional impact the severity model can
+#: express. A pair's severity is the mean of its two variants' severity
+#: scores, so a LoF paired with anything inherits most of that impact.
+LOF_SEVERITY = 100.0
 
 CHARGE: Mapping[str, int] = {
     "A": 0,
@@ -156,20 +167,58 @@ def mutation_severity(mutations: pd.DataFrame) -> pd.DataFrame:
             ]
         )
 
+    # compute_severity is a pure function of the two residues, so there are at
+    # most a few hundred distinct answers however many mutation rows there are.
+    # Memoising it turns ~66k calls at cohort scale into a few hundred, which is
+    # the same exactness argument used for the epistasis contingency tables.
+    # iterrows is avoided for the same reason: it boxes every row into a Series.
+    cache: dict[tuple[str, str], dict] = {}
+    accessions = mutations["Accession"].tolist() if "Accession" in mutations.columns else []
+    genes = mutations["Gene"].tolist() if "Gene" in mutations.columns else []
+    mutations_col = mutations["Mutation"].tolist() if "Mutation" in mutations.columns else []
+
     records: list[dict] = []
-    for _, row in mutations.iterrows():
-        mut = str(row.get("Mutation", ""))
+    for accession, gene, raw in zip(accessions, genes, mutations_col, strict=True):
+        mut = str(raw)
+        if mut == LOF_ALLELE:
+            # A loss-of-function allele is not a substitution, so it has no
+            # Ref_Alt residues to score with BLOSUM62. Without this guard the
+            # "L" and "F" of the literal "LoF" parse as a Leu->Phe change and
+            # emit a bogus biochemical score. Severity is categorical.
+            records.append(
+                {
+                    "blosum62_score": 0,
+                    "charge_delta": 0,
+                    "kd_delta": 0.0,
+                    "volume_delta": 0,
+                    "severity_score": LOF_SEVERITY,
+                    "Accession": accession,
+                    "Gene": gene,
+                    "Mutation": LOF_ALLELE,
+                    "Ref_AA": "",
+                    "Alt_AA": "",
+                }
+            )
+            continue
         if len(mut) < 2:
             continue
         ref_aa = mut[0]
         alt_aa = mut[-1]
-        s = compute_severity(ref_aa, alt_aa)
-        s["Accession"] = row["Accession"]
-        s["Gene"] = row["Gene"]
-        s["Mutation"] = mut
-        s["Ref_AA"] = ref_aa
-        s["Alt_AA"] = alt_aa
-        records.append(s)
+        key = (ref_aa, alt_aa)
+        metrics = cache.get(key)
+        if metrics is None:
+            metrics = compute_severity(ref_aa, alt_aa)
+            cache[key] = metrics
+        records.append(
+            {
+                **metrics,
+                "Accession": accession,
+                "Gene": gene,
+                "Mutation": mut,
+                "Ref_AA": ref_aa,
+                "Alt_AA": alt_aa,
+            }
+        )
 
     frame = pd.DataFrame(records)
     cols = [
@@ -187,16 +236,45 @@ def mutation_severity(mutations: pd.DataFrame) -> pd.DataFrame:
     return frame[cols]
 
 
-def pair_severity(variant_a: str, variant_b: str, severity: pd.DataFrame) -> float:
-    """Average severity of two variants across all genomes that carry them."""
+def build_severity_index(severity: pd.DataFrame) -> dict[tuple[str, str], float]:
+    """Mean severity per ``(gene, mutation)``, built once for many lookups.
+
+    Pair scoring needs this same lookup once per candidate pair. Computing it
+    per pair means re-scanning the whole severity table each time, which is
+    quadratic: at cohort scale it dominated the epistasis stage so completely
+    that the run never finished.
+    """
+    if severity.empty:
+        return {}
+    grouped = (
+        severity.assign(
+            _gene=severity["Gene"].astype(str),
+            _mutation=severity["Mutation"].astype(str),
+        )
+        .groupby(["_gene", "_mutation"])["severity_score"]
+        .mean()
+    )
+    return {(str(gene), str(mutation)): float(value) for (gene, mutation), value in grouped.items()}
+
+
+def pair_severity(
+    variant_a: str,
+    variant_b: str,
+    severity: pd.DataFrame,
+    index: dict[tuple[str, str], float] | None = None,
+) -> float:
+    """Average severity of two variants across all genomes that carry them.
+
+    Pass *index* (from :func:`build_severity_index`) when scoring many pairs;
+    without it each call rescans *severity*.
+    """
     if severity.empty:
         return 0.0
+    if index is None:
+        index = build_severity_index(severity)
 
     def _mean(variant: str) -> float:
         gene, mut = variant.split(":", 1)
-        sub = severity[
-            (severity["Gene"].astype(str) == gene) & (severity["Mutation"].astype(str) == mut)
-        ]
-        return float(sub["severity_score"].mean()) if not sub.empty else 0.0
+        return index.get((gene, mut), 0.0)
 
     return round((_mean(variant_a) + _mean(variant_b)) / 2.0, 2)

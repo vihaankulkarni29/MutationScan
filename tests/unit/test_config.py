@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mutation_scan.config import Config, ConfigError, load_config
+from mutation_scan.config import _DEFAULTS, Config, ConfigError, load_config
 
 
 def test_defaults_are_usable(tmp_path):
@@ -13,6 +13,7 @@ def test_defaults_are_usable(tmp_path):
     assert config.job_name == "default_run"
     assert config.min_identity_percent == 80.0
     assert config.min_coverage_percent == 80.0
+    assert config.knockout_lost_percent == 20.0
     assert config.cooccurrence.levels == ("gene",)
     assert config.cooccurrence.min_count == 1
     assert config.targets == ()
@@ -81,6 +82,9 @@ def test_null_values_fall_back_to_defaults(tmp_path):
         {"min_identity_percent": 101},
         {"min_identity_percent": -1},
         {"min_coverage_percent": "abc"},
+        {"knockout_lost_percent": 101},
+        {"knockout_lost_percent": -1},
+        {"knockout_lost_percent": "abc"},
         {"threads": 0},
         {"cooccurrence": {"min_count": 0}},
         {"cooccurrence": {"levels": []}},
@@ -123,7 +127,10 @@ def test_require_inputs_rejects_a_file_where_a_directory_is_expected(tmp_path):
 def test_load_config_reads_yaml(tmp_path):
     config_file = tmp_path / "config.yaml"
     config_file.write_text(
-        "job_name: yaml_run\nmin_identity_percent: 95\ncooccurrence:\n  min_count: 3\n",
+        "job_name: yaml_run\n"
+        "min_identity_percent: 95\n"
+        "knockout_lost_percent: 50\n"
+        "cooccurrence:\n  min_count: 3\n",
         encoding="utf-8",
     )
 
@@ -131,6 +138,7 @@ def test_load_config_reads_yaml(tmp_path):
 
     assert config.job_name == "yaml_run"
     assert config.min_identity_percent == 95.0
+    assert config.knockout_lost_percent == 50.0
     assert config.cooccurrence.min_count == 3
     # Unspecified nested keys keep their defaults.
     assert config.cooccurrence.levels == ("gene",)
@@ -168,3 +176,160 @@ def test_shipped_config_is_valid():
 
     assert config.job_name
     assert config.min_identity_percent > 0
+
+
+# -- nested defaults must not leak between builds ----------------------------
+
+
+def test_epistasis_settings_do_not_leak_into_later_configs(tmp_path):
+    """Regression: `dict(_DEFAULTS)` is a shallow copy.
+
+    ``raw["epistasis"]`` used to alias the module-level defaults, so building a
+    config with ``epistasis.threads: 8`` rewrote the default for the rest of the
+    process. Every later Config then silently inherited it -- the same class of
+    cross-call state leak as the pool initializer taking no arguments.
+    """
+    tuned = Config.from_mapping({"epistasis": {"threads": 8, "min_count": 4}}, tmp_path)
+    assert tuned.epistasis.threads == 8
+    assert tuned.epistasis.min_count == 4
+
+    plain = Config.from_mapping({}, tmp_path)
+
+    assert plain.epistasis.threads == 1
+    assert plain.epistasis.min_count == 1
+    assert _DEFAULTS["epistasis"]["threads"] is None
+    assert _DEFAULTS["epistasis"]["min_count"] == 1
+
+
+def test_epistasis_threads_inherit_the_run_width_by_default(tmp_path):
+    """One inheritance rule, in one place, so both entry points agree.
+
+    The file default used to be a hard 1: `--threads 8` and `snakemake --cores 8`
+    both widened extraction and variant calling while epistasis silently stayed
+    serial, and nothing in the run's output said so.
+    """
+    wide = Config.from_mapping({"threads": 6}, tmp_path)
+    assert wide.epistasis.threads == 6
+
+    narrow = Config.from_mapping({"threads": 2}, tmp_path)
+    assert narrow.epistasis.threads == 2
+
+
+def test_explicit_epistasis_threads_still_win(tmp_path):
+    config = Config.from_mapping({"threads": 6, "epistasis": {"threads": 2}}, tmp_path)
+
+    assert config.threads == 6
+    assert config.epistasis.threads == 2
+
+
+def test_cooccurrence_settings_do_not_leak_into_later_configs(tmp_path):
+    tuned = Config.from_mapping({"cooccurrence": {"min_count": 9}}, tmp_path)
+    assert tuned.cooccurrence.min_count == 9
+
+    plain = Config.from_mapping({}, tmp_path)
+
+    assert plain.cooccurrence.min_count == 1
+    assert _DEFAULTS["cooccurrence"]["min_count"] == 1
+
+
+# -- CLI thread wiring -------------------------------------------------------
+
+
+def _run_config(tmp_path, *extra):
+    from mutation_scan.cli import _config_from_args, build_parser
+
+    genomes = tmp_path / "genomes"
+    references = tmp_path / "refs"
+    genomes.mkdir(exist_ok=True)
+    references.mkdir(exist_ok=True)
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--genomes",
+            str(genomes),
+            "--references",
+            str(references),
+            "--out",
+            str(tmp_path / "out"),
+            *extra,
+        ]
+    )
+    return _config_from_args(args)
+
+
+def test_epistasis_threads_default_to_the_thread_count(tmp_path):
+    """`--threads 8` must widen epistasis too, or the flag quietly does nothing.
+
+    It used to leave epistasis at its config default of 1, with no command-line
+    way to change it.
+    """
+    config = _run_config(tmp_path, "--threads", "8")
+
+    assert config.threads == 8
+    assert config.epistasis.threads == 8
+
+
+def test_explicit_epistasis_threads_win(tmp_path):
+    config = _run_config(tmp_path, "--threads", "8", "--epistasis-threads", "2")
+
+    assert config.threads == 8
+    assert config.epistasis.threads == 2
+
+
+def test_omitting_both_leaves_epistasis_at_its_default(tmp_path):
+    config = _run_config(tmp_path)
+
+    assert config.threads == 1
+    assert config.epistasis.threads == 1
+
+
+def test_epistasis_threads_do_not_disturb_the_other_settings(tmp_path):
+    """Widening the stage must not clobber fdr_threshold or min_count."""
+    tuned = _run_config(tmp_path, "--threads", "4")
+    assert tuned.epistasis.fdr_threshold == 0.05
+    assert tuned.epistasis.min_count == 1
+
+
+def test_knockout_lost_percent_defaults_then_flag_wins(tmp_path):
+    """The 20% knockout bar is a setting, not a constant in the code."""
+    default = _run_config(tmp_path)
+    assert default.knockout_lost_percent == 20.0
+
+    tuned = _run_config(tmp_path, "--knockout-lost-percent", "5")
+    assert tuned.knockout_lost_percent == 5.0
+
+    strict = _run_config(tmp_path, "--knockout-lost-percent", "90")
+    assert strict.knockout_lost_percent == 90.0
+
+
+# -- the README must document a config the tool accepts ----------------------
+
+
+def test_the_readme_config_block_still_loads(tmp_path):
+    """Keep the documented schema honest.
+
+    The README used to show `epistasis.threads: 1`, which parsed fine and was
+    quietly wrong: it documented the exact value that left the stage serial
+    while the rest of the run went parallel. A doc block that the loader rejects
+    would be obvious; one that loads but means something stale is not, which is
+    why this also asserts the *resolved* values rather than just parseability.
+    """
+    import re
+    from pathlib import Path
+
+    from mutation_scan.config import load_config
+
+    readme = Path(__file__).resolve().parents[2] / "README.md"
+    blocks = re.findall(r"```yaml\n(.*?)```", readme.read_text(encoding="utf-8"), re.S)
+    assert blocks, "no yaml config block found in the README"
+
+    block = tmp_path / "readme.yaml"
+    block.write_text(blocks[0], encoding="utf-8")
+
+    config = load_config(block, base_dir=tmp_path)
+
+    # The documented defaults must all resolve to the same width, or the README
+    # is telling a user to run a narrower stage than it implies.
+    assert config.epistasis.threads == config.threads
+    assert config.epistasis.fdr_threshold > 0
+    assert config.epistasis.min_count >= 1

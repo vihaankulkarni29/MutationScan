@@ -18,17 +18,21 @@ import argparse
 import json
 import logging
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
-from .config import Config, ConfigError, load_config
+from .config import Config, ConfigError, EpistasisConfig, load_config
 from .cooccurrence import cooccurrence
 from .diagnostics import diagnose_empty_extraction, diagnose_empty_variants
 from .epistasis import epistasis_networks
-from .extract import STATUS_EXTRACTED, extract
+from .extract import STATUS_EXTRACTED, discover_genomes, extract
+from .parallel import available_cores
+from .parallel_plan import describe, format_plan
 from .preflight import preflight
-from .references import prepare_references
+from .references import ReferenceSet, prepare_references, prepare_species_references
+from .species import parse_species_panel
 from .summary import write_run_summary
 from .variants import VARIANT_STATUS_CALLED, call_variants
 
@@ -119,6 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-coverage", type=float, metavar="PCT", help="reject a protein below this %% coverage"
     )
     run_parser.add_argument(
+        "--knockout-lost-percent",
+        type=float,
+        metavar="PCT",
+        help=(
+            "share of the reference protein a truncation must lose "
+            "downstream of a stop codon to count as a functional "
+            "knockout (default: 20%%)"
+        ),
+    )
+    run_parser.add_argument(
         "--cooccurrence-level",
         metavar="LIST",
         help="'gene', 'variant', or 'gene,variant' (default: gene)",
@@ -128,7 +142,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--threads", type=int, metavar="N", help="concurrent tblastn processes")
     run_parser.add_argument(
+        "--variant-threads", type=int, metavar="N", help="parallel processes for variant calling"
+    )
+    run_parser.add_argument(
+        "--epistasis-threads",
+        type=int,
+        metavar="N",
+        help=(
+            "accepted for compatibility, but epistasis no longer uses a process "
+            "pool: it resolves every pair's counts with one Gram matrix per "
+            "universe and runs one Fisher test per distinct 2x2 table, so this "
+            "changes nothing. Recorded in the run summary as advisory "
+            "(default: same as --threads)"
+        ),
+    )
+    run_parser.add_argument(
         "--config", metavar="FILE", help="YAML config to start from; flags override it"
+    )
+    run_parser.add_argument(
+        "--lineage-manifest",
+        metavar="FILE",
+        help=(
+            "TSV/CSV mapping Accession -> Lineage (e.g. ST, phylogroup). "
+            "Enables clonal vs. convergent classification of epistatic pairs."
+        ),
     )
     run_parser.add_argument(
         "--allow-empty",
@@ -210,6 +247,16 @@ def _config_from_args(args: argparse.Namespace) -> Config:
             ),
         )
 
+    # Epistasis defaults to the same width as --threads. Without this, asking
+    # for 8 threads left that stage serial with no way to widen it from the
+    # command line, which is the opposite of what --threads implies. When
+    # neither flag is given, the config's own value stands.
+    epistasis_threads = args.epistasis_threads
+    if epistasis_threads is None:
+        epistasis_threads = args.threads
+    if epistasis_threads is None:
+        epistasis_threads = config.epistasis.threads
+
     return config.with_overrides(
         job_name=args.job_name,
         genomes_dir=Path(args.genomes).expanduser().resolve() if args.genomes else None,
@@ -219,8 +266,20 @@ def _config_from_args(args: argparse.Namespace) -> Config:
         uniprot_taxid=args.taxid,
         min_identity_percent=args.min_identity,
         min_coverage_percent=args.min_coverage,
+        knockout_lost_percent=args.knockout_lost_percent,
         threads=args.threads,
+        variant_threads=args.variant_threads,
         cooccurrence=cooccurrence_config,
+        epistasis=EpistasisConfig(
+            fdr_threshold=config.epistasis.fdr_threshold,
+            min_count=config.epistasis.min_count,
+            threads=epistasis_threads,
+        ),
+        lineage_manifest=(
+            Path(args.lineage_manifest).expanduser().resolve()
+            if getattr(args, "lineage_manifest", None)
+            else None
+        ),
     )
 
 
@@ -238,6 +297,10 @@ def _report_empty(lines: Sequence[str], allow_empty: bool) -> int:
 
 def run(config: Config, allow_empty: bool = False) -> int:
     """Execute all four stages in order. Returns a process exit code."""
+    # Started before anything else so preflight -- which on a large cohort spends
+    # real time reading every genome header -- is timed too. A timing report
+    # that shows 0.0 for the second-slowest stage is worse than none.
+    started = time.perf_counter()
     config.require_inputs()
 
     logger.info("MutationScan %s -- run '%s'", __version__, config.job_name)
@@ -257,31 +320,121 @@ def run(config: Config, allow_empty: bool = False) -> int:
 
     # 1. Targets come from the reference filenames -- this is the only place the
     #    gene list is decided, and it is decided by the user's own directory.
-    targets = report.targets
+    #    With a species panel, targets are the union across species: a gene only
+    #    some species have is still worth analysing there, and the pairs it
+    #    cannot serve are reported rather than silently dropped.
+    panel = parse_species_panel(config.species_settings(), config.references_dir)
+    species_references: dict[str, ReferenceSet] = {}
+    species_refs_dirs: dict[str, Path] = {}
+
+    if panel.enabled:
+        logger.info(
+            "Species-aware run: %d species, each genome compared only against its "
+            "own species' references",
+            len(panel.profiles),
+        )
+        species_references = prepare_species_references(
+            config.references_dir, config.refs_dir, panel, config.uniprot_taxid
+        )
+        if not species_references:
+            logger.error(
+                "No usable per-species reference directory. Check the 'species' "
+                "block in the config."
+            )
+            return EXIT_USAGE
+        for key, reference_set in species_references.items():
+            species_refs_dirs[key] = reference_set.refs_dir
+
+        # Targets are the union across species, never the flat directory's guess: the
+        # flat listing includes genes no species provides, and adopting it would
+        # quietly reintroduce the cross-species comparison this run exists to stop.
+        targets = sorted(
+            {gene for reference_set in species_references.values() for gene in reference_set.genes}
+        )
+        unassigned = panel.unassigned(discover_genomes(config.genomes_dir))
+        if unassigned:
+            logger.error(
+                "%d genome(s) match no configured species pattern (e.g. %s). "
+                "Add a species entry covering them, or rename them. Nothing was "
+                "compared for these, because no reference can be trusted for them.",
+                len(unassigned),
+                unassigned[0].name,
+            )
+            return EXIT_USAGE
+    else:
+        targets = report.targets
+
     logger.info("Targets (%d): %s", len(targets), ", ".join(targets))
 
-    references = prepare_references(
-        config.references_dir, config.refs_dir, targets, config.uniprot_taxid
-    )
-    if references.missing:
-        logger.error(
-            "No reference available for: %s. Supply <gene>_WT.faa in %s, or set "
-            "--taxid to fetch from UniProt.",
-            ", ".join(references.missing),
-            config.references_dir,
+    if not panel.enabled:
+        references = prepare_references(
+            config.references_dir, config.refs_dir, targets, config.uniprot_taxid
         )
-        return EXIT_USAGE
+        if references.missing:
+            logger.error(
+                "No reference available for: %s. Supply <gene>_WT.faa in %s, or set "
+                "--taxid to fetch from UniProt.",
+                ", ".join(references.missing),
+                config.references_dir,
+            )
+            return EXIT_USAGE
+    else:
+        missing = sorted(
+            {
+                gene
+                for reference_set in species_references.values()
+                for gene in reference_set.missing
+            }
+        )
+        if missing:
+            logger.error("No reference available for: %s", ", ".join(missing))
+            return EXIT_USAGE
+
+        # A merged view of every species' references, so the shared reporting and
+        # summary path has one ReferenceSet to read. Built from the union rather
+        # than any single species, so no species' protein is presented as *the*
+        # reference for the run.
+        references = ReferenceSet(refs_dir=config.refs_dir)
+        seen: set[str] = set()
+        for reference_set in species_references.values():
+            for gene in reference_set.genes:
+                if gene.lower() not in seen:
+                    seen.add(gene.lower())
+                    references.genes.append(gene)
+            references.lengths.update(reference_set.lengths)
+            for gene in reference_set.missing:
+                if gene.lower() not in seen:
+                    seen.add(gene.lower())
+                    references.missing.append(gene)
+        references.sources = {
+            gene: f"species:{species}"
+            for species, reference_set in species_references.items()
+            for gene in reference_set.genes
+        }
+
+    # Every stage is timed. A run summary that records what came out but not
+    # where the time went is why a quadratic blow-up in the last stage went
+    # unnoticed: the only way to see it was to read the log.
+    def stage(name: str) -> float:
+        return time.perf_counter() - started
+
+    timings: dict[str, float] = {"preflight": round(stage("preflight"), 3)}
+    mark = stage("extraction")
 
     # 2. Extract every target protein from every genome.
     manifest = extract(
         config.genomes_dir,
         config.refs_dir,
         config.proteins_dir,
-        references,
+        targets if panel.enabled else references,
         manifest_csv=config.manifest_csv,
         tblastn_binary=config.tblastn_binary,
         threads=config.threads,
+        panel=panel if panel.enabled else None,
+        species_references=species_references or None,
     )
+    timings["extraction"] = round(stage("extraction") - mark, 3)
+    mark = stage("variants")
 
     extracted = (
         int((manifest["Status"] == STATUS_EXTRACTED).sum())
@@ -300,9 +453,14 @@ def run(config: Config, allow_empty: bool = False) -> int:
         manifest=manifest,
         min_identity_percent=config.min_identity_percent,
         min_coverage_percent=config.min_coverage_percent,
+        knockout_lost_percent=config.knockout_lost_percent,
         mutations_csv=config.mutations_csv,
         qc_csv=config.variant_qc_csv,
+        threads=config.variant_threads,
+        species_refs_dirs=species_refs_dirs or None,
     )
+    timings["variants"] = round(stage("variants") - mark, 3)
+    mark = stage("cooccurrence")
 
     called = (
         int((variants.qc["Status"] == VARIANT_STATUS_CALLED).sum())
@@ -330,6 +488,8 @@ def run(config: Config, allow_empty: bool = False) -> int:
             config.cooccurrence_variants_csv if "variant" in config.cooccurrence.levels else None
         ),
     )
+    timings["cooccurrence"] = round(stage("cooccurrence") - mark, 3)
+    mark = stage("epistasis")
 
     # 5. Epistasis -- genome mutation maps + statistical pair networks.
     #    Only runs when there are at least two mutations to compare.
@@ -340,7 +500,28 @@ def run(config: Config, allow_empty: bool = False) -> int:
         fdr_threshold=config.epistasis.fdr_threshold,
         min_count=config.epistasis.min_count,
         threads=config.epistasis.threads,
+        lineage_manifest=config.lineage_manifest,
     )
+    timings["epistasis"] = round(stage("epistasis") - mark, 3)
+    mark = stage("dn_ds")
+
+    # 6. dN/dS -- per-gene selection pressure from nucleotide CDS.
+    from .evolution import compute_dn_ds
+
+    dn_ds_frame = compute_dn_ds(
+        mutations=variants.mutations,
+        manifest=manifest,
+        refs_dir=config.refs_dir,
+        genomes_dir=config.genomes_dir,
+        genes=list(config.targets) if config.targets else None,
+    )
+    if dn_ds_frame is not None and not dn_ds_frame.empty:
+        dn_ds_path = config.dn_ds_csv
+        dn_ds_path.parent.mkdir(parents=True, exist_ok=True)
+        dn_ds_frame.to_csv(dn_ds_path, index=False)
+        logger.info("Wrote dN/dS: %s (%d genes)", dn_ds_path, len(dn_ds_frame))
+    timings["dn_ds"] = round(stage("dn_ds") - mark, 3)
+    timings["total"] = round(stage("done"), 3)
 
     write_run_summary(
         config,
@@ -350,8 +531,13 @@ def run(config: Config, allow_empty: bool = False) -> int:
         mutations=variants.mutations,
         cooccurrence=counts,
         tblastn_version=report.tblastn_version,
+        timings=timings,
     )
 
+    slowest = max(timings, key=lambda name: timings[name] if name != "total" else -1)
+    logger.info(
+        "Slowest stage: %s (%.2fs of %.2fs total)", slowest, timings[slowest], timings["total"]
+    )
     logger.info("Done. Results in %s", config.run_dir)
     return EXIT_OK
 
@@ -372,6 +558,8 @@ def _config_check(args: argparse.Namespace) -> int:
         "settings": config.to_dict(),
         "run_dir": str(config.run_dir),
         "expected_outputs": [str(path) for path in config.outputs()],
+        "cores_available": available_cores(),
+        "parallelism": [stage.to_dict() for stage in describe(config)],
         "inputs_present": inputs_present,
         "preflight": {
             "ran": report is not None,
@@ -409,6 +597,16 @@ def _config_check(args: argparse.Namespace) -> int:
             print(f"  WARNING: {warning}")
         for error in report.errors:
             print(f"  ERROR: {error}")
+
+    stages = describe(config)
+    print(f"parallelism ({available_cores()} core(s) available):")
+    print(format_plan(stages))
+    for stage in stages:
+        if stage.effective < stage.requested:
+            print(
+                f"  NOTE: {stage.name} asked for {stage.requested} workers, "
+                f"will use {stage.effective}"
+            )
 
     print("expected outputs:")
     for path in config.outputs():

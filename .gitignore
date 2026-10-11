@@ -17,6 +17,7 @@ data/genomes/*
 !data/genomes/.gitkeep
 data/references/*
 !data/references/.gitkeep
+!data/references/*_WT.faa
 data/databases/*
 !data/databases/.gitkeep
 data/output/*
@@ -65,6 +66,10 @@ dmypy.json
 .DS_Store
 Thumbs.db
 
+# Agent tooling state. Deliberately untracked: it is per-machine scratch, not
+# project source.
+.claude/
+
 # Logs, caches, scratch
 logs/
 *.log
@@ -74,3 +79,15 @@ logs/
 
 # Docker
 docker-compose.override.yml
+
+# Benchmark generated artifacts: synthetic cohorts, ground truth,
+# reports and tool run outputs are reproducible, not source.
+# Ignoring the *contents* rather than the directory itself matters:
+# git does not descend into an excluded directory, so a file inside
+# one cannot be re-included, and the documented example fixtures
+# below are hand-written source that should be tracked.
+benchmarks/data/*
+!benchmarks/data/.gitkeep
+!benchmarks/data/*.example.tsv
+benchmarks/results/
+benchmarks/runs/

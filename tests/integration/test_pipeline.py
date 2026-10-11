@@ -110,6 +110,11 @@ def completed_run(tmp_path_factory):
             "gene,variant",
             "--threads",
             "2",
+            # Without this the fixture ran variant calling serially, so the
+            # serial/parallel comparison below never crossed that stage's
+            # process path.
+            "--variant-threads",
+            "2",
         ]
     )
     assert exit_code == 0
@@ -224,6 +229,54 @@ def test_variant_level_pairs_use_the_gene_level_denominator(completed_run):
 
 
 @requires_tblastn
+def test_the_run_summary_records_timings_for_every_stage(completed_run):
+    """The run summary is the only artifact a run leaves behind.
+
+    If it does not say where the time went, the next person to wonder "why is
+    this slow" has nothing to read but a log they were not watching. A stage
+    reported as 0.0s is worse than absent, because it looks measured.
+    """
+    summary = json.loads(completed_run.run_summary_json.read_text(encoding="utf-8"))
+    timings = summary["timings_seconds"]
+
+    for stage in ("preflight", "extraction", "variants", "cooccurrence", "epistasis"):
+        assert stage in timings, f"{stage} is not timed"
+        assert timings[stage] > 0.0, (
+            f"{stage} reported as {timings[stage]}s, which is not a measurement"
+        )
+
+    assert timings["total"] >= max(
+        timings[stage] for stage in ("preflight", "extraction", "variants", "cooccurrence")
+    )
+
+
+def test_the_run_summary_records_the_resolved_parallelism(completed_run):
+    """Requested and effective, per stage.
+
+    A run that was asked for N workers and ran on fewer has been given less than
+    it asked for, and the summary is the record that should say so.
+    """
+    summary = json.loads(completed_run.run_summary_json.read_text(encoding="utf-8"))
+    plan = {entry["stage"]: entry for entry in summary["parallelism"]}
+
+    assert set(plan) == {"extraction", "variant calling", "co-occurrence", "epistasis"}
+    for name, entry in plan.items():
+        assert entry["effective_workers"] >= 1, name
+        assert "clamped" in entry, name
+        assert "oversubscribed" in entry, name
+
+    # The fixture ran with --threads 2 --variant-threads 2, so the two pooled
+    # stages agree at 2. Epistasis and co-occurrence run in-process: epistasis
+    # resolves every pair with one test per distinct 2x2 table, so the inherited
+    # width is recorded but not spent.
+    assert plan["extraction"]["effective_workers"] == 2
+    assert plan["variant calling"]["effective_workers"] == 2
+    assert plan["epistasis"]["effective_workers"] == 1
+    assert plan["epistasis"]["requested_workers"] == 2
+    assert plan["epistasis"]["not_parallelised"]
+    assert plan["co-occurrence"]["not_parallelised"]
+
+
 def test_the_run_summary_records_provenance_without_inference(completed_run):
     summary = json.loads(completed_run.run_summary_json.read_text(encoding="utf-8"))
 
@@ -250,7 +303,19 @@ def test_the_run_summary_records_provenance_without_inference(completed_run):
 
 @requires_tblastn
 def test_the_run_is_reproducible_when_repeated(completed_run, tmp_path):
-    """Same inputs, same settings, byte-identical tables."""
+    """Serial versus parallel, and serial versus serial, byte-identical.
+
+    Two separate guarantees, both easy to lose:
+
+    * repeating a run with the same settings changes nothing, and
+    * changing the worker count changes nothing, because parallel results are
+      yielded in input order.
+
+    The second run below omits ``--threads`` and ``--variant-threads``, so it
+    takes the in-process path in every stage while the fixture run used 2. This
+    used to compare neither the variant-calling nor the epistasis outputs, and
+    passed while both stages ran serially on both sides.
+    """
     second = tmp_path / "again"
     exit_code = cli.main(
         [
@@ -276,10 +341,51 @@ def test_the_run_is_reproducible_when_repeated(completed_run, tmp_path):
         "cooccurrence_genes.csv",
         "cooccurrence_genes_matrix.csv",
         "cooccurrence_variants.csv",
+        "genome_mutation_map.csv",
+        "mutation_severity.csv",
+        "epistasis_networks.csv",
     ):
         first_text = (completed_run.run_dir / name).read_text(encoding="utf-8")
         second_text = (second / "integration" / name).read_text(encoding="utf-8")
-        assert first_text == second_text, f"{name} differs between identical runs"
+        assert first_text == second_text, f"{name} differs between serial and parallel runs"
+
+
+def test_extracted_proteins_are_reproducible(completed_run, tmp_path):
+    """The .faa files are the actual deliverable, so compare them too.
+
+    Everything else is derived from them, but a divergence in the sequences
+    would change every downstream number rather than fail a byte comparison of
+    one table.
+    """
+    second = tmp_path / "proteins"
+    exit_code = cli.main(
+        [
+            "run",
+            "--genomes",
+            str(completed_run.genomes_dir),
+            "--references",
+            str(completed_run.references_dir),
+            "--out",
+            str(second),
+            "--job-name",
+            "integration",
+            "--cooccurrence-level",
+            "gene,variant",
+        ]
+    )
+    assert exit_code == 0
+
+    first_dir = completed_run.run_dir / "proteins"
+    second_dir = second / "integration" / "proteins"
+    first_files = sorted(p.name for p in first_dir.glob("*.faa"))
+    second_files = sorted(p.name for p in second_dir.glob("*.faa"))
+
+    assert first_files, "the fixture run extracted nothing, so this proves nothing"
+    assert first_files == second_files
+    for name in first_files:
+        assert (first_dir / name).read_bytes() == (second_dir / name).read_bytes(), (
+            f"{name} differs between runs"
+        )
 
 
 # -- tests that need no BLAST+ ----------------------------------------------
