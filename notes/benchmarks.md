@@ -271,13 +271,31 @@ agreement against a cohort with no breakpoints at all — which is why it is
 a distinct outcome and not a silent fallback.
 
 **Status: code complete, data pending.** The module is written and tested
-(60 unit cases) but has **not been run on real MIC data** — that needs a
+(65 unit cases) but has **not been run on real MIC data** — that needs a
 BV-BRC account and a downloaded breakpoint table, neither of which this
-repository commits to. The only number produced so far is a smoke test on
-eight synthetic genomes, and it demonstrated nothing but that the
+repository commits to. The only numbers produced so far are a smoke test
+on synthetic fixtures, and they demonstrate nothing but that the
 arithmetic runs. No concordance figure here is a result.
-`benchmarks/data/breakpoints.example.tsv` is a documented format example,
-**not** a curated breakpoint source.
+
+`benchmarks/data/` carries three **documented example fixtures** so the
+module is runnable before any real data arrives:
+
+| file | what it shows |
+|---|---|
+| `breakpoints.example.tsv` | both classification conventions — EUCAST `s_max`-only rows and a CLSI three-band row |
+| `mic.example.tsv` | the MIC column shape, including the doubling-dilution convention |
+| `rules.example.tsv` | a curated gene → drug mapping |
+
+All three are synthetic and say so in a header comment, so none can be
+mistaken for a curated source. CI runs them as a smoke test: what it
+guards is that the loaders, the classifier and the three metrics still
+execute together, so a regression in the EUCAST-vs-CLSI convention
+handling fails in CI rather than on a reviewer's machine.
+
+The carriers come from MutationScan's own `genome_mutation_map.csv`
+(`--genome-map`), so the real-world loop is
+`mutationscan run ... && python -m benchmarks.phenotypic --mic ... --breakpoints ...
+--rules ... --genome-map ...` with no intermediate format.
 
 ### Where the data comes from
 

@@ -63,18 +63,32 @@ table can carry its provenance and caveats inside the file. This was
 added while writing `benchmarks/data/breakpoints.example.tsv`, which
 documented itself and then failed to parse.
 
-**Status.** Code complete and tested (60 unit cases). **No real MIC data
-has been run** -- that needs a BV-BRC account and a downloaded
+**Status.** Code complete and tested (65 unit cases). **No real MIC data
+has been run** — that needs a BV-BRC account and a downloaded
 breakpoint table, and neither is committed to this repository. The only
-run so far is a smoke test on eight synthetic genomes, which proved the
-arithmetic and nothing else. `breakpoints.example.tsv` is a documented
-format example, not a curated source.
+run so far is a smoke test through three synthetic example fixtures,
+which proved the arithmetic and nothing else. `benchmarks/data/`
+carries `breakpoints.example.tsv`, `mic.example.tsv` and
+`rules.example.tsv`, each with a header comment saying they are
+synthetic; CI runs them so a convention regression fails visibly rather
+than on a reviewer's machine.
+
+**`.gitignore` subtlety worth knowing.** The rule was originally
+`benchmarks/data/`, which excludes the *directory* — and git does not
+descend into an excluded directory, so a file inside one can never be
+re-included. The example fixtures were invisible until the rule became
+`benchmarks/data/*` with `!benchmarks/data/*.example.tsv` negations.
+Generated artifacts are still ignored; the hand-written examples are now
+tracked.
 
 **Data sources when real data arrives.** MIC from BV-BRC (successor to
 PATRIC, free academic registration, `p3-get-phenotype-data` CLI or the
 `/api/` endpoints); breakpoints from EUCAST `clinical_breakpoints`
-(open) or CLSI M100 (paywalled) -- same column shape either way; rules
-from ResFinder or CARD.
+(open) or CLSI M100 (paywalled) — same column shape either way; rules
+from ResFinder or CARD. Carriers come from MutationScan's own
+`genome_mutation_map.csv` via `--genome-map`, so the real-world loop is
+`mutationscan run ... && python -m benchmarks.phenotypic ... --genome-map ...`
+with no intermediate format.
 
 **Verified by.** `ruff` + `mypy` clean on 36 source files. 60 unit tests
 in `tests/unit/test_phenotypic.py`, covering classification edge cases
@@ -552,3 +566,8 @@ Ordered by how much they affect published results.
 9. **GFF3-dependent fragmentation comparison.** The MutationScan half of the
    fragmentation claim is measured (40% sensitivity loss at 2 contigs/gene);
    the external tools' half needs Prokka or Bakta, which are not installed.
+10. **Benchmark CI coverage.** `.github/workflows/amr-benchmark.yml` now runs
+    the scaling, fragmentation and phenotypic benchmarks alongside the
+    self-benchmark, and uploads every result as an artifact. None of it runs
+    on `pull_request`-blocked branches locally, so a branch without a pushed
+    run has no CI signal at all — worth confirming after the first push.
