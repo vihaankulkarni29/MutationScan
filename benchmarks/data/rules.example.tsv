@@ -1,0 +1,26 @@
+# Curated gene -> drug resistance rules -- **a worked example, not a
+# curated source.**
+#
+# One resistance relationship per row: **gene, drug**. An optional
+# `allele` column is read but not required, because this module's
+# genotype is gene-level -- matching the collapsed `LoF` convention
+# the pipeline uses everywhere else, where a frameshift in a gene and
+# a nonsense mutation in the same gene test as one functional class.
+#
+# These particular mappings are illustrative: the project's reference
+# panel is `acrA`, `acrB`, `acrR`, `marR` and `tolC`, which are
+# efflux-pump and regulator components rather than classic
+# resistance-gene targets, so the rows below describe the kind of
+# relationship the module expects rather than the biology of this
+# cohort. Replace with ResFinder (https://cge.food.dtu.dk/services/
+# ResFinder/) or CARD (https://card.mcmaster.ca/) entries before
+# drawing any conclusion.
+#
+# Drug names are matched case-insensitively against the MIC table, so
+# `ciprofloxacin` and `Ciprofloxacin` are the same drug.
+gene	drug	allele
+gyrA	ciprofloxacin	S83L
+parC	ciprofloxacin	S80I
+aac	gentamicin
+acrB	tetracycline
+acrB	chloramphenicol

@@ -81,11 +81,12 @@ docker-compose.override.yml
 
 # Benchmark generated artifacts: synthetic cohorts, ground truth,
 # reports and tool run outputs are reproducible, not source.
-benchmarks/data/
-# A hand-written format example is source, not an artifact: it is the
-# worked example that makes the module's input shape legible, and it
-# costs nothing to track.
+# Ignoring the *contents* rather than the directory itself matters:
+# git does not descend into an excluded directory, so a file inside
+# one cannot be re-included, and the documented example fixtures
+# below are hand-written source that should be tracked.
+benchmarks/data/*
 !benchmarks/data/.gitkeep
-!benchmarks/data/breakpoints.example.tsv
+!benchmarks/data/*.example.tsv
 benchmarks/results/
 benchmarks/runs/

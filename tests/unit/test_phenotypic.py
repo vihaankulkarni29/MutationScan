@@ -358,6 +358,76 @@ class TestLoaders:
             ("escherichia coli", "gentamicin"),
         }
 
+    def test_reads_a_documented_example_file(self) -> None:
+        """The committed example must parse, or it is a broken example."""
+        path = Path(__file__).resolve().parents[2] / "benchmarks/data/breakpoints.example.tsv"
+        table = read_breakpoints(path)
+        assert ("escherichia coli", "ciprofloxacin") in table
+        # The EUCAST form: s_max only, so anything above it is R.
+        bp = table[("escherichia coli", "ciprofloxacin")]
+        assert bp.s_max == 0.25
+        assert bp.i_max is None
+        # The CLSI form: all three, with a real intermediate band.
+        gent = table[("escherichia coli", "gentamicin")]
+        assert (gent.s_max, gent.i_max, gent.r_min) == (2.0, 4.0, 8.0)
+        assert gent.standard == "CLSI"
+
+
+class TestGenomeMapLoader:
+    """Reading carriers from MutationScan's own ``genome_mutation_map.csv``."""
+
+    def _write_map(self, tmp_path: Path, body: str) -> Path:
+        path = tmp_path / "genome_mutation_map.csv"
+        path.write_text(
+            "Accession,N_Mutated_Genes,Mutated_Genes,N_Mutations,N_LoF,Mutation_Map,Lineage\n"
+            + body,
+            encoding="utf-8",
+        )
+        return path
+
+    def test_reads_mutated_genes(self, tmp_path: Path) -> None:
+        from benchmarks.phenotypic import read_carriers_from_genome_map
+
+        path = self._write_map(
+            tmp_path,
+            'GCF_1,2,acrB;gyrA,3,0,"acrB:V139F|gyrA:S83L",ST131\nGCF_2,0,,0,,,ST11\n',
+        )
+        carriers = read_carriers_from_genome_map(path)
+        assert carriers == {"GCF_1": {"acrB": True, "gyrA": True}, "GCF_2": {}}
+
+    def test_a_clean_genome_is_a_result_not_a_missing_row(self, tmp_path: Path) -> None:
+        """A genome the pipeline looked at and found clean scores clean.
+
+        Dropping it would let it be silently treated as "no phenotype"
+        instead of "carries nothing", which understates the negatives.
+        """
+        from benchmarks.phenotypic import read_carriers_from_genome_map
+
+        path = self._write_map(tmp_path, "GCF_1,0,,0,,,ST11\n")
+        carriers = read_carriers_from_genome_map(path)
+        assert "GCF_1" in carriers
+        assert carriers["GCF_1"] == {}
+
+    def test_missing_columns_are_a_clear_error(self, tmp_path: Path) -> None:
+        from benchmarks.phenotypic import read_carriers_from_genome_map
+
+        path = tmp_path / "map.csv"
+        path.write_text("Accession,Lineage\nGCF_1,ST11\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="genome map needs"):
+            read_carriers_from_genome_map(path)
+
+    def test_lof_only_genome_counts_as_carrier(self, tmp_path: Path) -> None:
+        """A genome whose only allele is a ``LoF`` still carries that gene.
+
+        The collapsed ``LoF`` class rides in ``Mutated_Genes`` exactly
+        like a substitution, so a frameshift in ``acrR`` makes
+        ``acrR`` a carrier for this drug's test.
+        """
+        from benchmarks.phenotypic import read_carriers_from_genome_map
+
+        path = self._write_map(tmp_path, 'GCF_1,1,acrR,1,1,"acrR:LoF",ST11,Escherichia\n')
+        assert read_carriers_from_genome_map(path)["GCF_1"] == {"acrR": True}
+
 
 # ---------------------------------------------------------------------------
 # Breakpoint lookup

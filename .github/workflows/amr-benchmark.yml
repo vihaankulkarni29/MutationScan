@@ -49,6 +49,48 @@ jobs:
         run: |
           pip install staramr mykrobe || true
 
+      - name: Run scaling benchmark
+        # The resource curves are the only benchmark that needs no
+        # ground truth and no cohort beyond what the generator makes,
+        # so they are the cheapest regression signal CI can take:
+        # a step change in wall-clock or memory is visible here.
+        # Sizes are deliberately small -- the point is the shape.
+        run: |
+          python -m benchmarks.scaling \
+            --references data/references \
+            --output benchmarks/results/scaling \
+            --sizes 10 20 \
+            --threads 2 4 \
+            --seed 42
+
+      - name: Run fragmentation benchmark
+        # The other unconditional claim: recall survives a contig
+        # structure. If best-HSP selection ever regresses to dropping
+        # a gene outright, this catches it against known ground truth.
+        run: |
+          python -m benchmarks.fragmentation \
+            --references data/references \
+            --output benchmarks/results/fragmentation \
+            --fragments 1 2 \
+            --genomes 20 \
+            --threads 2 \
+            --seed 42
+
+      - name: Run phenotypic concordance smoke test
+        # The example fixtures are synthetic and prove only that the
+        # path runs: real MIC data needs a BV-BRC account. What CI is
+        # guarding is that the loaders, the classifier and the three
+        # metrics still execute together -- a regression in the
+        # convention handling (EUCAST s_max-only vs. CLSI three-band)
+        # fails here rather than on a reviewer's machine.
+        run: |
+          python -m benchmarks.phenotypic \
+            --mic benchmarks/data/mic.example.tsv \
+            --breakpoints benchmarks/data/breakpoints.example.tsv \
+            --rules benchmarks/data/rules.example.tsv \
+            --output benchmarks/results/phenotypic \
+            -v
+
       - name: Run benchmark
         # MutationScan is always available (it is this
         # repository), so the run always produces at
@@ -69,6 +111,12 @@ jobs:
           path: |
             benchmarks/results/benchmark_report.md
             benchmarks/results/benchmark_report.html
+            benchmarks/results/scaling/scaling.csv
+            benchmarks/results/scaling/scaling.json
+            benchmarks/results/fragmentation/fragmentation.csv
+            benchmarks/results/fragmentation/fragmentation.json
+            benchmarks/results/phenotypic/phenotypic.md
+            benchmarks/results/phenotypic/phenotypic.json
 
       - name: Check MutationScan sensitivity
         # The synthetic cohort has exact ground truth,
@@ -79,18 +127,43 @@ jobs:
           python - <<'PY'
           import json, sys
           from pathlib import Path
-          report = Path("benchmarks/results/benchmark_report.md")
-          text = report.read_text()
-          for line in text.splitlines():
-              if line.startswith("| MutationScan"):
-                  cells = [c.strip() for c in line.strip("|").split("|")]
-                  sensitivity = cells[2]
-                  if sensitivity in ("--", "0.0%"):
-                      print("::error::MutationScan sensitivity is zero")
-                      sys.exit(1)
-                  print(f"MutationScan sensitivity: {sensitivity}")
-                  break
-          else:
-              print("::error::MutationScan row not found in report")
+           report = Path("benchmarks/results/benchmark_report.md")
+           text = report.read_text()
+           for line in text.splitlines():
+               if line.startswith("| MutationScan"):
+                   cells = [c.strip() for c in line.strip("|").split("|")]
+                   sensitivity = cells[2]
+                   if sensitivity in ("--", "0.0%"):
+                       print("::error::MutationScan sensitivity is zero")
+                       sys.exit(1)
+                   print(f"MutationScan sensitivity: {sensitivity}")
+                   break
+           else:
+               print("::error::MutationScan row not found in report")
+               sys.exit(1)
+           PY
+
+      - name: Check unfragmented recall
+        # The fragmentation benchmark runs at 1 contig/gene as its
+        # baseline, which is the same case the synthetic cohort is: a
+        # gene on one contig. Recall there should be perfect, so a drop
+        # means the extraction or variant caller regressed -- this is
+        # the same signal as the sensitivity check, taken through a
+        # different, contig-aware path.
+        run: |
+          python - <<'PY'
+          import csv, sys
+          from pathlib import Path
+
+          path = Path("benchmarks/results/fragmentation/fragmentation.csv")
+          rows = list(csv.DictReader(path.open()))
+          if not rows:
+              print("::error::fragmentation benchmark produced no rows")
+              sys.exit(1)
+          baseline = min(rows, key=lambda r: int(r["fragments_per_gene"]))
+          sensitivity = float(baseline["sensitivity"])
+          print(f"unfragmented sensitivity: {sensitivity:.3f} ({baseline['fragments_per_gene']} contigs/gene)")
+          if sensitivity < 0.95:
+              print(f"::error::unfragmented recall dropped to {sensitivity:.3f}")
               sys.exit(1)
           PY

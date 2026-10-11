@@ -77,6 +77,7 @@ __all__ = [
     "read_mic_records",
     "read_breakpoints",
     "read_rules",
+    "read_carriers_from_genome_map",
     "gene_drug_associations",
     "burden_correlation",
     "concordance",
@@ -1052,6 +1053,46 @@ def write_report(
 # ---------------------------------------------------------------------------
 
 
+def read_carriers_from_genome_map(
+    path: Path | str,
+    mutation_column: str = "Mutated_Genes",
+) -> dict[str, dict[str, bool]]:
+    """Read gene-mutation carriage from a ``genome_mutation_map.csv``.
+
+    This is the natural source: it is what MutationScan already writes,
+    with one row per genome and a semicolon-joined ``Mutated_Genes``
+    list. Feeding that straight in means the whole loop is
+    ``mutationscan run ... && python -m benchmarks.phenotypic ...``
+    with no intermediate format.
+
+    A genome listed with no mutated genes comes back as an empty map,
+    which scores as "carries nothing" rather than being dropped -- a
+    genome the pipeline looked at and found clean is a result.
+    """
+    path = Path(path)
+    dialect = _dialect_for(path)
+    reader = csv.DictReader(_data_lines(path), dialect=dialect)
+    if reader.fieldnames is None:
+        raise SystemExit(f"{path}: empty genome map")
+    columns = {_normalise_header(name): name for name in reader.fieldnames}
+    accession_col = columns.get("accession")
+    mutation_col = columns.get(mutation_column.lower())
+    if accession_col is None or mutation_col is None:
+        raise SystemExit(
+            f"{path}: genome map needs 'accession' and '{mutation_column}' columns; "
+            f"found {sorted(reader.fieldnames)}"
+        )
+
+    carriers: dict[str, dict[str, bool]] = {}
+    for row in reader:
+        accession = (row.get(accession_col) or "").strip()
+        if not accession:
+            continue
+        genes = [gene.strip() for gene in (row.get(mutation_col) or "").split(";") if gene.strip()]
+        carriers[accession] = dict.fromkeys(genes, True)
+    return carriers
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mic", required=True, help="TSV/CSV of accession, drug, MIC")
@@ -1061,6 +1102,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="TSV/CSV of organism, drug, s_max, i_max, r_min",
     )
     parser.add_argument("--rules", help="optional curated gene -> drug resistance table")
+    parser.add_argument(
+        "--genome-map",
+        help="genome_mutation_map.csv from a MutationScan run (preferred over --carriers)",
+    )
     parser.add_argument(
         "--carriers",
         help="JSON mapping accession -> {gene: bool} (e.g. from genome_mutation_map.csv)",
@@ -1075,6 +1120,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         format="%(asctime)s %(levelname)-7s %(message)s",
     )
 
+    if args.genome_map and args.carriers:
+        parser.error("--genome-map and --carriers are alternative sources; pick one")
+
     records = read_mic_records(Path(args.mic))
     logger.info("read %d MIC records from %s", len(records), args.mic)
 
@@ -1082,7 +1130,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger.info("read %d breakpoints", len(breakpoints))
 
     carriers: dict[str, dict[str, bool]] = {}
-    if args.carriers:
+    if args.genome_map:
+        carriers = read_carriers_from_genome_map(args.genome_map)
+        logger.info("read carriers for %d accessions from %s", len(carriers), args.genome_map)
+    elif args.carriers:
         with Path(args.carriers).open(encoding="utf-8") as handle:
             carriers = json.load(handle)
         logger.info("read carriers for %d accessions", len(carriers))
