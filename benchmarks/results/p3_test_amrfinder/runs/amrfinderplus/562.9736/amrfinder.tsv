@@ -1,0 +1,6 @@
+Protein id	Contig id	Start	Stop	Strand	Element symbol	Element name	Scope	Type	Subtype	Class	Subclass	Method	Target length	Reference sequence length	% Coverage of reference	% Identity to reference	Alignment length	Closest reference accession	Closest reference name	HMM accession	HMM description
+NA	accn|LSAQ01000001	31826	33625	+	ybtP	yersiniabactin ABC transporter ATP-binding/permease protein YbtP	plus	VIRULENCE	VIRULENCE	NA	NA	BLASTX	600	600	100.00	99.83	600	CAA21388.1	yersiniabactin ABC transporter ATP-binding/permease protein YbtP	NA	NA
+NA	accn|LSAQ01000001	33615	35414	+	ybtQ	yersiniabactin ABC transporter ATP-binding/permease protein YbtQ	plus	VIRULENCE	VIRULENCE	NA	NA	BLASTX	600	600	100.00	99.50	600	AAC69584.1	yersiniabactin ABC transporter ATP-binding/permease protein YbtQ	NA	NA
+NA	accn|LSAQ01000001	410809	411114	-	asr	acid resistance repetitive basic protein Asr	plus	STRESS	ACID	NA	NA	EXACTX	102	102	100.00	100.00	102	BAA15331.2	acid resistance repetitive basic protein Asr	NA	NA
+NA	accn|LSAQ01000002	116241	116504	-	ariR	biofilm/acid-resistance regulator AriR	plus	STRESS	ACID	NA	NA	EXACTX	88	88	100.00	100.00	88	AAC74250.1	biofilm/acid-resistance regulator AriR	NA	NA
+NA	accn|LSAQ01000153	1849	2934	+	capU	putative hexosyltransferase CapU	plus	VIRULENCE	VIRULENCE	NA	NA	BLASTX	362	362	100.00	99.72	362	CAV02025.1	putative hexosyltransferase CapU	NA	NA

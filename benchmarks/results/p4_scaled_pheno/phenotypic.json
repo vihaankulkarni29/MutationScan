@@ -1,0 +1,16 @@
+{
+  "gene_drug_associations": [],
+  "burden_correlations": [],
+  "concordance": {
+    "n_evaluable": 0,
+    "n_unknown_phenotype": 17,
+    "agreement": 0.0,
+    "very_major_error": 0.0,
+    "major_error": 0.0,
+    "minor_error": 0.0,
+    "n_very_major": 0,
+    "n_major": 0,
+    "n_minor": 0,
+    "per_drug": {}
+  }
+}

@@ -1,0 +1,45 @@
+{
+    "562.7695": {
+        "susceptibility": {},
+        "phylogenetics": {
+            "phylo_group": {
+                "Unknown": {
+                    "percent_coverage": -1,
+                    "median_depth": -1
+                }
+            },
+            "sub_complex": {
+                "Unknown": {
+                    "percent_coverage": -1,
+                    "median_depth": -1
+                }
+            },
+            "species": {
+                "Unknown": {
+                    "percent_coverage": -1,
+                    "median_depth": -1
+                }
+            },
+            "lineage": {
+                "Unknown": {
+                    "percent_coverage": -1,
+                    "median_depth": -1
+                }
+            }
+        },
+        "kmer": 15,
+        "probe_sets": [
+            "/home/vhn/miniconda3/envs/amr_benchmarking/lib/python3.12/site-packages/mykrobe/data/staph/staph-amr-bradley_2015-feb-17-2017.fasta.gz",
+            "/home/vhn/miniconda3/envs/amr_benchmarking/lib/python3.12/site-packages/mykrobe/data/staph/staph-species-160227.fasta.gz"
+        ],
+        "files": [
+            "data/overlap_genomes/562.7695.fna"
+        ],
+        "version": {
+            "mykrobe-predictor": "v0.13.0",
+            "mykrobe-atlas": "v0.13.0",
+            "panel": "20201001/20170217"
+        },
+        "genotype_model": "kmer_count"
+    }
+}

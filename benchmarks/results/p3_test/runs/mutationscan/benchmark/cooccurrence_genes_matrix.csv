@@ -1,0 +1,6 @@
+Gene,acrA,acrB,acrR,marR,tolC
+acrA,3,1,1,3,1
+acrB,1,3,1,3,1
+acrR,1,1,1,1,0
+marR,3,3,1,10,2
+tolC,1,1,0,2,2

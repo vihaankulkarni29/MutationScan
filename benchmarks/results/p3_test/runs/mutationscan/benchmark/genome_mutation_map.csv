@@ -1,0 +1,11 @@
+Accession,N_Mutated_Genes,Mutated_Genes,N_Mutations,N_LoF,Mutation_Map
+562.13556,3,acrB;marR;tolC,6,0,acrB:V129I | acrB:S1043N | marR:M1V | marR:G103S | marR:Y137H | tolC:T276S
+562.135584,4,acrA;acrB;acrR;marR,9,0,acrA:T104A | acrB:H596N | acrR:V29G | acrR:T213I | acrR:N214T | marR:M1V | marR:K62R | marR:G103S | marR:Y137H
+562.7572,2,acrA;marR,4,0,acrA:N127T | marR:M1V | marR:G103S | marR:Y137H
+562.7573,1,marR,3,0,marR:M1V | marR:G103S | marR:Y137H
+562.7693,1,marR,3,0,marR:M1V | marR:G103S | marR:Y137H
+562.7695,3,acrA;marR;tolC,3,0,acrA:M37I | marR:M1V | tolC:N24D
+562.7699,2,acrB;marR,4,0,acrB:S1043N | marR:M1V | marR:G103S | marR:Y137H
+562.7703,1,marR,3,0,marR:M1V | marR:G103S | marR:Y137H
+562.7771,1,marR,3,0,marR:M1V | marR:G103S | marR:Y137H
+562.9736,1,marR,1,0,marR:M1V

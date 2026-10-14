@@ -1,0 +1,171 @@
+{
+  "mutation_scan_version": "1.0.0",
+  "generated_utc": "2026-10-14T04:23:29+00:00",
+  "environment": {
+    "python": "3.12.15",
+    "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "tblastn": "tblastn: 2.16.0+"
+  },
+  "config": {
+    "job_name": "p4_scaled_n100",
+    "genomes_dir": "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100/genomes",
+    "references_dir": "/mnt/c/Users/Vihaan/Desktop/MutationScan/data/references",
+    "output_root": "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run",
+    "targets": [],
+    "uniprot_taxid": "",
+    "min_identity_percent": 80.0,
+    "min_coverage_percent": 80.0,
+    "knockout_lost_percent": 20.0,
+    "tblastn_binary": "tblastn",
+    "threads": 8,
+    "variant_threads": 1,
+    "cooccurrence": {
+      "levels": [
+        "gene"
+      ],
+      "min_count": 1
+    },
+    "epistasis": {
+      "fdr_threshold": 0.05,
+      "min_count": 1,
+      "threads": 8
+    },
+    "species": {},
+    "lineage_manifest": null
+  },
+  "references": {
+    "genes": [
+      "acrA",
+      "acrB",
+      "acrR",
+      "marR",
+      "tolC"
+    ],
+    "missing": [],
+    "sources": {
+      "acrA": "local:acrA_WT.faa",
+      "acrB": "local:acrB_WT.faa",
+      "acrR": "local:acrR_WT.faa",
+      "marR": "local:marR_WT.faa",
+      "tolC": "local:tolC_WT.faa"
+    },
+    "lengths": {
+      "acrA": 397,
+      "acrB": 1049,
+      "acrR": 215,
+      "marR": 144,
+      "tolC": 493
+    }
+  },
+  "extraction": {
+    "genomes": 100,
+    "pairs_attempted": 500,
+    "status_counts": {
+      "extracted": 500
+    },
+    "genomes_with_any_protein": 100
+  },
+  "variants": {
+    "pairs_evaluated": 500,
+    "status_counts": {
+      "called": 500
+    },
+    "pairs_called": 500,
+    "mutations": 664,
+    "loss_of_function_alleles": 0,
+    "genomes_with_any_mutation": 100,
+    "genomes_with_loss_of_function": 0,
+    "gates": {
+      "min_identity_percent": 80.0,
+      "min_coverage_percent": 80.0
+    }
+  },
+  "cooccurrence": {
+    "levels": [
+      "gene"
+    ],
+    "min_count": 1,
+    "gene_pairs_reported": 10,
+    "variant_pairs_reported": 0,
+    "mutated_per_gene": {
+      "acrA": 68,
+      "acrB": 80,
+      "acrR": 77,
+      "marR": 69,
+      "tolC": 36
+    },
+    "eligible_per_gene": {
+      "acrA": 100,
+      "acrB": 100,
+      "acrR": 100,
+      "marR": 100,
+      "tolC": 100
+    }
+  },
+  "epistasis": {
+    "fdr_threshold": 0.05,
+    "min_count": 1,
+    "threads": 8,
+    "genome_map_rows": 99,
+    "severity_rows": 663,
+    "network_pairs": 2117
+  },
+  "outputs": [
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/extraction_manifest.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/mutations.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/variant_qc.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/cooccurrence_genes.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/cooccurrence_genes_matrix.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/genome_mutation_map.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/mutation_severity.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/epistasis_networks.csv",
+    "/mnt/c/Users/Vihaan/Desktop/MutationScan/benchmarks/results/p4_scaled_n100_run/p4_scaled_n100/run_summary.json"
+  ],
+  "cores_available": 12,
+  "parallelism": [
+    {
+      "stage": "extraction",
+      "workload": "thread",
+      "requested_workers": 8,
+      "effective_workers": 8,
+      "clamped": false,
+      "oversubscribed": false
+    },
+    {
+      "stage": "variant calling",
+      "workload": "process",
+      "requested_workers": 1,
+      "effective_workers": 1,
+      "clamped": false,
+      "oversubscribed": false
+    },
+    {
+      "stage": "co-occurrence",
+      "workload": "thread",
+      "requested_workers": 1,
+      "effective_workers": 1,
+      "clamped": false,
+      "oversubscribed": false,
+      "not_parallelised": "O(genes^2) over a small panel; not worth a pool"
+    },
+    {
+      "stage": "epistasis",
+      "workload": "process",
+      "requested_workers": 8,
+      "effective_workers": 1,
+      "clamped": true,
+      "oversubscribed": false,
+      "not_parallelised": "exact counts + one test per distinct table; no pool"
+    }
+  ],
+  "timings_seconds": {
+    "preflight": 3.405,
+    "extraction": 10.326,
+    "variants": 12.532,
+    "cooccurrence": 0.1,
+    "epistasis": 1.499,
+    "dn_ds": 16.135,
+    "total": 43.997
+  },
+  "note": "Co-occurrence counts are descriptive. They are not tests of interaction, selection or causation."
+}
