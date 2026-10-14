@@ -1,0 +1,101 @@
+Accession,N_Mutated_Genes,Mutated_Genes,N_Mutations,N_LoF,Mutation_Map
+SIM_0000,4,acrA;acrB;acrR;tolC,10,0,acrA:A115G | acrA:V126W | acrB:K55I | acrB:D408Y | acrB:T860A | acrR:F24Q | acrR:Q27N | tolC:Q151N | tolC:S322D | tolC:A425K
+SIM_0001,3,acrA;acrB;marR,8,0,acrA:S187G | acrA:V326N | acrB:I335Q | acrB:K502W | acrB:E947N | marR:I55Q | marR:K81F | marR:T128F
+SIM_0002,2,acrA;acrR,2,0,acrA:Q71V | acrR:L203R
+SIM_0003,2,acrA;acrR,6,0,acrA:Y137M | acrA:Q385L | acrA:Q394G | acrR:G46E | acrR:Q130V | acrR:A196G
+SIM_0004,3,acrA;acrB;tolC,7,0,acrA:K186M | acrB:M162D | acrB:Q176F | acrB:G996W | tolC:T192V | tolC:T225E | tolC:G333K
+SIM_0005,4,acrA;acrB;marR;tolC,5,0,acrA:N4D | acrB:A677E | marR:E122R | tolC:Q182R | tolC:A217D
+SIM_0006,4,acrB;acrR;marR;tolC,5,0,acrB:I390W | acrR:A20S | marR:K24I | tolC:Q31G | tolC:A463C
+SIM_0007,3,acrB;acrR;marR,9,0,acrB:P318L | acrB:S389C | acrB:S997M | acrR:H15D | acrR:A41E | acrR:R131I | marR:I11Y | marR:V21K | marR:C108N
+SIM_0008,3,acrB;acrR;tolC,7,0,acrB:Q151V | acrB:T205F | acrB:Q437D | acrR:D157V | acrR:T207W | tolC:L108N | tolC:F310L
+SIM_0009,3,acrB;marR;tolC,4,0,acrB:I268G | acrB:S537W | marR:G95Y | tolC:A461P
+SIM_0010,3,acrB;acrR;marR,5,0,acrB:R363Q | acrR:S172I | acrR:P206G | marR:V79I | marR:P90A
+SIM_0011,5,acrA;acrB;acrR;marR;tolC,12,0,acrA:T205M | acrA:T275E | acrA:L348G | acrB:K643R | acrB:K708Q | acrR:E176I | acrR:F185R | acrR:E190N | marR:L33H | marR:D76Q | marR:V142Y | tolC:E221Y
+SIM_0012,2,acrR;marR,5,0,acrR:L86D | acrR:M159L | acrR:A163I | marR:H19R | marR:Q117P
+SIM_0013,1,acrR,3,0,acrR:R13W | acrR:F119E | acrR:L133F
+SIM_0014,5,acrA;acrB;acrR;marR;tolC,8,0,acrA:L133I | acrA:A231L | acrB:R586I | acrR:S99F | marR:R16H | marR:I107Q | tolC:L437R | tolC:P457T
+SIM_0015,3,acrA;acrB;acrR,7,0,acrA:Q208G | acrA:L348F | acrA:V371P | acrB:A103L | acrB:P373M | acrR:L65D | acrR:N214A
+SIM_0016,3,acrA;acrB;tolC,4,0,acrA:G319F | acrB:M953K | tolC:A56C | tolC:D297Y
+SIM_0017,3,acrA;acrB;marR,8,0,acrA:T53L | acrA:T125E | acrA:T322N | acrB:G217R | acrB:G1004S | marR:V63D | marR:G69S | marR:W83R
+SIM_0018,4,acrA;acrB;acrR;marR,9,0,acrA:D144L | acrA:K175A | acrB:C493T | acrB:N1001S | acrR:W63L | acrR:W178S | marR:A70L | marR:V79E | marR:Q117M
+SIM_0019,3,acrB;acrR;marR,5,0,acrB:M398L | acrR:T12C | acrR:S33F | acrR:G71E | marR:S65T
+SIM_0020,2,acrB;acrR,6,0,acrB:V175E | acrB:K509I | acrB:N623S | acrR:Q26H | acrR:D54E | acrR:A196K
+SIM_0021,3,acrA;acrB;acrR,6,0,acrA:Q145D | acrA:G233L | acrA:V360Y | acrB:Y545F | acrR:M153Y | acrR:R192S
+SIM_0022,4,acrA;acrB;marR;tolC,6,0,acrA:T166K | acrA:E377D | acrB:T964V | marR:W83E | marR:R86M | tolC:T162K
+SIM_0023,2,acrB;marR,6,0,acrB:Q112H | acrB:L847T | acrB:E947C | marR:A41W | marR:K62W | marR:C80E
+SIM_0024,3,acrA;acrR;marR,8,0,acrA:A150L | acrA:E261T | acrA:S362I | acrR:V88T | acrR:Y202A | marR:L97N | marR:Q117I | marR:K140Q
+SIM_0025,3,acrA;acrB;marR,9,0,acrA:K78C | acrA:F254V | acrA:T334E | acrB:G296D | acrB:F317L | acrB:A840Q | marR:I18K | marR:K61R | marR:M74E
+SIM_0026,5,acrA;acrB;acrR;marR;tolC,9,0,acrA:Q151N | acrB:I349G | acrR:S66A | acrR:E118M | acrR:I171D | marR:L78H | marR:Q117T | tolC:K152M | tolC:Q295P
+SIM_0027,1,tolC,2,0,tolC:A113I | tolC:Q326K
+SIM_0028,3,acrB;marR;tolC,5,0,acrB:A670H | acrB:L851F | marR:N30D | marR:H120K | tolC:A233P
+SIM_0029,4,acrB;acrR;marR;tolC,10,0,acrB:E130M | acrB:V454E | acrB:D951C | acrR:G35P | acrR:T100Y | acrR:C117R | marR:T56R | marR:G95P | marR:L114P | tolC:Q63S
+SIM_0030,3,acrA;acrB;marR,3,0,acrA:G290I | acrB:I6L | marR:S34A
+SIM_0031,3,acrA;acrB;marR,6,0,acrA:I65R | acrB:P224V | acrB:Y926C | marR:H19N | marR:V21D | marR:L114K
+SIM_0032,3,acrB;acrR;marR,5,0,acrB:A441K | acrB:L881N | acrB:V925P | acrR:E176T | marR:V96F
+SIM_0033,2,acrR;tolC,4,0,acrR:A40T | acrR:K55E | acrR:Q130W | tolC:S446F
+SIM_0034,4,acrB;acrR;marR;tolC,10,0,acrB:A441S | acrB:V771G | acrB:T860L | acrR:R13K | acrR:L21R | acrR:G173S | marR:L29Y | marR:R73V | tolC:Y29F | tolC:A105M
+SIM_0035,4,acrA;acrB;acrR;marR,7,0,acrA:V195W | acrB:A39S | acrB:T87M | acrB:S894Y | acrR:T44R | acrR:P206N | marR:T102L
+SIM_0036,4,acrA;acrR;marR;tolC,10,0,acrA:T100F | acrA:P179E | acrA:I180L | acrR:F119Y | acrR:Q127Y | acrR:Y194M | marR:G15V | marR:N91L | tolC:R40D | tolC:F331S
+SIM_0037,4,acrA;acrB;acrR;marR,10,0,acrA:A231F | acrB:P326N | acrB:I897M | acrB:S900Q | acrR:L65F | acrR:L73D | acrR:S99N | marR:L33V | marR:E85R | marR:L97P
+SIM_0038,3,acrA;acrR;marR,4,0,acrA:Q71F | acrR:G42H | marR:R73I | marR:V115I
+SIM_0039,4,acrA;acrB;acrR;marR,8,0,acrA:Q196V | acrA:G258H | acrB:D256M | acrR:A38E | acrR:I112S | acrR:T213A | marR:K61D | marR:K99I
+SIM_0040,4,acrA;acrB;acrR;marR,7,0,acrA:V72S | acrA:D357A | acrB:R867E | acrR:I62R | marR:D37R | marR:K62P | marR:L75Y
+SIM_0041,3,acrA;acrB;marR,7,0,acrA:L260A | acrA:I279T | acrA:D284Q | acrB:A707K | marR:C47G | marR:L119S | marR:L123M
+SIM_0042,4,acrA;acrB;acrR;marR,8,0,acrA:A204W | acrA:D264L | acrB:W754Q | acrR:R22Q | acrR:N69R | acrR:P206G | marR:V79Q | marR:V115R
+SIM_0043,2,acrA;acrR,2,0,acrA:A39Q | acrR:E200P
+SIM_0044,3,acrA;acrB;marR,5,0,acrA:G272P | acrB:A54H | marR:A52F | marR:M74D | marR:N126G
+SIM_0045,3,acrB;acrR;marR,6,0,acrB:I323P | acrB:L357E | acrR:Q7W | acrR:L93S | marR:T102V | marR:L123R
+SIM_0046,3,acrB;acrR;tolC,9,0,acrB:V265T | acrB:P373E | acrB:C887M | acrR:L58M | acrR:L89K | acrR:L133W | tolC:T87Y | tolC:N304G | tolC:T483Y
+SIM_0047,4,acrA;acrB;acrR;marR,9,0,acrA:Q136H | acrA:R296A | acrA:S395W | acrB:Q123R | acrB:V324R | acrB:V901M | acrR:L34P | acrR:V195M | marR:L75Q
+SIM_0048,3,acrB;acrR;marR,5,0,acrB:F1021V | acrR:E118K | acrR:Q130Y | marR:M74W | marR:Q121E
+SIM_0049,4,acrA;acrB;acrR;marR,9,0,acrA:D27W | acrA:F292P | acrB:E244G | acrB:M573Q | acrR:E11C | acrR:E103G | acrR:A129T | marR:Q42P | marR:G82Y
+SIM_0050,4,acrA;acrB;acrR;marR,9,0,acrA:V214Y | acrB:Q106G | acrB:Y467F | acrB:L984C | acrR:K39R | acrR:L108R | marR:L97N | marR:L123S | marR:L135N
+SIM_0051,3,acrA;acrR;tolC,5,0,acrA:A148I | acrA:S395T | acrR:H147W | tolC:Y366D | tolC:P490S
+SIM_0052,4,acrB;acrR;marR;tolC,12,0,acrB:Q104V | acrB:A491K | acrB:L497E | acrR:A41T | acrR:R105H | acrR:R168M | marR:E10H | marR:V45P | marR:I107G | tolC:E55N | tolC:S309R | tolC:Q476W
+SIM_0053,4,acrA;acrB;acrR;marR,5,0,acrA:N170G | acrB:Q360P | acrB:F396V | acrR:M123N | marR:V115K
+SIM_0054,2,acrA;tolC,2,0,acrA:N239L | tolC:A113G
+SIM_0055,2,acrB;acrR,5,0,acrB:V448D | acrB:E507V | acrR:F52W | acrR:Q130G | acrR:H147V
+SIM_0056,3,acrA;acrB;marR,3,0,acrA:S263Q | acrB:M447Y | marR:Q121C
+SIM_0057,4,acrA;acrB;acrR;marR,8,0,acrA:L194Q | acrA:L230W | acrB:A457C | acrR:F59K | acrR:P211N | marR:S5H | marR:K62E | marR:C108S
+SIM_0058,4,acrA;acrR;marR;tolC,10,0,acrA:V72T | acrR:G173N | acrR:L198M | acrR:N210V | marR:V45S | marR:Q110N | marR:L143V | tolC:Q124I | tolC:L243F | tolC:L435C
+SIM_0059,4,acrA;acrB;acrR;tolC,7,0,acrA:Y105D | acrA:N170P | acrB:N81Y | acrB:T150S | acrB:F386N | acrR:E190F | tolC:Y283M
+SIM_0060,4,acrA;acrB;acrR;marR,7,0,acrA:Q51T | acrA:N239H | acrA:P255M | acrB:Q34K | acrR:E98Y | marR:D118H | marR:N126G
+SIM_0061,3,acrB;acrR;marR,7,0,acrB:V14F | acrB:A100E | acrB:E845A | acrR:K4A | acrR:R106W | acrR:E142A | marR:L135F
+SIM_0062,3,acrA;acrR;marR,6,0,acrA:G41Q | acrA:G192Y | acrR:L97T | acrR:E142A | marR:K25C | marR:E136I
+SIM_0063,4,acrA;acrR;marR;tolC,7,0,acrA:S92M | acrR:Y77G | marR:V21N | marR:L36E | marR:A129K | tolC:V231S | tolC:Y402N
+SIM_0064,5,acrA;acrB;acrR;marR;tolC,11,0,acrA:N127D | acrA:Q152K | acrA:K366Q | acrB:A738L | acrB:G911F | acrR:Q7D | acrR:Q27W | acrR:R105M | marR:N22I | tolC:G75D | tolC:D253R
+SIM_0065,4,acrA;acrB;acrR;marR,8,0,acrA:G370T | acrB:D681N | acrB:Y779M | acrR:L75T | acrR:P82M | marR:C47W | marR:A52S | marR:K140S
+SIM_0066,4,acrA;acrB;marR;tolC,8,0,acrA:V367Q | acrB:G821W | acrB:Y857N | acrB:E1038F | marR:L28A | marR:C111L | tolC:T348Y | tolC:D396P
+SIM_0067,3,acrA;acrB;marR,7,0,acrA:S73M | acrA:A160I | acrA:P179T | acrB:F615C | marR:V45W | marR:V63M | marR:A133S
+SIM_0068,3,acrA;acrB;acrR,6,0,acrA:Q102Y | acrA:A231Q | acrA:R315H | acrB:L383P | acrR:E136N | acrR:A164Q
+SIM_0069,3,acrA;acrB;marR,6,0,acrA:S61I | acrA:R69E | acrA:K161P | acrB:K342T | acrB:M355F | marR:D130T
+SIM_0070,4,acrA;acrB;acrR;marR,8,0,acrA:Q116L | acrA:L276S | acrB:G86W | acrB:A752R | acrB:V904I | acrR:I113E | marR:F43G | marR:Q110H
+SIM_0071,3,acrA;acrR;marR,7,0,acrA:Y137E | acrA:D264R | acrA:L348K | acrR:N69R | acrR:R161S | acrR:R162D | marR:V84N
+SIM_0072,4,acrA;acrB;acrR;tolC,9,0,acrA:E67N | acrA:S249C | acrA:G290S | acrB:P2H | acrB:Y877L | acrR:M167G | acrR:I171Q | tolC:R40Y | tolC:A68V
+SIM_0073,2,acrB;acrR,3,0,acrB:S979D | acrR:E36Q | acrR:Y77F
+SIM_0074,3,acrB;acrR;tolC,6,0,acrB:S287E | acrR:R22L | acrR:E64M | acrR:E142V | tolC:S58T | tolC:Q124V
+SIM_0075,4,acrA;acrB;acrR;marR,10,0,acrA:N188G | acrA:V216D | acrA:F280Y | acrB:Q124P | acrR:A40L | acrR:Y138L | acrR:L158V | marR:L17I | marR:C80K | marR:H112R
+SIM_0076,3,acrA;acrR;marR,5,0,acrA:G6H | acrA:Q71N | acrA:V360G | acrR:L86R | marR:T128Y
+SIM_0077,4,acrA;acrB;marR;tolC,8,0,acrA:N2A | acrA:T23C | acrA:E261P | acrB:W859I | marR:V96E | tolC:N24D | tolC:Q206L | tolC:N489M
+SIM_0078,3,acrA;acrR;marR,6,0,acrA:T125Y | acrA:V189H | acrA:E238G | acrR:V195E | marR:I12K | marR:K24P
+SIM_0079,5,acrA;acrB;acrR;marR;tolC,8,0,acrA:Q32F | acrA:F223M | acrA:S340M | acrB:V416F | acrR:F81R | acrR:V120W | marR:K24G | tolC:Y183P
+SIM_0080,4,acrB;acrR;marR;tolC,5,0,acrB:E947F | acrR:L34H | marR:D6E | tolC:M26Y | tolC:T87P
+SIM_0081,3,acrA;acrR;tolC,7,0,acrA:I96L | acrR:I16L | acrR:L23F | acrR:M123H | tolC:Q177Y | tolC:R249P | tolC:L401G
+SIM_0082,3,acrB;acrR;marR,8,0,acrB:A477H | acrB:Q733I | acrR:H15Y | acrR:D57P | acrR:A196H | marR:D37T | marR:I49G | marR:N91C
+SIM_0083,3,acrA;acrB;acrR,7,0,acrA:K175G | acrB:Q228D | acrB:I291Q | acrB:T748M | acrR:P82G | acrR:V125I | acrR:M167Q
+SIM_0084,2,acrB;acrR,4,0,acrB:V214S | acrB:F453N | acrR:V43D | acrR:A163S
+SIM_0085,4,acrA;acrB;acrR;marR,6,0,acrA:I52Y | acrA:L246G | acrB:R653K | acrR:G42D | acrR:K188N | marR:D26N
+SIM_0086,3,acrB;acrR;marR,4,0,acrB:I487E | acrB:F610Q | acrR:M110D | marR:A53H
+SIM_0087,5,acrA;acrB;acrR;marR;tolC,8,0,acrA:A242L | acrA:G251W | acrB:L383S | acrB:S757K | acrR:D193F | marR:L100V | tolC:Q258E | tolC:G293H
+SIM_0088,4,acrA;acrB;acrR;marR,9,0,acrA:G41R | acrA:T350F | acrB:D566V | acrB:L668A | acrB:P814E | acrR:Q26E | acrR:E150M | acrR:V195Q | marR:L71Q
+SIM_0089,2,acrB;acrR,4,0,acrB:M575T | acrB:R637I | acrR:P155D | acrR:I166S
+SIM_0090,5,acrA;acrB;acrR;marR;tolC,9,0,acrA:P70V | acrA:Q207G | acrA:L260H | acrB:L739H | acrR:I62P | marR:K24A | marR:R73C | tolC:N210F | tolC:Q263A
+SIM_0091,4,acrA;acrB;acrR;marR,8,0,acrA:Q130H | acrA:K236M | acrB:T222S | acrB:V612M | acrR:H15Q | acrR:I62F | acrR:A196T | marR:I49N
+SIM_0092,4,acrA;acrB;acrR;tolC,5,0,acrA:A242G | acrB:V629Q | acrR:A163Y | tolC:V28F | tolC:Y212H
+SIM_0093,3,acrA;acrB;acrR,5,0,acrA:V42M | acrA:L93N | acrA:D250A | acrB:A266R | acrR:S137H
+SIM_0094,3,acrB;acrR;marR,7,0,acrB:V265E | acrB:E640V | acrB:A706H | acrR:C117V | acrR:L187R | marR:S5I | marR:E59G
+SIM_0095,2,acrA;acrB,5,0,acrA:K131C | acrA:I274E | acrA:S395C | acrB:E314I | acrB:L972A
+SIM_0096,4,acrA;acrB;acrR;tolC,7,0,acrA:E55T | acrB:T329C | acrB:N605H | acrR:V29Y | tolC:K52I | tolC:A132M | tolC:D464S
+SIM_0097,2,acrB;acrR,5,0,acrB:T238E | acrB:E641A | acrB:A873H | acrR:S30P | acrR:A47S
+SIM_0098,2,acrA;marR,5,0,acrA:Q31R | acrA:T54Y | acrA:K82G | marR:I12D | marR:Q113M
+SIM_0099,3,acrB;acrR;marR,7,0,acrB:K510Q | acrB:H709W | acrB:M987A | acrR:R13V | acrR:E72W | marR:Q23T | marR:V115M

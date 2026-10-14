@@ -1,0 +1,187 @@
+{
+  "gene_drug_associations": [
+    {
+      "gene": "acrA",
+      "drug": "ceftriaxone",
+      "n_carrier": 1,
+      "n_resistant": 3,
+      "n_both": 1,
+      "n_evaluable": 3,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "marR",
+      "drug": "ceftriaxone",
+      "n_carrier": 1,
+      "n_resistant": 3,
+      "n_both": 1,
+      "n_evaluable": 3,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "tolC",
+      "drug": "ceftriaxone",
+      "n_carrier": 1,
+      "n_resistant": 3,
+      "n_both": 1,
+      "n_evaluable": 3,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "acrA",
+      "drug": "ciprofloxacin",
+      "n_carrier": 2,
+      "n_resistant": 9,
+      "n_both": 2,
+      "n_evaluable": 9,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "acrB",
+      "drug": "ciprofloxacin",
+      "n_carrier": 3,
+      "n_resistant": 9,
+      "n_both": 3,
+      "n_evaluable": 9,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "acrR",
+      "drug": "ciprofloxacin",
+      "n_carrier": 1,
+      "n_resistant": 9,
+      "n_both": 1,
+      "n_evaluable": 9,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "marR",
+      "drug": "ciprofloxacin",
+      "n_carrier": 9,
+      "n_resistant": 9,
+      "n_both": 9,
+      "n_evaluable": 9,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "tolC",
+      "drug": "ciprofloxacin",
+      "n_carrier": 1,
+      "n_resistant": 9,
+      "n_both": 1,
+      "n_evaluable": 9,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    },
+    {
+      "gene": "marR",
+      "drug": "gentamicin",
+      "n_carrier": 3,
+      "n_resistant": 3,
+      "n_both": 3,
+      "n_evaluable": 3,
+      "odds_ratio": null,
+      "p_value": "1.0000",
+      "q_value": "1.0000",
+      "significant": false
+    }
+  ],
+  "burden_correlations": [
+    {
+      "drug": "cefepime",
+      "n": 2,
+      "n_carriers": 0,
+      "rho": 0.0,
+      "p_value": "1.0000",
+      "significant": false
+    },
+    {
+      "drug": "ceftriaxone",
+      "n": 3,
+      "n_carriers": 1,
+      "rho": 0.0,
+      "p_value": "1.0000",
+      "significant": false
+    },
+    {
+      "drug": "ciprofloxacin",
+      "n": 9,
+      "n_carriers": 9,
+      "rho": 0.7789,
+      "p_value": "0.0134",
+      "significant": true
+    },
+    {
+      "drug": "gentamicin",
+      "n": 3,
+      "n_carriers": 3,
+      "rho": 0.0,
+      "p_value": "1.0000",
+      "significant": false
+    }
+  ],
+  "concordance": {
+    "n_evaluable": 17,
+    "n_unknown_phenotype": 0,
+    "agreement": 0.7647,
+    "very_major_error": 0.2353,
+    "major_error": 0.0,
+    "minor_error": 0.0,
+    "n_very_major": 4,
+    "n_major": 0,
+    "n_minor": 0,
+    "per_drug": {
+      "cefepime": {
+        "n": 2,
+        "agreement": 0.0,
+        "very_major_error": 1.0,
+        "major_error": 0.0,
+        "minor_error": 0.0
+      },
+      "ceftriaxone": {
+        "n": 3,
+        "agreement": 0.3333,
+        "very_major_error": 0.6667,
+        "major_error": 0.0,
+        "minor_error": 0.0
+      },
+      "ciprofloxacin": {
+        "n": 9,
+        "agreement": 1.0,
+        "very_major_error": 0.0,
+        "major_error": 0.0,
+        "minor_error": 0.0
+      },
+      "gentamicin": {
+        "n": 3,
+        "agreement": 1.0,
+        "very_major_error": 0.0,
+        "major_error": 0.0,
+        "minor_error": 0.0
+      }
+    }
+  }
+}
